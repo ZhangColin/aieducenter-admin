@@ -1,0 +1,98 @@
+# Java / Gradle / Maven
+.gradle/
+build/
+target/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+.kotlin/
+*.class
+*.jar
+*.war
+*.ear
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+# Node.js / Frontend
+node_modules/
+dist/
+.next/
+out/
+.turbo/
+.vercel/
+*.log*
+*.tsbuildinfo
+
+# Environment files
+.env
+.env*.local
+.env.production
+.env.development
+.env.dev
+.env.test
+
+# Local configuration (not committed)
+src/main/resources/application-local.yml
+
+# Testing
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+
+# Build outputs
+*.tgz
+*.tar.gz
+
+# Mac OS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Git Worktrees
+.worktrees/
+
+# Temporary files
+*.swp
+*.swo
+*~
+.tmp/
+
+# Deploy directories
+.deploy-test/
+.deploy-prod/
+
+# Logs
+logs/
+
+# Backup files
+*.bak
