@@ -1,0 +1,26 @@
+package com.aieducenter.admin.application.dto.command;
+
+import jakarta.validation.constraints.Size;
+
+/**
+ * 更新菜单命令。
+ *
+ * @since 0.1.0
+ */
+public record UpdateMenuCommand(
+
+        @Size(max = 50, message = "菜单名称长度不能超过50")
+        String name,
+
+        @Size(max = 255, message = "路径长度不能超过255")
+        String path,
+
+        @Size(max = 50, message = "图标长度不能超过50")
+        String icon,
+
+        Long parentId,
+
+        Integer sortOrder
+
+) {
+}
