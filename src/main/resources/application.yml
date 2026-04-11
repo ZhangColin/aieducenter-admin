@@ -1,0 +1,52 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: aieducenter-admin
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  flyway:
+    enabled: true
+    table: admin_flyway_schema_history
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: "0"
+  datasource:
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+
+cartisan:
+  security:
+    interceptor:
+      path-patterns:
+        - "/admin/**"
+      exclude-path-patterns:
+        - "/error"
+        - "/actuator/**"
+        - "/admin/auth/login"
+        - "/admin/auth/captcha"
+        - "/admin/health"
+        - "/swagger-ui/**"
+        - "/api-docs/**"
+
+sa-token:
+  token-name: Authorization
+  timeout: 604800
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: never

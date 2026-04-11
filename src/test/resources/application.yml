@@ -1,0 +1,19 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:25432/aieducenter_test
+    username: aiedu_test
+    password: test123
+    driver-class-name: org.postgresql.Driver
+
+  data:
+    redis:
+      host: localhost
+      port: 26379
+
+  flyway:
+    enabled: false
+
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: create-drop
