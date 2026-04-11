@@ -1,0 +1,22 @@
+# 管理后台网关 - 本地开发 Docker Compose 配置
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aieducenter-admin-dev
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_PROFILES_ACTIVE=local
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://host.docker.internal:5432/aieducenter
+      - SPRING_DATASOURCE_USERNAME=aiedu
+      - SPRING_DATASOURCE_PASSWORD=dev123
+      - REDIS_HOST=host.docker.internal
+      - REDIS_PORT=6379
+    networks:
+      - webnet
+
+networks:
+  webnet:
+    external: true
