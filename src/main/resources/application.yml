@@ -23,13 +23,12 @@ cartisan:
   security:
     interceptor:
       path-patterns:
-        - "/admin/**"
+        - "/api/admin/**"
       exclude-path-patterns:
         - "/error"
         - "/actuator/**"
-        - "/admin/auth/login"
-        - "/admin/auth/captcha"
-        - "/admin/health"
+        - "/api/admin/auth/login"
+        - "/api/admin/auth/captcha"
         - "/swagger-ui/**"
         - "/api-docs/**"
 
@@ -40,6 +39,7 @@ sa-token:
   is-concurrent: true
   is-share: false
   token-style: uuid
+  token-prefix: Bearer
 
 management:
   endpoints:

@@ -1,5 +1,7 @@
 package com.aieducenter.admin.endpoints.controller;
 
+import cn.dev33.satoken.stp.StpUtil;
+import com.cartisan.core.context.RequestContext;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -7,7 +9,6 @@ import com.aieducenter.admin.application.AdminUserAuthAppService;
 import com.aieducenter.admin.application.dto.command.AdminUserLoginCommand;
 import com.aieducenter.admin.application.dto.command.UpdatePasswordCommand;
 import com.aieducenter.admin.application.dto.response.CurrentUserResponse;
-import com.cartisan.security.annotation.CurrentUser;
 import com.cartisan.security.annotation.RequireAuth;
 import com.cartisan.security.authentication.TokenInfo;
 import com.cartisan.web.response.ApiResponse;
@@ -15,6 +16,9 @@ import com.cartisan.web.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * 管理员认证控制器。
@@ -47,17 +51,16 @@ public class AdminAuthController {
     @GetMapping("/current")
     @RequireAuth
     @Operation(summary = "获取当前管理员信息")
-    public ApiResponse<CurrentUserResponse> getCurrentAdmin(@CurrentUser Long userId) {
-        return ApiResponse.ok(adminAuthAppService.getCurrentAdmin(userId));
+    public ApiResponse<CurrentUserResponse> getCurrentAdmin() {
+        return ApiResponse.ok(adminAuthAppService.getCurrentAdmin(RequestContext.getUserId()));
     }
 
     @PutMapping("/current/password")
     @RequireAuth
     @Operation(summary = "修改当前管理员密码")
     public ApiResponse<Void> updatePassword(
-            @CurrentUser Long userId,
             @Valid @RequestBody UpdatePasswordCommand command) {
-        adminAuthAppService.updatePassword(userId, command);
+        adminAuthAppService.updatePassword(RequestContext.getUserId(), command);
         return ApiResponse.ok();
     }
 }

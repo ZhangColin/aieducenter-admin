@@ -12,9 +12,9 @@
     </parent>
 
     <groupId>com.aieducenter</groupId>
-    <artifactId>aieducenter-admin-server</artifactId>
+    <artifactId>aieducenter-admin</artifactId>
     <version>1.0.0-SNAPSHOT</version>
-    <name>aieducenter-admin-server</name>
+    <name>aieducenter-admin</name>
     <description>海创元智研云平台 - 管理后台网关</description>
 
     <properties>
