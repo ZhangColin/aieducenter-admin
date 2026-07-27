@@ -107,16 +107,6 @@ com.aieducenter.{context}
 - 全量检查（含 ArchUnit）：`mvn verify`
 - 变异测试：`mvn org.pitest:pitest-maven:mutationCoverage`
 
-## 开发流程
-
-使用 Superpowers 技能驱动开发，按需求规模分层：
-
-- **大需求**：先充分讨论，产出需求设计文档（含 Epic 拆解），再逐个 Epic 推进
-- **Epic / 中需求**：讨论后产出 Backlog 文档（含 Feature 拆解），再逐个 Feature 推进
-- **Feature / 小需求 / Bug**：直接用 Superpowers 技能（brainstorming -> writing-plans -> TDD -> verification）
-
-阶段性完成后人工触发归档：提取有价值内容到 docs/guide/，然后清理过程文档。
-
 ## 快速参考
 
 ### cartisan-boot 核心注解
@@ -149,3 +139,17 @@ com.aieducenter.{context}
 - 应用层：90%+
 - 基础设施层：80%+
 - 控制器层：70%+
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles, label string == role name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
