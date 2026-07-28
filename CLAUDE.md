@@ -153,3 +153,17 @@ Five canonical roles, label string == role name. See `docs/agents/triage-labels.
 ### Domain docs
 
 Single-context — root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
+
+
+## 平台架构上下文
+本应用（admin）是统一后台后端（应用层·平台自带应用），企业内部聚合入口。继续在现有项目上开发。完整架构与决策在兄弟仓库 ../aieducenter-architecture/（起步包 docs/starters/admin.md）。
+
+稳定不变式（务必遵守）：
+- Operator（运营人员认证 + 角色/部门/岗位/RBAC）归本应用自有——operator 是后台内部员工、非跨应用共享身份，凭据留本应用（用 cartisan-security），不进 IdP/用户域。
+- Operator 不做 SSO（唯一内部应用，本地登录即可）。
+- 财务上下文在本应用（非独立域）：只读各能力域（支付/钱包/Token计量）做收入确认（履约时点）+ append-only 冲销；不收款、不持余额、不计量 token。
+- 经 cartisan-openapi 签名调用各能力域；前端不直连各域（经本 BFF 聚合）。
+- 现有 RBAC（AdminUser/Role/Menu + sys_admin_*）已建、继续用。动手前先修已知 bug：① Sa-Token loginType 对不上（StpInterface 等 "admin" 但默认 "login"）→ @RequirePermission 可能全员失效；② 超管无 bypass；③ AdminUser 未映射 system 列、内置 admin 可被删。
+
+深度（财务上下文、各域聚合流转）：读架构仓库 architecture.md §5.3、§6.15、CONTEXT.md、integration-flows.md、map.md。
+本项目自己的设计演进 → 本项目的 CONTEXT.md + docs/adr/。
