@@ -1,6 +1,5 @@
 package com.aieducenter.admin.endpoints.controller;
 
-import cn.dev33.satoken.stp.StpUtil;
 import com.cartisan.core.context.RequestContext;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
