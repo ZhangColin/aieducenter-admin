@@ -49,16 +49,24 @@ class AdminUserPermissionAppServiceTest {
     // ========== getPermissions tests ==========
 
     @Test
-    void given_super_admin_when_getPermissions_then_return_empty_list() {
+    void given_superAdminRole_when_getPermissions_then_aggregates_role_permissions() {
+        // 超管不再短路返回空（Bug ② workaround 已移除）：与普通用户同路径，聚合其角色（含 SUPER_ADMIN）的权限
         // Given
         Long adminId = 1L;
-        when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(true);
+        AdminUser adminUser = new AdminUser("superadmin", "Test1234", "超管");
+        adminUser.addRole(1L);
+
+        AdminRole superAdminRole = new AdminRole("超级管理员", AdminRole.SUPER_ADMIN_CODE, "超管", 0);
+        superAdminRole.addPermission("admin:user:read", "用户管理-查看");
+
+        when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
+        when(adminRoleRepository.findAllById(Set.of(1L))).thenReturn(List.of(superAdminRole));
 
         // When
         List<String> permissions = adminUserPermissionAppService.getPermissions(adminId);
 
         // Then
-        assertThat(permissions).isEmpty();
+        assertThat(permissions).containsExactly("admin:user:read");
     }
 
     @Test
@@ -76,7 +84,6 @@ class AdminUserPermissionAppServiceTest {
         AdminRole role2 = new AdminRole("操作员", "OPERATOR", "操作员", 2);
         role2.addPermission("admin:role:read", "角色管理-查看");
 
-        when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
         when(adminRoleRepository.findAllById(Set.of(1L, 2L))).thenReturn(List.of(role1, role2));
 
@@ -93,7 +100,6 @@ class AdminUserPermissionAppServiceTest {
         Long adminId = 1L;
         AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
 
-        when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
 
         // When
@@ -106,16 +112,26 @@ class AdminUserPermissionAppServiceTest {
     // ========== getRoleCodes tests ==========
 
     @Test
-    void given_super_admin_when_getRoleCodes_then_return_empty_list() {
+    void given_superAdminRole_when_getRoleCodes_then_returns_super_admin_code() throws Exception {
+        // 超管不再短路返回空（Bug ② workaround 已移除）：聚合角色编码，返回 ["SUPER_ADMIN"]
         // Given
         Long adminId = 1L;
-        when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(true);
+        AdminUser adminUser = new AdminUser("superadmin", "Test1234", "超管");
+        adminUser.addRole(1L);
+
+        AdminRole superAdminRole = new AdminRole("超级管理员", AdminRole.SUPER_ADMIN_CODE, "超管", 0);
+        java.lang.reflect.Field idField = AdminRole.class.getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(superAdminRole, 1L);
+
+        when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
+        when(adminRoleRepository.findAllById(Set.of(1L))).thenReturn(List.of(superAdminRole));
 
         // When
         List<String> roleCodes = adminUserPermissionAppService.getRoleCodes(adminId);
 
         // Then
-        assertThat(roleCodes).isEmpty();
+        assertThat(roleCodes).containsExactly(AdminRole.SUPER_ADMIN_CODE);
     }
 
     @Test
@@ -135,7 +151,6 @@ class AdminUserPermissionAppServiceTest {
         idField.set(role1, 1L);
         idField.set(role2, 2L);
 
-        when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
         when(adminRoleRepository.findAllById(Set.of(1L, 2L))).thenReturn(List.of(role1, role2));
 
@@ -152,7 +167,6 @@ class AdminUserPermissionAppServiceTest {
         Long adminId = 1L;
         AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
 
-        when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
 
         // When

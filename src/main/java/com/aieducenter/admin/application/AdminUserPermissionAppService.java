@@ -44,16 +44,15 @@ public class AdminUserPermissionAppService {
     /**
      * 获取管理员的权限编码列表。
      *
+     * <p>超管与非超管走同一聚合路径——超管的授权放行由框架 {@code AuthorizationBypassResolver} 在拦截器层处理
+     * （见 {@code SaTokenConfig#superAdminAuthorizationBypassResolver}），本方法不再为绕历史上的 Bug ②
+     * 而对超管特判返回空。</p>
+     *
      * @param adminId 管理员 ID
      * @return 权限编码列表
      */
     @Transactional(readOnly = true)
     public List<String> getPermissions(Long adminId) {
-        // 超级管理员返回空列表（由 SaToken 拦截器直接放行）
-        if (adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)) {
-            return List.of();
-        }
-
         AdminUser adminUser = requirePresent(
                 adminUserRepository.findById(adminId)
         );
@@ -73,16 +72,13 @@ public class AdminUserPermissionAppService {
     /**
      * 获取管理员的角色编码列表。
      *
+     * <p>超管与非超管走同一聚合路径（不再特判返回空，见 {@link #getPermissions}）。</p>
+     *
      * @param adminId 管理员 ID
      * @return 角色编码列表
      */
     @Transactional(readOnly = true)
     public List<String> getRoleCodes(Long adminId) {
-        // 超级管理员返回空列表（由 SaToken 拦截器直接放行）
-        if (adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)) {
-            return List.of();
-        }
-
         AdminUser adminUser = requirePresent(
                 adminUserRepository.findById(adminId)
         );
@@ -106,7 +102,7 @@ public class AdminUserPermissionAppService {
      */
     @Transactional(readOnly = true)
     public List<MenuResponse> getMenus(Long adminId) {
-        // 超级管理员返回所有菜单
+        // 超管可见全部菜单（展示规则，与授权 bypass 无关——超管不靠角色-菜单绑定决定可见菜单）
         if (adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)) {
             return menuManagementAppService.findTree(null);
         }

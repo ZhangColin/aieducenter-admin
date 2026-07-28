@@ -22,6 +22,7 @@ import org.springframework.test.annotation.DirtiesContext;
 
 import com.aieducenter.admin.application.AdminUserManagementAppService;
 import com.aieducenter.admin.application.RoleManagementAppService;
+import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.application.dto.command.AssignPermissionsCommand;
 import com.aieducenter.admin.application.dto.command.AssignRolesCommand;
 import com.aieducenter.admin.application.dto.command.CreateAdminUserCommand;
@@ -33,10 +34,18 @@ import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.config.SaTokenConfig;
 
 /**
- * RBAC 强制执行集成测试（Phase 0 Bug ①：Sa-Token loginType 修复）。
+ * RBAC 强制执行集成测试（Phase 0 Bug ① Sa-Token loginType + Bug ② 超管 bypass）。
  *
- * <p>验证 {@code @RequirePermission} 对<b>非超管</b>运营人员按其角色权限正确放行/拒绝——以 HTTP 外部行为
- * （200 / 403 / 401）断言。超管 bypass 属 Phase 0 Bug ②，本测试不覆盖。</p>
+ * <p>以 HTTP 外部行为（200 / 403 / 401）断言：</p>
+ * <ul>
+ *   <li>非超管 + 有权限 → 200（Bug ①：权限解析按真实角色生效）</li>
+ *   <li>非超管 + 无权限 → 403（Bug ①）</li>
+ *   <li>超管（SUPER_ADMIN、无任何权限）→ 200（Bug ②：框架 {@code AuthorizationBypassResolver} 放行）</li>
+ *   <li>未登录 → 401（{@code @RequireAuth} 不被 bypass，无后门）</li>
+ * </ul>
+ *
+ * <p>注：admin 无 {@code @RequireRole} 端点，故 {@code @RequireRole} 的 bypass 覆盖由框架侧
+ * {@code AuthAnnotationIntegrationTest} 验证（同一 {@code shouldBypassAuthorization} 代码路径）。</p>
  *
  * <p>用 {@code RANDOM_PORT} + {@link TestRestTemplate} 走真实 servlet 过滤器链，Sa-Token 登录/token
  * 往返与生产一致。</p>
@@ -81,7 +90,7 @@ class RbacEnforcementIntegrationTest {
     @BeforeEach
     void setUp() {
         // UUID 后缀保证用户名/角色码唯一，类内多条用例互不冲突
-        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String suffix = uuidSuffix();
         usernameWithPermission = "opwith" + suffix;
         usernameWithoutPermission = "opnone" + suffix;
 
@@ -101,6 +110,26 @@ class RbacEnforcementIntegrationTest {
     @DisplayName("非超管且拥有权限：访问 @RequirePermission 接口返回 200")
     void given_nonSuperAdminWithPermission_when_listUsers_then_200() {
         String token = login(usernameWithPermission);
+
+        ResponseEntity<String> response = getWithToken("/api/admin/users", token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    @DisplayName("超管（SUPER_ADMIN 角色、未授予任何权限）：访问 @RequirePermission 接口返回 200（框架 bypass 放行）")
+    void given_superAdmin_when_listUsers_then_200() {
+        // 超管自包含种子：SUPER_ADMIN 角色（固定 code，触发 isSuperAdmin）+ 超管用户，不授予任何权限，
+        // 完全依赖框架 AuthorizationBypassResolver 放行（验 Phase 0 Bug ②）。
+        String suffix = uuidSuffix();
+        String superAdminUsername = "superadmin" + suffix;
+        Long superAdminRoleId = roleAppService.create(
+                new CreateRoleCommand("超管_" + suffix, AdminRole.SUPER_ADMIN_CODE, "超级管理员", 0));
+        Long superAdminUserId = userAppService.create(
+                new CreateAdminUserCommand(superAdminUsername, PASSWORD, "超管", null, null));
+        userAppService.assignRoles(superAdminUserId, new AssignRolesCommand(List.of(superAdminRoleId)));
+
+        String token = login(superAdminUsername);
 
         ResponseEntity<String> response = getWithToken("/api/admin/users", token);
 
@@ -156,5 +185,9 @@ class RbacEnforcementIntegrationTest {
 
     private String url(String path) {
         return "http://localhost:" + port + path;
+    }
+
+    private String uuidSuffix() {
+        return UUID.randomUUID().toString().replace("-", "").substring(0, 8);
     }
 }
