@@ -4,6 +4,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.domain.aggregate.AdminUser;
@@ -46,6 +47,7 @@ public class AdminUserPermissionAppService {
      * @param adminId 管理员 ID
      * @return 权限编码列表
      */
+    @Transactional(readOnly = true)
     public List<String> getPermissions(Long adminId) {
         // 超级管理员返回空列表（由 SaToken 拦截器直接放行）
         if (adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)) {
@@ -74,6 +76,7 @@ public class AdminUserPermissionAppService {
      * @param adminId 管理员 ID
      * @return 角色编码列表
      */
+    @Transactional(readOnly = true)
     public List<String> getRoleCodes(Long adminId) {
         // 超级管理员返回空列表（由 SaToken 拦截器直接放行）
         if (adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)) {
@@ -101,6 +104,7 @@ public class AdminUserPermissionAppService {
      * @param adminId 管理员 ID
      * @return 菜单 DTO 列表
      */
+    @Transactional(readOnly = true)
     public List<MenuResponse> getMenus(Long adminId) {
         // 超级管理员返回所有菜单
         if (adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)) {

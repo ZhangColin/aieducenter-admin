@@ -12,18 +12,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.Callable;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.core.MethodParameter;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.bind.support.WebDataBinderFactory;
-import org.springframework.web.context.request.NativeWebRequest;
-import org.springframework.web.method.support.HandlerMethodArgumentResolver;
-import org.springframework.web.method.support.ModelAndViewContainer;
 
 import com.aieducenter.admin.application.AdminUserAuthAppService;
 import com.aieducenter.admin.application.dto.command.AdminUserLoginCommand;
@@ -31,15 +27,18 @@ import com.aieducenter.admin.application.dto.command.UpdatePasswordCommand;
 import com.aieducenter.admin.application.dto.response.AdminUserResponse;
 import com.aieducenter.admin.application.dto.response.CurrentUserResponse;
 import com.aieducenter.admin.application.dto.response.MenuResponse;
-import com.aieducenter.admin.domain.aggregate.AdminUser;
 import com.aieducenter.admin.domain.enums.AdminUserStatus;
-import com.cartisan.security.annotation.CurrentUser;
+import com.cartisan.core.context.RequestContext;
 import com.cartisan.security.authentication.TokenInfo;
 
 import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * AdminAuthController API 测试。
+ *
+ * <p>注：{@code getCurrentAdmin} / {@code updatePassword} 经 {@link RequestContext#getUserId()} 取当前用户
+ * （controller 重构后不再用 {@code @CurrentUser} 参数）。standalone MockMvc 不跑过滤器，故这两个用例需在
+ * {@code RequestContext.runFor} 内执行以填充上下文。</p>
  */
 @ExtendWith(MockitoExtension.class)
 class AdminAuthControllerTest {
@@ -55,26 +54,7 @@ class AdminAuthControllerTest {
     @BeforeEach
     void setUp() {
         controller = new AdminAuthController(adminAuthAppService);
-        mvc = MockMvcBuilders.standaloneSetup(controller)
-                .setCustomArgumentResolvers(new CurrentUserArgumentResolver())
-                .build();
-    }
-
-    /**
-     * Mock argument resolver for @CurrentUser annotation.
-     */
-    private static class CurrentUserArgumentResolver implements HandlerMethodArgumentResolver {
-        @Override
-        public boolean supportsParameter(MethodParameter parameter) {
-            return parameter.hasParameterAnnotation(CurrentUser.class)
-                    && parameter.getParameterType().equals(Long.class);
-        }
-
-        @Override
-        public Object resolveArgument(MethodParameter parameter, ModelAndViewContainer mavContainer,
-                NativeWebRequest webRequest, WebDataBinderFactory binderFactory) {
-            return TEST_USER_ID;
-        }
+        mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
     @Test
@@ -123,14 +103,17 @@ class AdminAuthControllerTest {
         when(adminAuthAppService.getCurrentAdmin(TEST_USER_ID))
                 .thenReturn(new CurrentUserResponse(user, roleCodes, menus, permissions));
 
-        // When & Then
-        mvc.perform(get("/api/admin/auth/current"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.user.username").value("admin"))
-                .andExpect(jsonPath("$.data.roleCodes.length()").value(1))
-                .andExpect(jsonPath("$.data.roleCodes[0]").value("SUPER_ADMIN"))
-                .andExpect(jsonPath("$.data.permissions.length()").value(2))
-                .andExpect(jsonPath("$.data.menus.length()").value(1));
+        // When & Then — controller 经 RequestContext 取 userId，需在上下文中执行
+        runAsTestUser(() -> {
+            mvc.perform(get("/api/admin/auth/current"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.user.username").value("admin"))
+                    .andExpect(jsonPath("$.data.roleCodes.length()").value(1))
+                    .andExpect(jsonPath("$.data.roleCodes[0]").value("SUPER_ADMIN"))
+                    .andExpect(jsonPath("$.data.permissions.length()").value(2))
+                    .andExpect(jsonPath("$.data.menus.length()").value(1));
+            return null;
+        });
 
         verify(adminAuthAppService).getCurrentAdmin(TEST_USER_ID);
     }
@@ -145,12 +128,24 @@ class AdminAuthControllerTest {
                 }
                 """;
 
-        // When & Then
-        mvc.perform(put("/api/admin/auth/current/password")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json))
-                .andExpect(status().isOk());
+        // When & Then — controller 经 RequestContext 取 userId，需在上下文中执行
+        runAsTestUser(() -> {
+            mvc.perform(put("/api/admin/auth/current/password")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(json))
+                    .andExpect(status().isOk());
+            return null;
+        });
 
         verify(adminAuthAppService).updatePassword(eq(TEST_USER_ID), any(UpdatePasswordCommand.class));
+    }
+
+    /**
+     * 在填充了 TEST_USER_ID 的 RequestContext 中执行（standalone MockMvc 不跑过滤器，需手动注入上下文）。
+     */
+    private void runAsTestUser(Callable<Void> body) throws Exception {
+        RequestContext.runFor(
+                new RequestContext(null, null, null, null, TEST_USER_ID, null, null, null),
+                body);
     }
 }
