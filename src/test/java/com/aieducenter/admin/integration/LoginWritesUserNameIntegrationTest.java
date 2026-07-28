@@ -25,15 +25,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import cn.dev33.satoken.stp.StpUtil;
 
 /**
- * 登录写会话 userName 集成测试（Phase 0 Bug ④a：admin 侧补丁）。
+ * 登录写会话 userName 集成测试（Phase 0 Bug ④：框架根因已修后的端到端回归）。
  *
  * <p>断言登录成功后，Sa-Token 会话的 {@code "userName"} key 被写入登录用户昵称——
  * 这是后续请求 {@code RequestContext.userName} 被 {@code SecurityFilter} 正确填充的前提
  * （{@code SecurityFilter} 从 {@code StpUtil.getSession().get("userName")} 读取）。</p>
  *
- * <p>框架侧根因（{@code AuthenticationService.login()} 把会话建立与 userName 写入割裂）已另提需求
- * cartisan-boot {@code .scratch/login-user-name/issues/01}；落地前 admin 侧在 login 后补写
- * {@code StpUtil.getSession().set("userName", nickname)}，今天就让 userName 可用。本类验证该补丁。</p>
+ * <p>历史：Bug ④ 根因（{@code AuthenticationService.login()} 把会话建立与 userName 写入割裂、
+ * 逼调用方越过抽象摸 {@code StpUtil}）已在 cartisan-boot commit {@code efcb1e7} 修复——{@code login}
+ * 新签名接收 {@code userName}、由框架写入 session。admin 已迁到新签名（传昵称）、删除曾绕过抽象的
+ * {@code StpUtil.getSession().set(...)} 临时补丁。本类现在是真链路回归：HTTP 登录 →
+ * 框架 {@code SaTokenAuthenticationService.login} 写 session → SecurityFilter 读 → RequestContext。</p>
  *
  * <p>断言点（login-session seam）：HTTP 登录后直接读会话
  * {@code StpUtil.getSessionByLoginId(userId).get("userName")}，不新建测试专用 controller。</p>

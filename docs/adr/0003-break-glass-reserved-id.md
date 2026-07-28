@@ -45,7 +45,7 @@
 - ✅ 破窗救援入口不可删/不可禁/不可去权，可改密；守卫在聚合内单一执行。
 - ✅ 授权（角色）与韧性（保留 ID）解耦，`system` 列的语义混淆彻底消除。
 - ✅ `AdminUserResponse.breakGlass` 供前端平滑跟进（增量、向后兼容）。
-- 🔁 Bug ④（登录写 userName）的 admin 侧补丁独立于本决策，见 CONTEXT.md 决策记录与 [ADR-0002](0002-super-admin-bypass-is-framework-gap.md) 的"框架缺口→admin 侧先补、框架并行修"模式。
+- ✅ Bug ④（登录写 userName）框架根因已修（cartisan-boot commit `efcb1e7` 破坏性补全 `login` 签名）、admin 已迁到新签名并删 `StpUtil` workaround，见 CONTEXT.md 决策记录。
 
 ## 参见
 

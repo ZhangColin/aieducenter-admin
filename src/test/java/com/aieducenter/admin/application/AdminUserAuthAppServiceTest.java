@@ -14,8 +14,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.MockedStatic;
-import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.aieducenter.admin.application.dto.command.AdminUserLoginCommand;
@@ -30,9 +28,6 @@ import com.aieducenter.admin.application.mapper.AdminUserMapper;
 import com.cartisan.security.authentication.TokenInfo;
 import com.aieducenter.admin.domain.service.PasswordEncoderService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-
-import cn.dev33.satoken.session.SaSession;
-import cn.dev33.satoken.stp.StpUtil;
 
 @ExtendWith(MockitoExtension.class)
 class AdminUserAuthAppServiceTest {
@@ -79,21 +74,16 @@ class AdminUserAuthAppServiceTest {
 
         when(adminUserRepository.findByUsername("admin")).thenReturn(Optional.of(adminUser));
         when(passwordEncoderService.verifyPassword(plainPassword, encodedPassword)).thenReturn(true);
-        when(authenticationService.login(any(), eq(86400L))).thenReturn(tokenInfo);
+        when(authenticationService.login(any(), eq(86400L), eq("管理员"))).thenReturn(tokenInfo);
 
         AdminUserLoginCommand command = new AdminUserLoginCommand("admin", plainPassword, false);
 
-        // When & Then — login 现在写会话 userName（Bug ④a）；纯单测下 mock StpUtil 并断言写入昵称
-        SaSession session = Mockito.mock(SaSession.class);
-        TokenInfo result;
-        try (MockedStatic<StpUtil> stp = Mockito.mockStatic(StpUtil.class)) {
-            stp.when(StpUtil::getSession).thenReturn(session);
-            result = adminAuthAppService.login(command);
-            Mockito.verify(session).set("userName", "管理员");
-        }
+        // When — login 经框架新签名传入昵称（Bug ④：userName 由框架写入会话，admin 不再直接依赖 StpUtil）
+        TokenInfo result = adminAuthAppService.login(command);
 
-        // Then
+        // Then — admin 把昵称交给框架 login（userName 落 session 的职责归框架，抽象不泄漏）
         assertThat(result.token()).isEqualTo("test-token");
+        verify(authenticationService).login(any(), eq(86400L), eq("管理员"));
         verify(passwordEncoderService).verifyPassword(plainPassword, encodedPassword);
     }
 
@@ -107,20 +97,16 @@ class AdminUserAuthAppServiceTest {
 
         when(adminUserRepository.findByUsername("admin")).thenReturn(Optional.of(adminUser));
         when(passwordEncoderService.verifyPassword(plainPassword, encodedPassword)).thenReturn(true);
-        when(authenticationService.login(any(), eq(604800L))).thenReturn(tokenInfo);
+        when(authenticationService.login(any(), eq(604800L), eq("管理员"))).thenReturn(tokenInfo);
 
         AdminUserLoginCommand command = new AdminUserLoginCommand("admin", plainPassword, true);
 
-        // When — login 写会话 userName（Bug ④a）；mock StpUtil 以在纯单测中放行
-        SaSession session = Mockito.mock(SaSession.class);
-        TokenInfo result;
-        try (MockedStatic<StpUtil> stp = Mockito.mockStatic(StpUtil.class)) {
-            stp.when(StpUtil::getSession).thenReturn(session);
-            result = adminAuthAppService.login(command);
-        }
+        // When — 两个 login 重载行为一致，均把昵称交给框架
+        TokenInfo result = adminAuthAppService.login(command);
 
-        // Then
+        // Then — 自定义超时（记住我）路径同样经框架写 userName
         assertThat(result.token()).isEqualTo("test-token");
+        verify(authenticationService).login(any(), eq(604800L), eq("管理员"));
     }
 
     @Test

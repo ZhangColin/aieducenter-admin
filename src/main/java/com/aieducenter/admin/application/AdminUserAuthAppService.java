@@ -22,8 +22,6 @@ import com.aieducenter.admin.domain.error.AdminMessage;
 import com.cartisan.security.authentication.AuthenticationService;
 import com.cartisan.security.authentication.TokenInfo;
 
-import cn.dev33.satoken.stp.StpUtil;
-
 /**
  * 管理员认证应用服务。
  *
@@ -71,15 +69,11 @@ public class AdminUserAuthAppService {
             throw new ApplicationException(AdminMessage.LOGIN_FAILED);
         }
 
-        // 登录（使用框架的 AuthenticationService）
+        // 登录（框架 AuthenticationService.login 新签名：loginId + timeout + userName；
+        // 框架在建立会话后把 userName 写入 SaSession，后续请求由 SecurityFilter 读入 RequestContext。
+        // admin 不再直接依赖 StpUtil——Bug ④ 根因已在框架 commit efcb1e7 修复）
         long timeout = command.rememberMe() ? REMEMBER_TIMEOUT : DEFAULT_TIMEOUT;
-        TokenInfo tokenInfo = authenticationService.login(adminUser.getId(), timeout);
-
-        // Bug ④a（admin 侧补丁）：框架 login() 只建会话、不写 SaSession.userName，
-        // 此处补写昵称，使后续每个请求的 RequestContext.userName 被 SecurityFilter 正确填充（非 null）。
-        // 框架根因（login 把会话建立与 userName 写入割裂）已提需求 cartisan-boot
-        // .scratch/login-user-name/issues/01；落地后迁移到新 login 签名、删除此 workaround。
-        StpUtil.getSession().set("userName", adminUser.getNickname());
+        TokenInfo tokenInfo = authenticationService.login(adminUser.getId(), timeout, adminUser.getNickname());
 
         return tokenInfo;
     }
