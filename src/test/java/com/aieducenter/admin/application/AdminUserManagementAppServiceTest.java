@@ -3,6 +3,7 @@ package com.aieducenter.admin.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -101,20 +102,8 @@ class AdminUserManagementAppServiceTest {
     }
 
     @Test
-    void given_only_one_admin_when_delete_then_throw_exception() {
-        // Given
-        when(adminUserRepository.count()).thenReturn(1L);
-
-        // When & Then
-        assertThatThrownBy(() -> adminUserManagementAppService.delete(1L))
-            .isInstanceOf(ApplicationException.class)
-            .hasMessageContaining(AdminMessage.LAST_ADMIN_CANNOT_DELETE.message());
-    }
-
-    @Test
-    void given_multiple_admins_when_delete_then_success() {
-        // Given
-        when(adminUserRepository.count()).thenReturn(2L);
+    void given_existingAdmin_when_delete_then_delegatesToRepository() {
+        // Given — 破窗号不可删守卫由聚合 markAsDeleted() 承担，应用服务只负责加载并委托仓储
         AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
         when(adminUserRepository.findById(1L)).thenReturn(Optional.of(adminUser));
 
@@ -308,6 +297,65 @@ class AdminUserManagementAppServiceTest {
         // Then
         assertThat(adminUser.getRoleIds()).isEmpty();
         verify(adminUserRepository).save(adminUser);
+    }
+
+    @Test
+    void given_breakGlassAdmin_when_assignRolesWithoutSuperAdmin_then_throwException() throws Exception {
+        // Given — 破窗号必须保留 SUPER_ADMIN（守住全权救援能力）
+        Long userId = AdminUser.BREAK_GLASS_ADMIN_ID;
+        AdminUser breakGlass = new AdminUser("admin", "Test1234", "破窗号");
+        java.lang.reflect.Field idField = AdminUser.class.getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(breakGlass, userId);
+
+        AdminRole superRole = new AdminRole("超管", AdminRole.SUPER_ADMIN_CODE, "超级管理员", 0);
+        AdminRole otherRole = new AdminRole("运营", "OPERATOR", "运营", 1);
+        java.lang.reflect.Field roleIdField = AdminRole.class.getDeclaredField("id");
+        roleIdField.setAccessible(true);
+        roleIdField.set(superRole, 100L);
+        roleIdField.set(otherRole, 200L);
+
+        AssignRolesCommand command = new AssignRolesCommand(List.of(200L)); // 不含 SUPER_ADMIN
+
+        when(adminUserRepository.findById(userId)).thenReturn(Optional.of(breakGlass));
+        when(adminRoleRepository.findAllById(command.roleIds())).thenReturn(List.of(otherRole));
+        when(adminRoleRepository.findByCode(AdminRole.SUPER_ADMIN_CODE)).thenReturn(Optional.of(superRole));
+
+        // When & Then
+        assertThatThrownBy(() -> adminUserManagementAppService.assignRoles(userId, command))
+            .isInstanceOf(DomainException.class)
+            .hasMessageContaining(AdminMessage.BREAK_GLASS_SUPER_ADMIN_REQUIRED.message());
+        // 被拒 → 原角色关联不应被改动
+        assertThat(breakGlass.getRoleIds()).isEmpty();
+        verify(adminUserRepository, never()).save(breakGlass);
+    }
+
+    @Test
+    void given_breakGlassAdmin_when_assignRolesKeepsSuperAdmin_then_success() throws Exception {
+        // Given — 破窗号保留 SUPER_ADMIN 时放行
+        Long userId = AdminUser.BREAK_GLASS_ADMIN_ID;
+        AdminUser breakGlass = new AdminUser("admin", "Test1234", "破窗号");
+        java.lang.reflect.Field idField = AdminUser.class.getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(breakGlass, userId);
+
+        AdminRole superRole = new AdminRole("超管", AdminRole.SUPER_ADMIN_CODE, "超级管理员", 0);
+        java.lang.reflect.Field roleIdField = AdminRole.class.getDeclaredField("id");
+        roleIdField.setAccessible(true);
+        roleIdField.set(superRole, 100L);
+
+        AssignRolesCommand command = new AssignRolesCommand(List.of(100L)); // 含 SUPER_ADMIN
+
+        when(adminUserRepository.findById(userId)).thenReturn(Optional.of(breakGlass));
+        when(adminRoleRepository.findAllById(command.roleIds())).thenReturn(List.of(superRole));
+        when(adminRoleRepository.findByCode(AdminRole.SUPER_ADMIN_CODE)).thenReturn(Optional.of(superRole));
+
+        // When
+        adminUserManagementAppService.assignRoles(userId, command);
+
+        // Then
+        assertThat(breakGlass.getRoleIds()).containsExactly(100L);
+        verify(adminUserRepository).save(breakGlass);
     }
 
     @Test

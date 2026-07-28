@@ -132,8 +132,6 @@ class AdminUserManagementAppServiceConcurrentTest {
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger failureCount = new AtomicInteger(0);
 
-        when(adminUserRepository.count()).thenReturn(2L); // Allow deletion
-
         AtomicInteger findCallCount = new AtomicInteger(0);
         when(adminUserRepository.findById(userId)).thenAnswer(invocation -> {
             int currentCall = findCallCount.incrementAndGet();

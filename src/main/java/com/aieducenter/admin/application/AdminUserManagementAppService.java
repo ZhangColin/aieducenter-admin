@@ -151,14 +151,13 @@ public class AdminUserManagementAppService {
 
     /**
      * 删除管理员。
+     *
+     * <p>破窗账号（保留 ID = 1）的不可删守卫由聚合 {@link AdminUser#markAsDeleted()} 承担——
+     * {@code adminUserRepository.delete(entity)} 经框架 {@code BaseRepositoryImpl} 调用
+     * {@code entity.markAsDeleted()}，命中即抛领域错误。</p>
      */
     @Transactional
     public void delete(Long id) {
-        // 检查是否是最后一个管理员
-        if (adminUserRepository.count() <= 1) {
-            throw new ApplicationException(AdminMessage.LAST_ADMIN_CANNOT_DELETE);
-        }
-
         AdminUser adminUser = requirePresent(
                 adminUserRepository.findById(id),
                 AdminMessage.ADMIN_NOT_FOUND
@@ -207,6 +206,16 @@ public class AdminUserManagementAppService {
 
         if (!CollUtil.containsAll(existingRoleIds, command.roleIds())) {
             throw new ApplicationException(AdminMessage.ROLE_NOT_FOUND);
+        }
+
+        // 破窗号必须保留 SUPER_ADMIN 角色——守住"总能以全权救援"的韧性目标
+        // （不可删/不可禁守卫的逻辑补全：否则能登入却无救援能力）。授权（谁是超管）仍走角色。
+        if (adminUser.isBreakGlass()) {
+            Long superAdminRoleId = adminRoleRepository.findByCode(AdminRole.SUPER_ADMIN_CODE)
+                    .map(AdminRole::getId)
+                    .orElse(null);
+            require(command.roleIds().contains(superAdminRoleId),
+                    AdminMessage.BREAK_GLASS_SUPER_ADMIN_REQUIRED);
         }
 
         // 清除现有角色关联

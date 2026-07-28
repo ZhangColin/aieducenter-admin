@@ -12,7 +12,7 @@ import com.cartisan.core.exception.CodeMessage;
  *   <li>密码错误 (400): PASSWORD_INCORRECT</li>
  *   <li>资源不存在 (404): ADMIN_NOT_FOUND, ROLE_NOT_FOUND, MENU_NOT_FOUND, PERMISSION_NOT_FOUND</li>
  *   <li>登录错误 (401): LOGIN_FAILED, ADMIN_DISABLED</li>
- *   <li>业务限制 (403): LAST_ADMIN_CANNOT_DELETE, ROLE_IN_USE, SUPER_ADMIN_CANNOT_DELETE</li>
+ *   <li>业务限制 (403): ROLE_IN_USE, SUPER_ADMIN_CANNOT_DELETE, BREAK_GLASS_CANNOT_DELETE, BREAK_GLASS_CANNOT_DISABLE, BREAK_GLASS_SUPER_ADMIN_REQUIRED</li>
  *   <li>菜单限制 (403): MENU_HAS_CHILDREN, MENU_DEPTH_EXCEEDED, MENU_INVALID_PARENT</li>
  * </ul>
  *
@@ -93,11 +93,6 @@ public enum AdminMessage implements CodeMessage {
     // ========== 业务限制 (403) ==========
 
     /**
-     * 不能删除最后一个管理员。
-     */
-    LAST_ADMIN_CANNOT_DELETE(403, "ADMIN_012", "不能删除最后一个管理员"),
-
-    /**
      * 角色正在使用中，不能删除。
      */
     ROLE_IN_USE(403, "ADMIN_013", "角色正在使用中，不能删除"),
@@ -120,7 +115,26 @@ public enum AdminMessage implements CodeMessage {
     /**
      * 超级管理员角色不能删除。
      */
-    SUPER_ADMIN_CANNOT_DELETE(403, "ADMIN_013_1", "超级管理员角色不能删除");
+    SUPER_ADMIN_CANNOT_DELETE(403, "ADMIN_013_1", "超级管理员角色不能删除"),
+
+    // ========== 破窗账号（运维韧性）限制 (403) ==========
+    // 内置 admin（保留 ID = 1）不可删/不可禁、可改密；授权仍走其挂的 SUPER_ADMIN 角色。
+    // 识别按保留 ID（AdminUser.BREAK_GLASS_ADMIN_ID），不靠列。详见 CONTEXT.md「破窗账号」。
+
+    /**
+     * 内置破窗账号不可删除。
+     */
+    BREAK_GLASS_CANNOT_DELETE(403, "ADMIN_015", "内置账号不可删除"),
+
+    /**
+     * 内置破窗账号不可禁用。
+     */
+    BREAK_GLASS_CANNOT_DISABLE(403, "ADMIN_016", "内置账号不可禁用"),
+
+    /**
+     * 内置破窗账号必须保留超级管理员角色（保证全权救援能力）。
+     */
+    BREAK_GLASS_SUPER_ADMIN_REQUIRED(403, "ADMIN_017", "内置账号必须保留超级管理员角色");
 
     private final int httpStatus;
     private final String code;

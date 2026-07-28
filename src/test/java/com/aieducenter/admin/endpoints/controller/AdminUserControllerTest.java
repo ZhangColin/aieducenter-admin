@@ -56,8 +56,8 @@ class AdminUserControllerTest {
     void given_authenticatedUser_when_findAll_then_returnUsers() throws Exception {
         // Given
         List<AdminUserResponse> users = List.of(
-                new AdminUserResponse(1L, "admin", "管理员", null, null, null, AdminUserStatus.ACTIVE, null, null, null),
-                new AdminUserResponse(2L, "user", "普通用户", null, null, null, AdminUserStatus.ACTIVE, null, null, null)
+                new AdminUserResponse(1L, "admin", "管理员", null, null, null, AdminUserStatus.ACTIVE, null, true, null, null),
+                new AdminUserResponse(2L, "user", "普通用户", null, null, null, AdminUserStatus.ACTIVE, null, false, null, null)
         );
 
         when(adminManagementAppService.findAll(any(AdminUserQuery.class), any()))
@@ -77,7 +77,7 @@ class AdminUserControllerTest {
     void given_authenticatedUser_when_findById_then_returnUser() throws Exception {
         // Given
         when(adminManagementAppService.findById(1L))
-                .thenReturn(new AdminUserResponse(1L, "admin", "管理员", null, null, null, AdminUserStatus.ACTIVE, null, null, null));
+                .thenReturn(new AdminUserResponse(1L, "admin", "管理员", null, null, null, AdminUserStatus.ACTIVE, null, true, null, null));
 
         // When & Then
         mvc.perform(get("/api/admin/users/1"))

@@ -14,6 +14,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.aieducenter.admin.application.dto.command.AdminUserLoginCommand;
@@ -28,6 +30,9 @@ import com.aieducenter.admin.application.mapper.AdminUserMapper;
 import com.cartisan.security.authentication.TokenInfo;
 import com.aieducenter.admin.domain.service.PasswordEncoderService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+
+import cn.dev33.satoken.session.SaSession;
+import cn.dev33.satoken.stp.StpUtil;
 
 @ExtendWith(MockitoExtension.class)
 class AdminUserAuthAppServiceTest {
@@ -78,8 +83,14 @@ class AdminUserAuthAppServiceTest {
 
         AdminUserLoginCommand command = new AdminUserLoginCommand("admin", plainPassword, false);
 
-        // When
-        TokenInfo result = adminAuthAppService.login(command);
+        // When & Then — login 现在写会话 userName（Bug ④a）；纯单测下 mock StpUtil 并断言写入昵称
+        SaSession session = Mockito.mock(SaSession.class);
+        TokenInfo result;
+        try (MockedStatic<StpUtil> stp = Mockito.mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getSession).thenReturn(session);
+            result = adminAuthAppService.login(command);
+            Mockito.verify(session).set("userName", "管理员");
+        }
 
         // Then
         assertThat(result.token()).isEqualTo("test-token");
@@ -100,8 +111,13 @@ class AdminUserAuthAppServiceTest {
 
         AdminUserLoginCommand command = new AdminUserLoginCommand("admin", plainPassword, true);
 
-        // When
-        TokenInfo result = adminAuthAppService.login(command);
+        // When — login 写会话 userName（Bug ④a）；mock StpUtil 以在纯单测中放行
+        SaSession session = Mockito.mock(SaSession.class);
+        TokenInfo result;
+        try (MockedStatic<StpUtil> stp = Mockito.mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getSession).thenReturn(session);
+            result = adminAuthAppService.login(command);
+        }
 
         // Then
         assertThat(result.token()).isEqualTo("test-token");

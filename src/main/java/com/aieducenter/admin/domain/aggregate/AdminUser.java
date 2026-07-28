@@ -45,6 +45,14 @@ import lombok.Setter;
 public class AdminUser extends AuditableSoftDeletable implements AggregateRoot<AdminUser, Long> {
     private static final String USERNAME_PATTERN = "^[a-zA-Z][a-zA-Z0-9_]{2,19}$";
 
+    /**
+     * 破窗账号的保留 ID（内置 {@code admin}）。
+     *
+     * <p>运维韧性层：保证"就算角色被改坏、管理员被删光/禁光，也总有一个救援号能登进来"的固定账号。
+     * 识别方式为保留 ID（不靠列），与授权层（{@code SUPER_ADMIN} 角色）解耦。详见 CONTEXT.md「破窗账号」。</p>
+     */
+    public static final long BREAK_GLASS_ADMIN_ID = 1L;
+
     @Getter
     @Id
     @Column(name = "id", nullable = false, updatable = false)
@@ -123,8 +131,26 @@ public class AdminUser extends AuditableSoftDeletable implements AggregateRoot<A
         return this.status == AdminUserStatus.ACTIVE;
     }
 
+    /**
+     * 是否为破窗账号（按保留 ID 判定，不入库、不靠列）。
+     */
+    public boolean isBreakGlass() {
+        return this.id != null && this.id == BREAK_GLASS_ADMIN_ID;
+    }
+
     // ========== 业务行为 ==========
 
+
+    /**
+     * 软删入口（框架 {@code BaseRepositoryImpl.delete} 经此方法执行软删）。
+     *
+     * <p>破窗账号不可删——保证救援入口永远存在。授权（谁是超管）走角色，与此韧性守卫解耦。</p>
+     */
+    @Override
+    public void markAsDeleted() {
+        require(!isBreakGlass(), AdminMessage.BREAK_GLASS_CANNOT_DELETE);
+        super.markAsDeleted();
+    }
 
     /**
      * 修改密码（已加密）。
@@ -156,8 +182,11 @@ public class AdminUser extends AuditableSoftDeletable implements AggregateRoot<A
 
     /**
      * 禁用管理员。
+     *
+     * <p>破窗账号不可禁——避免把救援入口锁死。改由 {@link #enable()} / 改密恢复。</p>
      */
     public void disable() {
+        require(!isBreakGlass(), AdminMessage.BREAK_GLASS_CANNOT_DISABLE);
         this.status = AdminUserStatus.DISABLED;
     }
 

@@ -93,4 +93,80 @@ class AdminUserTest {
         // Then
         assertThat(adminUser.getStatus()).isEqualTo(AdminUserStatus.ACTIVE);
     }
+
+    // ========== 破窗账号（运维韧性）守卫 ==========
+
+    @Test
+    void given_breakGlassId_when_isBreakGlass_then_true() throws Exception {
+        AdminUser breakGlass = adminUserWithId("admin", AdminUser.BREAK_GLASS_ADMIN_ID);
+
+        assertThat(breakGlass.isBreakGlass()).isTrue();
+    }
+
+    @Test
+    void given_normalId_when_isBreakGlass_then_false() throws Exception {
+        AdminUser normal = adminUserWithId("operator", AdminUser.BREAK_GLASS_ADMIN_ID + 1);
+
+        assertThat(normal.isBreakGlass()).isFalse();
+    }
+
+    @Test
+    void given_breakGlassId_when_markAsDeleted_then_throwDomainException() throws Exception {
+        AdminUser breakGlass = adminUserWithId("admin", AdminUser.BREAK_GLASS_ADMIN_ID);
+
+        assertThatThrownBy(breakGlass::markAsDeleted)
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining(AdminMessage.BREAK_GLASS_CANNOT_DELETE.message());
+        // 不可删 → 软删标记不应被置位
+        assertThat(breakGlass.isDeleted()).isFalse();
+    }
+
+    @Test
+    void given_normalId_when_markAsDeleted_then_markedDeleted() throws Exception {
+        AdminUser normal = adminUserWithId("operator", AdminUser.BREAK_GLASS_ADMIN_ID + 1);
+
+        normal.markAsDeleted();
+
+        assertThat(normal.isDeleted()).isTrue();
+    }
+
+    @Test
+    void given_breakGlassId_when_disable_then_throwDomainException() throws Exception {
+        AdminUser breakGlass = adminUserWithId("admin", AdminUser.BREAK_GLASS_ADMIN_ID);
+
+        assertThatThrownBy(breakGlass::disable)
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining(AdminMessage.BREAK_GLASS_CANNOT_DISABLE.message());
+        // 不可禁 → 状态保持 ACTIVE
+        assertThat(breakGlass.getStatus()).isEqualTo(AdminUserStatus.ACTIVE);
+    }
+
+    @Test
+    void given_normalId_when_disable_then_disabled() throws Exception {
+        AdminUser normal = adminUserWithId("operator", AdminUser.BREAK_GLASS_ADMIN_ID + 1);
+
+        normal.disable();
+
+        assertThat(normal.getStatus()).isEqualTo(AdminUserStatus.DISABLED);
+    }
+
+    @Test
+    void given_breakGlassId_when_changePassword_then_succeed() throws Exception {
+        // 破窗号不可删/不可禁，但可改密（救援号需能轮换密码）
+        AdminUser breakGlass = adminUserWithId("admin", AdminUser.BREAK_GLASS_ADMIN_ID);
+        String newPassword = encodePassword("NewPass123");
+
+        breakGlass.changePassword(newPassword);
+
+        assertThat(breakGlass.getPassword()).isEqualTo(newPassword);
+    }
+
+    /** 构造一个指定 id 的管理员（反射设 id，模拟 JPA 加载后的状态）。 */
+    private AdminUser adminUserWithId(String username, long id) throws Exception {
+        AdminUser adminUser = new AdminUser(username, encodePassword("Test1234"), username);
+        java.lang.reflect.Field idField = AdminUser.class.getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(adminUser, id);
+        return adminUser;
+    }
 }

@@ -1,0 +1,26 @@
+-- ============================================================================
+-- Admin Context: Drop obsolete system column
+-- ============================================================================
+-- Purpose: Remove the system column from sys_admin_users
+-- Context: Admin (sys_)
+-- ============================================================================
+-- Background (Bug ③): the system column conflated two unrelated concerns:
+--   1. "Built-in / cannot be deleted"  (operational resilience)
+--   2. "System administrator"          (authorization / who is super-admin)
+-- Both are now expressed without a per-user flag:
+--   * Resilience  → the break-glass account's reserved ID
+--                   (AdminUser.BREAK_GLASS_ADMIN_ID = 1, see V2 seed).
+--   * Authorization → the SUPER_ADMIN role + framework AuthorizationBypassResolver
+--                     (Bug ②, already landed).
+--
+-- The AdminUser aggregate never mapped this column; under ddl-auto=none (prod)
+-- its `system BOOLEAN NOT NULL` with no default made every administrator INSERT
+-- omit the column and hit a NOT NULL violation → HTTP 500. (Tests use
+-- ddl-auto=create-drop, which builds schema from the entity — no system column —
+-- so the split stayed hidden.) Dropping the column realigns entity ↔ Flyway
+-- schema and removes the latent prod-500.
+--
+-- See CONTEXT.md「破窗账号」and docs/adr/0003-break-glass-reserved-id.md.
+-- ============================================================================
+
+ALTER TABLE sys_admin_users DROP COLUMN system;

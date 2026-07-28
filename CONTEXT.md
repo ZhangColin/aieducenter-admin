@@ -13,7 +13,14 @@
 _Avoid_: 把 Operator 塞进用户域/IdP；把 Operator 与终端用户(Account)混在一张表。
 
 **RBAC（已有，真金白银）**:
-`AdminUser` / `AdminRole` / `AdminMenu` 聚合 + `AdminUserRole` / `AdminRoleMenu` / `AdminRolePermission` 实体 + 6 张 `sys_admin_*` 表。鉴权：BCrypt(10) + cartisan-security（默认 `SaTokenAuthenticationService`）+ `StpInterface`（按 loginType 路由）+ `@RequirePermission` + `PermissionScanner`。
+`AdminUser` / `AdminRole` / `AdminMenu` 聚合 + `AdminUserRole` / `AdminRoleMenu` / `AdminRolePermission` 实体 + 6 张 `sys_admin_*` 表。鉴权：BCrypt(10) + cartisan-security（默认 `SaTokenAuthenticationService`）+ `StpInterface`（Bug ① 后：admin 用默认 loginType，`StpInterface` 无条件返回 admin 权限/角色）+ `@RequirePermission` + `PermissionScanner`。
+
+**超管 (SUPER_ADMIN 角色) — 授权层**:
+"谁是超管" = 是否持有 `SUPER_ADMIN` 角色（种子 id=1，V2 内置）。Bug ② 起接通框架 `AuthorizationBypassResolver`：admin 提供 bean 委托 `isSuperAdmin`，命中即跳过 `@RequireRole`/`@RequirePermission`（仍须 `@RequireAuth` 登录）。**授权维度不再用 per-user 标记位**——旧 `system` 列曾把"授权"与"运维韧性"搅在一起，已拆。
+
+**破窗账号 (Break-glass account) — 运维韧性层**:
+保证"就算角色被改坏、管理员被删光/禁光，也总有一个救援号能登进来"的**固定账号** = 内置 `admin`（保留 ID = 1）。不可删、不可禁、可改密；授权仍走它挂的 `SUPER_ADMIN` 角色。识别方式：**按保留 ID**（`BREAK_GLASS_ADMIN_ID = 1`），不靠列。`system` 列**删除**（V4 迁移）——其原"内置不可删"语义改由"保留 ID = 破窗号"承载；原 `count()<=1` last-admin 检查随之删除（破窗号永在，该规则成死逻辑）。
+_Avoid_: 给 `system` 列塞"系统管理员"的授权含义；把破窗号设计成随角色成员漂移的"最后一个超管"规则（脆、难文档化）。
 
 **财务上下文 (Finance Context)**:
 本应用内的一个**限界上下文（非独立域/服务）**。只读各能力域（支付/钱包/Token计量）做**收入确认（consume-based，履约时点）+ append-only 冲销 + 负债/营销费用视角**。**不收款（支付域）、不持余额（钱包域）、不计量 token（Token计量域）**。详见架构仓库 architecture.md §6.15。
@@ -32,9 +39,9 @@ _Avoid_: 把 Operator 塞进用户域/IdP；把 Operator 与终端用户(Account
 
 ### Phase 0 — 修 4 个 RBAC bug（地基，CLAUDE.md 强制）
 - ✅ [ADR-0001](docs/adr/0001-admin-uses-default-sa-token-login-type.md) Sa-Token 用默认 loginType、放弃 "admin" 命名空间（Bug ①）— 已定
-- 🔁 Bug ② 超管 bypass — 框架已实现 `AuthorizationBypassResolver` SPI（中性命名，`shouldBypass(Long)`）；admin 消费待实现（先 `mvn install` cartisan-boot 刷新 `~/.m2`）。见 [ADR-0002](docs/adr/0002-super-admin-bypass-is-framework-gap.md)
-- ⏳ Bug ③ `AdminUser` 未映射 `system` 列 + 内置账号可被删 — 待
-- ⏳ Bug ④ 登录后未写 `SaSession.userName` — 待
+- ✅ Bug ② 超管 bypass — 已落地（commit `9db013b`）：`SaTokenConfig` 提供 `AuthorizationBypassResolver` bean 委托 `isSuperAdmin`。见 [ADR-0002](docs/adr/0002-super-admin-bypass-is-framework-gap.md)
+- ✅ Bug ③ 内置账号保护 — **已落地**（2026-07-28）：拆"授权 vs 韧性"；超管 = 角色（已有）；破窗号 = 固定 `admin`(id=1) 不可删/不可禁/可改密；**删 `system` 列**（V4）、按保留 ID 识别；删 `count()<=1` 死逻辑；`assignRoles` 不许从破窗号移除 `SUPER_ADMIN`。见 [ADR-0003](docs/adr/0003-break-glass-reserved-id.md)。spec：[`.scratch/phase0-completion/spec.md`](.scratch/phase0-completion/spec.md)。
+- 🔁 Bug ④ 登录未写 `SaSession.userName` — **双轨**：① ✅ admin 侧已补（2026-07-28，login 后 `StpUtil.getSession().set("userName", nickname)`）；② ⏳ 框架缝已提需求 cartisan-boot `.scratch/login-user-name/issues/01`（`AuthenticationService.login()` 把会话建立与 userName 写入割裂、逼调用方越过抽象摸 `StpUtil`），框架侧**已改源码（未提交、未 `mvn install`）**——落地后按 `.scratch/phase0-completion/issues/03` 迁移到新 login 签名、删 admin 侧 workaround。
 
 ### Phase 1 — Operator 模型补全
 - ⏳ 部门 / 岗位模型（树？数据权限挂钩？）

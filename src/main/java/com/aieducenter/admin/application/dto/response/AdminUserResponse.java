@@ -18,6 +18,7 @@ public record AdminUserResponse(
         String avatar,
         AdminUserStatus status,
         String statusName,
+        boolean breakGlass,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {}
