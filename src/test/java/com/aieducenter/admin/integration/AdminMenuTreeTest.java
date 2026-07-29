@@ -16,8 +16,10 @@ import com.aieducenter.admin.application.MenuManagementAppService;
 import com.aieducenter.admin.application.dto.command.CreateMenuCommand;
 import com.aieducenter.admin.application.dto.response.MenuResponse;
 import com.aieducenter.admin.domain.aggregate.AdminMenu;
+import com.aieducenter.admin.domain.enums.MenuType;
 import com.aieducenter.admin.domain.repository.AdminMenuRepository;
 import com.cartisan.core.exception.DomainException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * AdminMenu 树形结构集成测试。
@@ -34,6 +36,9 @@ class AdminMenuTreeTest {
 
     @Autowired
     private AdminMenuRepository menuRepository;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @AfterEach
     void tearDown() {
@@ -71,6 +76,22 @@ class AdminMenuTreeTest {
         assertThat(level2.name()).isEqualTo("用户管理");
         assertThat(level2.parentId()).isEqualTo(level1Id);
         assertThat(level2.children()).isEmpty();
+
+        // T1: type 字段透传到响应，且与节点语义一致（默认创建 = MENU）
+        assertThat(level1.type()).isEqualTo(MenuType.MENU);
+        assertThat(level2.type()).isEqualTo(MenuType.MENU);
+    }
+
+    @Test
+    void given_menuResponse_when_serialize_then_type_is_integer_code() throws Exception {
+        // T1: type 经全局 BaseEnumSerializer 序列化为整数 code（1=MENU/2=GROUP/3=DIVIDER）
+        MenuResponse menu = new MenuResponse(1L, "用户管理", "/users", "user", null, 1, MenuType.MENU, null);
+        MenuResponse group = new MenuResponse(2L, "分组", null, null, null, 2, MenuType.GROUP, null);
+        MenuResponse divider = new MenuResponse(3L, "--", null, null, null, 3, MenuType.DIVIDER, null);
+
+        assertThat(objectMapper.writeValueAsString(menu)).contains("\"type\":1");
+        assertThat(objectMapper.writeValueAsString(group)).contains("\"type\":2");
+        assertThat(objectMapper.writeValueAsString(divider)).contains("\"type\":3");
     }
 
     @Test
