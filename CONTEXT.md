@@ -22,6 +22,10 @@ _Avoid_: 把 Operator 塞进用户域/IdP；把 Operator 与终端用户(Account
 保证"就算角色被改坏、管理员被删光/禁光，也总有一个救援号能登进来"的**固定账号** = 内置 `admin`（保留 ID = 1）。不可删、不可禁、可改密；授权仍走它挂的 `SUPER_ADMIN` 角色。识别方式：**按保留 ID**（`BREAK_GLASS_ADMIN_ID = 1`），不靠列。`system` 列**删除**（V4 迁移）——其原"内置不可删"语义改由"保留 ID = 破窗号"承载；原 `count()<=1` last-admin 检查随之删除（破窗号永在，该规则成死逻辑）。
 _Avoid_: 给 `system` 列塞"系统管理员"的授权含义；把破窗号设计成随角色成员漂移的"最后一个超管"规则（脆、难文档化）。
 
+**菜单树与节点类型 (Menu tree & MenuType)**:
+导航是一棵树（`AdminMenu`，`parentId` 组装，`MAX_DEPTH=3`）。**节点的 `type` 描述"这个节点怎么渲染"，与深度正交**——深度由树结构推出（前端据深度决定"画成一级图标 / 二级面板项"，据 `type` 决定"分组头 / 可路由叶子 / 分隔线"组件）。三型：`MENU`(1)=可路由叶子、`path` 必填；`GROUP`(2)=分组容器/小节标题、`path` 空、有子节点；`DIVIDER`(3)=**同级分隔线（非容器）**——作兄弟节点插入、仅靠 `parentId`+`sortOrder` 定位、无 `path`、无子、`name` 仅作维护备注不渲染。可见性派生（过滤层职责，非聚合）：GROUP 仅当 ≥1 子节点可见才显示，DIVIDER 仅当存在可见邻居才显示——按权限裁剪菜单树时需一并裁掉空 GROUP 与悬空 DIVIDER。不变量（待在聚合强制）：MENU 必有非空 path；GROUP/DIVIDER 的 path 为 null。
+_Avoid_: 把 `type` 当层级标识（GROUP≠"一级"、MENU≠"二级"）；把 DIVIDER 做成"挂在下一个节点上的 dividerBefore 标志位"（CRUD 时不直观、排序别扭、违背"维护时可读"，已否决）。
+
 **财务上下文 (Finance Context)**:
 本应用内的一个**限界上下文（非独立域/服务）**。只读各能力域（支付/钱包/Token计量）做**收入确认（consume-based，履约时点）+ append-only 冲销 + 负债/营销费用视角**。**不收款（支付域）、不持余额（钱包域）、不计量 token（Token计量域）**。详见架构仓库 architecture.md §6.15。
 
@@ -50,6 +54,10 @@ _Avoid_: 给 `system` 列塞"系统管理员"的授权含义；把破窗号设�
 ### Phase 2 — 财务上下文 + 各能力域聚合
 - ⏳ 财务首批视图 + 与各域取数契约
 - ⏳ cartisan-openapi 签名客户端
+
+### Issue 处置（前端 aieducenter-admin-web 提的需求）
+- **[REQ-1] `MenuResponse` 补 `type`**：模型已定——单棵树 + 每节点 `type`（见上「菜单树与节点类型」），DIVIDER 用 fake-row（非 dividerBefore 标志位）。实现范围 = 加 `type` 字段 + 聚合补 path/type 不变量 + 修 `findTree` 两坑（按 `sortOrder` 排序、裁空 GROUP/悬空 DIVIDER、不孤儿）。**待前端确认契约后启动**（后端兜底排序+裁剪、前端 naive 渲染）。对齐评论：[issue #1](https://github.com/ZhangColin/aieducenter-admin/issues/1#issuecomment-5102496878)。
+- **[REQ-3] `/auth/captcha`**：**不做**（内部员工后台无 botnet 撞库场景，图形验证码收益≈0、徒增真人摩擦；内部账号安全靠 BCrypt + 账号锁定 + 内网访问控制）。已从 `application.yml` 放行名单删占位、关闭 [issue #2](https://github.com/ZhangColin/aieducenter-admin/issues/2)（won't fix）。未来登录防自动化走「失败 N 次锁定 + IP 限流」，非图形码。
 
 ## ADR
 
