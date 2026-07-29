@@ -28,7 +28,6 @@ cartisan:
         - "/error"
         - "/actuator/**"
         - "/api/admin/auth/login"
-        - "/api/admin/auth/captcha"
         - "/swagger-ui/**"
         - "/api-docs/**"
 
