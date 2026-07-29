@@ -3,9 +3,15 @@ package com.aieducenter.admin.application.dto.response;
 import com.aieducenter.admin.domain.enums.AdminUserStatus;
 
 import java.time.LocalDateTime;
+import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * 管理员响应 DTO。
+ *
+ * <p>{@code roles} 仅详情端点（{@code GET /users/{id}}）填充——列表与 {@code /auth/current}
+ * 不填充（null），经 {@code NON_NULL} 序列化策略从响应中省略，保持既有响应形状不变。</p>
  *
  * @since 0.1.0
  */
@@ -20,5 +26,7 @@ public record AdminUserResponse(
         String statusName,
         boolean breakGlass,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        List<AssignedRoleResponse> roles
 ) {}

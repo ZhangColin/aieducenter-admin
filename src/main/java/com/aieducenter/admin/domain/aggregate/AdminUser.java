@@ -89,8 +89,17 @@ public class AdminUser extends AuditableSoftDeletable implements AggregateRoot<A
     @Column(name = "status", nullable = false)
     private AdminUserStatus status;
 
+    /**
+     * 用户-角色关联（聚合内实体）。
+     *
+     * <p>admin_id 列由 {@link AdminUserRole#getAdminId()} 属性独占可写映射，故此处
+     * {@code @JoinColumn} 标记只读：若两侧同时可写（双写映射），从集合移除关联时 Hibernate
+     * 会走「解引用」（UPDATE admin_id=null）而非 orphanRemoval 的 DELETE，在真实库的
+     * NOT NULL 约束上必现 23502——重新分配角色（clearRoles + addRole）整体失败。
+     * 只读后：插入由子实体属性写 admin_id，移除由 orphanRemoval 发 DELETE。</p>
+     */
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
-    @JoinColumn(name = "admin_id")
+    @JoinColumn(name = "admin_id", insertable = false, updatable = false)
     private final Set<AdminUserRole> userRoles = CollUtil.newHashSet();
 
     /**

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.aieducenter.admin.application.dto.command.AssignRolesCommand;
 import com.aieducenter.admin.application.dto.command.CreateAdminUserCommand;
 import com.aieducenter.admin.application.dto.command.UpdateAdminUserCommand;
+import com.aieducenter.admin.application.dto.response.AdminUserResponse;
+import com.aieducenter.admin.application.dto.response.AssignedRoleResponse;
 import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.domain.aggregate.AdminUser;
 import com.aieducenter.admin.domain.enums.AdminUserStatus;
@@ -26,6 +29,7 @@ import com.aieducenter.admin.domain.error.AdminMessage;
 import com.aieducenter.admin.domain.repository.AdminRoleRepository;
 import com.aieducenter.admin.domain.repository.AdminUserRepository;
 import com.aieducenter.admin.application.mapper.AdminUserMapper;
+import com.aieducenter.admin.application.mapper.AdminUserMapperImpl;
 import com.aieducenter.admin.domain.service.PasswordEncoderService;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.DomainException;
@@ -356,6 +360,91 @@ class AdminUserManagementAppServiceTest {
         // Then
         assertThat(breakGlass.getRoleIds()).containsExactly(100L);
         verify(adminUserRepository).save(breakGlass);
+    }
+
+    // ========== findById roles 回显（REQ-4）==========
+
+    /**
+     * 使用真实 MapStruct mapper 的服务实例——roles 断言落在响应对象本身，
+     * 而非对 mapper 协作的 mock 验证。
+     */
+    private AdminUserManagementAppService serviceWithRealMapper() {
+        return new AdminUserManagementAppService(
+            adminUserRepository,
+            adminRoleRepository,
+            adminUserAuthAppService,
+            new AdminUserMapperImpl(),
+            passwordEncoderService
+        );
+    }
+
+    private static void setRoleId(AdminRole role, Long id) throws Exception {
+        java.lang.reflect.Field idField = AdminRole.class.getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(role, id);
+    }
+
+    @Test
+    void given_assignedRoles_when_findById_then_responseContainsRoleSummaries() throws Exception {
+        // Given
+        Long userId = 7L;
+        AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
+        adminUser.addRole(1L);
+        adminUser.addRole(2L);
+
+        AdminRole role1 = new AdminRole("管理员", "ADMIN", "管理员", 1);
+        AdminRole role2 = new AdminRole("操作员", "OPERATOR", "操作员", 2);
+        setRoleId(role1, 1L);
+        setRoleId(role2, 2L);
+
+        when(adminUserRepository.findById(userId)).thenReturn(Optional.of(adminUser));
+        when(adminRoleRepository.findByIdInAndDeletedFalse(adminUser.getRoleIds()))
+            .thenReturn(List.of(role1, role2));
+
+        // When
+        AdminUserResponse response = serviceWithRealMapper().findById(userId);
+
+        // Then —— 裁剪投影 {id, name, code}，批量查询一次完成（无 N+1）
+        assertThat(response.roles())
+            .extracting(AssignedRoleResponse::id, AssignedRoleResponse::name, AssignedRoleResponse::code)
+            .containsExactlyInAnyOrder(
+                org.assertj.core.groups.Tuple.tuple(1L, "管理员", "ADMIN"),
+                org.assertj.core.groups.Tuple.tuple(2L, "操作员", "OPERATOR")
+            );
+    }
+
+    @Test
+    void given_staleLinkToSoftDeletedRole_when_findById_then_rolesEmpty() {
+        // Given —— 关联行无软删标志：角色已软删但 admin_user_role 关联仍在（残留关联）
+        Long userId = 7L;
+        AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
+        adminUser.addRole(9L);
+
+        when(adminUserRepository.findById(userId)).thenReturn(Optional.of(adminUser));
+        when(adminRoleRepository.findByIdInAndDeletedFalse(Set.of(9L))).thenReturn(List.of());
+
+        // When
+        AdminUserResponse response = serviceWithRealMapper().findById(userId);
+
+        // Then —— 已删角色不回显；且必须走显式过滤查询（findAllById 会把软删角色泄出来）
+        assertThat(response.roles()).isEmpty();
+        verify(adminRoleRepository).findByIdInAndDeletedFalse(Set.of(9L));
+    }
+
+    @Test
+    void given_noRoles_when_findById_then_rolesEmptyArrayNotNull() {
+        // Given
+        Long userId = 7L;
+        AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
+
+        when(adminUserRepository.findById(userId)).thenReturn(Optional.of(adminUser));
+
+        // When
+        AdminUserResponse response = serviceWithRealMapper().findById(userId);
+
+        // Then —— 返回空数组而非 null（契约：未分配 → []）；无角色时不发起无谓查询
+        assertThat(response.roles()).isNotNull().isEmpty();
+        verify(adminRoleRepository, never()).findByIdInAndDeletedFalse(any());
     }
 
     @Test

@@ -82,6 +82,9 @@ public class AdminUserManagementAppService {
 
     /**
      * 查询管理员详情。
+     *
+     * <p>携带当前已分配角色摘要（{@code roles}）供「分配角色」回显：显式排除软删角色
+     * （关联行无软删标志，角色软删后残留关联不得回显），批量查询一次完成，无 N+1。</p>
      */
     @Transactional(readOnly = true)
     public AdminUserResponse findById(Long id) {
@@ -90,7 +93,12 @@ public class AdminUserManagementAppService {
                 AdminMessage.ADMIN_NOT_FOUND
         );
 
-        return adminUserMapper.convert(adminUser);
+        Set<Long> roleIds = adminUser.getRoleIds();
+        List<AdminRole> roles = roleIds.isEmpty()
+                ? List.of()
+                : adminRoleRepository.findByIdInAndDeletedFalse(roleIds);
+
+        return adminUserMapper.convertWithRoles(adminUser, roles);
     }
 
     /**

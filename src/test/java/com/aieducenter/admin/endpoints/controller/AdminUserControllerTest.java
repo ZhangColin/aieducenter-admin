@@ -27,6 +27,7 @@ import com.aieducenter.admin.application.dto.command.ResetPasswordCommand;
 import com.aieducenter.admin.application.dto.command.UpdateAdminUserCommand;
 import com.aieducenter.admin.application.dto.query.AdminUserQuery;
 import com.aieducenter.admin.application.dto.response.AdminUserResponse;
+import com.aieducenter.admin.application.dto.response.AssignedRoleResponse;
 import com.aieducenter.admin.domain.aggregate.AdminUser;
 import com.aieducenter.admin.domain.enums.AdminUserStatus;
 
@@ -56,8 +57,8 @@ class AdminUserControllerTest {
     void given_authenticatedUser_when_findAll_then_returnUsers() throws Exception {
         // Given
         List<AdminUserResponse> users = List.of(
-                new AdminUserResponse(1L, "admin", "管理员", null, null, null, AdminUserStatus.ACTIVE, null, true, null, null),
-                new AdminUserResponse(2L, "user", "普通用户", null, null, null, AdminUserStatus.ACTIVE, null, false, null, null)
+                new AdminUserResponse(1L, "admin", "管理员", null, null, null, AdminUserStatus.ACTIVE, null, true, null, null, null),
+                new AdminUserResponse(2L, "user", "普通用户", null, null, null, AdminUserStatus.ACTIVE, null, false, null, null, null)
         );
 
         when(adminManagementAppService.findAll(any(AdminUserQuery.class), any()))
@@ -68,22 +69,27 @@ class AdminUserControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items.length()").value(2))
                 .andExpect(jsonPath("$.data.items[0].username").value("admin"))
+                .andExpect(jsonPath("$.data.items[0].roles").doesNotExist())
                 .andExpect(jsonPath("$.data.total").value(2));
 
         verify(adminManagementAppService).findAll(any(AdminUserQuery.class), any());
     }
 
     @Test
-    void given_authenticatedUser_when_findById_then_returnUser() throws Exception {
-        // Given
+    void given_authenticatedUser_when_findById_then_returnUserWithRoles() throws Exception {
+        // Given —— 详情响应携带已分配角色摘要（REQ-4）
         when(adminManagementAppService.findById(1L))
-                .thenReturn(new AdminUserResponse(1L, "admin", "管理员", null, null, null, AdminUserStatus.ACTIVE, null, true, null, null));
+                .thenReturn(new AdminUserResponse(1L, "admin", "管理员", null, null, null,
+                        AdminUserStatus.ACTIVE, null, true, null, null,
+                        List.of(new AssignedRoleResponse(1L, "超级管理员", "SUPER_ADMIN"))));
 
         // When & Then
         mvc.perform(get("/api/admin/users/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(1))
-                .andExpect(jsonPath("$.data.username").value("admin"));
+                .andExpect(jsonPath("$.data.username").value("admin"))
+                .andExpect(jsonPath("$.data.roles[0].name").value("超级管理员"))
+                .andExpect(jsonPath("$.data.roles[0].code").value("SUPER_ADMIN"));
 
         verify(adminManagementAppService).findById(1L);
     }

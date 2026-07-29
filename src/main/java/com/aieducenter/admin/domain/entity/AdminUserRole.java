@@ -27,6 +27,13 @@ public class AdminUserRole implements DomainEntity<AdminUserRole, Long> {
     @Column(name = "id", nullable = false, updatable = false)
     private Long id;
 
+    /**
+     * 管理员 ID（关联所属聚合根）。
+     *
+     * <p>本属性是 admin_id 列的唯一可写映射；{@code AdminUser#userRoles} 侧的
+     * {@code @JoinColumn} 已标记只读（见该处注释），避免同一列双写映射导致
+     * 「移除关联 → UPDATE admin_id=null 撞 NOT NULL 约束」。</p>
+     */
     @Column(name = "admin_id", nullable = false)
     private Long adminId;
 
