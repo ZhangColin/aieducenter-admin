@@ -88,7 +88,7 @@ public class MenuManagementAppService {
             }
         }
 
-        AdminMenu menu = new AdminMenu(command.name(), command.path(), command.icon(), command.parentId(), command.sortOrder());
+        AdminMenu menu = new AdminMenu(command.name(), command.path(), command.icon(), command.parentId(), command.sortOrder(), command.type());
         AdminMenu saved = menuRepository.save(menu);
         return saved.getId();
     }
@@ -127,11 +127,7 @@ public class MenuManagementAppService {
             }
         }
 
-        menu.setName(command.name());
-        menu.setPath(command.path());
-        menu.setIcon(command.icon());
-        menu.setParentId(command.parentId());
-        menu.setSortOrder(command.sortOrder());
+        menu.updateDetails(command.name(), command.path(), command.icon(), command.parentId(), command.sortOrder(), command.type());
         menuRepository.save(menu);
     }
 

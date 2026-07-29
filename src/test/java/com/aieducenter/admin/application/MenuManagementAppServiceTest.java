@@ -3,11 +3,14 @@ package com.aieducenter.admin.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Optional;
+
+import org.mockito.ArgumentCaptor;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +23,7 @@ import com.aieducenter.admin.application.dto.command.UpdateMenuCommand;
 import com.aieducenter.admin.application.mapper.AdminMenuMapper;
 import com.aieducenter.admin.domain.aggregate.AdminMenu;
 import com.aieducenter.admin.domain.error.AdminMessage;
+import com.aieducenter.admin.domain.enums.MenuType;
 import com.aieducenter.admin.domain.repository.AdminMenuRepository;
 import com.cartisan.core.exception.DomainException;
 
@@ -307,5 +311,45 @@ class MenuManagementAppServiceTest {
         // Then
         verify(menuRepository).findAll();
         verify(adminMenuMapper).convertList(any());
+    }
+
+    // ========== T2: type 透传 + type↔path 不变量经服务层 ==========
+
+    @Test
+    void given_menuTypeGroup_when_create_then_saved_menu_is_group_with_null_path() {
+        var command = new CreateMenuCommand("分组", null, null, null, 1, MenuType.GROUP);
+        when(menuRepository.save(any(AdminMenu.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        menuManagementAppService.create(command);
+
+        ArgumentCaptor<AdminMenu> captor = ArgumentCaptor.forClass(AdminMenu.class);
+        verify(menuRepository).save(captor.capture());
+        assertThat(captor.getValue().getType()).isEqualTo(MenuType.GROUP);
+        assertThat(captor.getValue().getPath()).isNull();
+    }
+
+    @Test
+    void given_menuTypeMenuWithoutPath_when_create_then_throw_admin014_3() {
+        var command = new CreateMenuCommand("用户管理", null, null, null, 1, MenuType.MENU);
+
+        assertThatThrownBy(() -> menuManagementAppService.create(command))
+                .isInstanceOf(DomainException.class)
+                .extracting("codeMessage")
+                .isEqualTo(AdminMessage.MENU_TYPE_PATH_MISMATCH);
+        verify(menuRepository, never()).save(any(AdminMenu.class));
+    }
+
+    @Test
+    void given_updateToGroup_when_update_then_path_normalized_to_null() {
+        Long menuId = 1L;
+        var command = new UpdateMenuCommand("分组", "/ignored", "icon", null, 1, MenuType.GROUP);
+        AdminMenu existing = new AdminMenu("用户管理", "/users", "user", null, 1);
+        when(menuRepository.findById(menuId)).thenReturn(Optional.of(existing));
+        when(menuRepository.save(any(AdminMenu.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        menuManagementAppService.update(menuId, command);
+
+        assertThat(existing.getType()).isEqualTo(MenuType.GROUP);
+        assertThat(existing.getPath()).isNull();
     }
 }

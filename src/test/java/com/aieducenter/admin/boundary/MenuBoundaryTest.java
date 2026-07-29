@@ -12,6 +12,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import com.aieducenter.admin.domain.aggregate.AdminMenu;
 import com.aieducenter.admin.domain.enums.MenuType;
+import com.aieducenter.admin.domain.error.AdminMessage;
+import com.cartisan.core.exception.DomainException;
 
 /**
  * Menu 边界值测试。
@@ -95,29 +97,32 @@ class MenuBoundaryTest {
     }
 
     @ParameterizedTest
-    @NullAndEmptySource
     @ValueSource(strings = {
-        "",
-        "  ",
         "/",
         "/test",
         "/admin/users",
         "/path/with/many/segments"
     })
-    @DisplayName("路径边界值测试")
-    void given_path_boundary_when_create_menu_then_handle_appropriately(String path) {
-        // Given
-        String name = "测试菜单";
-        String icon = "test-icon";
-        Long parentId = null;
-        Integer sortOrder = 0;
-
+    @DisplayName("MENU 有效 path 边界值：原样存储")
+    void given_valid_path_for_menu_when_create_then_path_stored(String path) {
         // When
-        AdminMenu menu = new AdminMenu(name, path, icon, parentId, sortOrder);
+        AdminMenu menu = new AdminMenu("测试菜单", path, "icon", null, 0, MenuType.MENU);
 
         // Then
-        // AdminMenu 没有对 path 进行验证
+        assertThat(menu.getType()).isEqualTo(MenuType.MENU);
         assertThat(menu.getPath()).isEqualTo(path);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"", "  ", "\t"})
+    @DisplayName("MENU 空/null/空白 path 边界值：拒绝 ADMIN_014_3")
+    void given_blank_path_for_menu_when_create_then_throw_admin014_3(String path) {
+        // When & Then: MENU 必须有非空 path
+        assertThatThrownBy(() -> new AdminMenu("测试菜单", path, "icon", null, 0, MenuType.MENU))
+                .isInstanceOf(DomainException.class)
+                .extracting("codeMessage")
+                .isEqualTo(AdminMessage.MENU_TYPE_PATH_MISMATCH);
     }
 
     @ParameterizedTest

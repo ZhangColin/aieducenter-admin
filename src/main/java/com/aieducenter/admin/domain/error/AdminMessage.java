@@ -14,6 +14,7 @@ import com.cartisan.core.exception.CodeMessage;
  *   <li>登录错误 (401): LOGIN_FAILED, ADMIN_DISABLED</li>
  *   <li>业务限制 (403): ROLE_IN_USE, SUPER_ADMIN_CANNOT_DELETE, BREAK_GLASS_CANNOT_DELETE, BREAK_GLASS_CANNOT_DISABLE, BREAK_GLASS_SUPER_ADMIN_REQUIRED</li>
  *   <li>菜单限制 (403): MENU_HAS_CHILDREN, MENU_DEPTH_EXCEEDED, MENU_INVALID_PARENT</li>
+ *   <li>菜单校验 (400): MENU_TYPE_PATH_MISMATCH（MENU 必须有 path）</li>
  * </ul>
  *
  * @since 0.1.0
@@ -111,6 +112,11 @@ public enum AdminMessage implements CodeMessage {
      * 菜单父级设置无效。
      */
     MENU_INVALID_PARENT(403, "ADMIN_014_2", "不能将菜单设置为自己的父级或后代"),
+
+    /**
+     * MENU 类型菜单必须有非空路径（type↔path 不变量）。
+     */
+    MENU_TYPE_PATH_MISMATCH(400, "ADMIN_014_3", "MENU 类型菜单必须有路径"),
 
     /**
      * 超级管理员角色不能删除。

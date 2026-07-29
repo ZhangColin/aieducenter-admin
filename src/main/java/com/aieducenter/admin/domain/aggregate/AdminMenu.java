@@ -6,9 +6,12 @@ import cn.hutool.core.collection.CollUtil;
 
 import com.cartisan.core.domain.AggregateRoot;
 import com.cartisan.core.stereotype.Aggregate;
+import static com.cartisan.core.util.Assertions.require;
+
 import com.cartisan.data.jpa.domain.AuditableSoftDeletable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 import com.aieducenter.admin.domain.enums.MenuType;
+import com.aieducenter.admin.domain.error.AdminMessage;
 
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -42,7 +45,6 @@ public class AdminMenu extends AuditableSoftDeletable implements AggregateRoot<A
     @Column(name = "name", nullable = false, length = 50)
     private String name;
 
-    @Setter
     @Getter
     @Column(name = "path", length = 255)
     private String path;
@@ -71,14 +73,36 @@ public class AdminMenu extends AuditableSoftDeletable implements AggregateRoot<A
     private List<AdminMenu> children = CollUtil.newArrayList();
 
     /**
-     * 创建菜单。
+     * 创建菜单（含类型，强制 type↔path 不变量）。
+     *
+     * @param type 菜单类型，null 缺省为 {@link MenuType#MENU}
      */
-    public AdminMenu(String name, String path, String icon, Long parentId, Integer sortOrder) {
+    public AdminMenu(String name, String path, String icon, Long parentId, Integer sortOrder, MenuType type) {
         this.name = name;
-        this.path = path;
         this.icon = icon;
         this.parentId = parentId;
         this.sortOrder = sortOrder != null ? sortOrder : 0;
+        applyTypeAndPath(type, path);
+    }
+
+    /**
+     * 创建菜单（type 缺省 MENU）。保持既有调用点兼容。
+     */
+    public AdminMenu(String name, String path, String icon, Long parentId, Integer sortOrder) {
+        this(name, path, icon, parentId, sortOrder, null);
+    }
+
+    /**
+     * 整体更新字段（应用层调用，强制 type↔path 不变量）。
+     *
+     * @param type 菜单类型，null 缺省为 {@link MenuType#MENU}
+     */
+    public void updateDetails(String name, String path, String icon, Long parentId, Integer sortOrder, MenuType type) {
+        this.name = name;
+        this.icon = icon;
+        this.parentId = parentId;
+        this.sortOrder = sortOrder != null ? sortOrder : 0;
+        applyTypeAndPath(type, path);
     }
 
     /**
@@ -106,7 +130,7 @@ public class AdminMenu extends AuditableSoftDeletable implements AggregateRoot<A
     // ========== Setter ==========
 
     public void setType(MenuType type) {
-        this.type = type != null ? type : MenuType.MENU;
+        applyTypeAndPath(type, this.path);
     }
 
     public void setChildren(List<AdminMenu> children) {
@@ -127,5 +151,27 @@ public class AdminMenu extends AuditableSoftDeletable implements AggregateRoot<A
      */
     public boolean isRoot() {
         return this.parentId == null;
+    }
+
+    // ========== 私有方法 ==========
+
+    /**
+     * 统一应用 type 与 path，强制 type↔path 不变量：
+     * <ul>
+     *   <li>MENU：必须有非空 path，否则 {@link AdminMessage#MENU_TYPE_PATH_MISMATCH}</li>
+     *   <li>GROUP / DIVIDER：path 无意义，归一为 null</li>
+     * </ul>
+     *
+     * @param type 菜单类型，null 缺省为 {@link MenuType#MENU}
+     */
+    private void applyTypeAndPath(MenuType type, String path) {
+        MenuType resolved = type != null ? type : MenuType.MENU;
+        if (resolved == MenuType.MENU) {
+            require(path != null && !path.isBlank(), AdminMessage.MENU_TYPE_PATH_MISMATCH);
+            this.path = path;
+        } else {
+            this.path = null;
+        }
+        this.type = resolved;
     }
 }

@@ -1,5 +1,7 @@
 package com.aieducenter.admin.application.dto.command;
 
+import com.aieducenter.admin.domain.enums.MenuType;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -22,7 +24,13 @@ public record CreateMenuCommand(
 
         Long parentId,
 
-        Integer sortOrder
+        Integer sortOrder,
+
+        MenuType type
 
 ) {
+    /** 旧 5 参构造（type 缺省 → MENU，由聚合归一），保持既有调用点兼容。 */
+    public CreateMenuCommand(String name, String path, String icon, Long parentId, Integer sortOrder) {
+        this(name, path, icon, parentId, sortOrder, null);
+    }
 }
