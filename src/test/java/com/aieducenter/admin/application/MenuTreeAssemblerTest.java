@@ -91,17 +91,33 @@ class MenuTreeAssemblerTest {
     }
 
     @Test
-    void given_divider_between_menus_when_assemble_filtered_then_kept() {
+    void given_divider_not_assigned_but_between_assigned_menus_when_assemble_filtered_then_auto_kept() {
+        // B：分隔线不分配——只要父容器可见、两侧有被分配的 MENU，就按结构自动出现
         AdminMenu root = menu("root", null, MenuType.GROUP, null, 0, 1L);
         AdminMenu a = menu("A", "/a", MenuType.MENU, 1L, 1, 2L);
         AdminMenu divider = menu("--", null, MenuType.DIVIDER, 1L, 2, 3L);
         AdminMenu b = menu("B", "/b", MenuType.MENU, 1L, 3, 4L);
 
-        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, a, divider, b), Set.of(2L, 3L, 4L));
+        // 只分配两个 MENU（分隔线 id 3 不在 menuIds）
+        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, a, divider, b), Set.of(2L, 4L));
 
         assertThat(roots).hasSize(1);
         assertThat(roots.get(0).getChildren()).extracting(AdminMenu::getId)
-                .containsExactly(2L, 3L, 4L); // divider 保留在两个 MENU 之间
+                .containsExactly(2L, 3L, 4L); // 分隔线自动补在两个 MENU 之间
+    }
+
+    @Test
+    void given_divider_with_content_only_on_one_side_when_assemble_filtered_then_kept() {
+        // 钉死行为：分隔线只要有任一侧可见内容即保留（前导/尾随分隔线不在本规则裁剪范围）
+        AdminMenu root = menu("root", null, MenuType.GROUP, null, 0, 1L);
+        AdminMenu a = menu("A", "/a", MenuType.MENU, 1L, 1, 2L);
+        AdminMenu divider = menu("--", null, MenuType.DIVIDER, 1L, 2, 3L); // 后面无内容
+
+        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, a, divider), Set.of(2L));
+
+        assertThat(roots).hasSize(1);
+        assertThat(roots.get(0).getChildren()).extracting(AdminMenu::getId)
+                .containsExactly(2L, 3L); // 分隔线靠 a 这个内容兄弟保留（尾随）
     }
 
     @Test

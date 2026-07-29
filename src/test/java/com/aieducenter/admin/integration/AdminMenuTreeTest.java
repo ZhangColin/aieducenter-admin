@@ -226,19 +226,19 @@ class AdminMenuTreeTest {
     }
 
     @Test
-    void given_divider_between_menus_when_filter_then_kept() {
-        // Given: MENU - DIVIDER - MENU（同级，三者都分配给角色）
+    void given_divider_between_menus_when_filter_then_auto_kept() {
+        // Given: MENU - DIVIDER - MENU（同级）
         Long aId = menuManagementAppService.create(
             new CreateMenuCommand("A", "/a", null, null, 1, MenuType.MENU));
-        Long dividerId = menuManagementAppService.create(
+        menuManagementAppService.create(
             new CreateMenuCommand("--", null, null, null, 2, MenuType.DIVIDER));
         Long bId = menuManagementAppService.create(
             new CreateMenuCommand("B", "/b", null, null, 3, MenuType.MENU));
 
-        // When: 两个 MENU + 分隔线都在过滤集
-        List<MenuResponse> tree = menuManagementAppService.findTree(java.util.Set.of(aId, dividerId, bId));
+        // When: 只分配两个 MENU（分隔线未分配）
+        List<MenuResponse> tree = menuManagementAppService.findTree(java.util.Set.of(aId, bId));
 
-        // Then: 两个 MENU 之间的 DIVIDER 保留（有内容兄弟），并按 sortOrder 排序
+        // Then: 分隔线按结构自动出现在两个 MENU 之间（B：不分配），按 sortOrder 排序
         assertThat(tree).extracting(MenuResponse::type)
                 .containsExactly(MenuType.MENU, MenuType.DIVIDER, MenuType.MENU);
     }
