@@ -176,8 +176,8 @@ class AdminMenuTreeTest {
     }
 
     @Test
-    void given_menu_tree_when_filter_exclude_parent_but_include_child_then_child_not_appear() {
-        // Given: 创建菜单树
+    void given_child_assigned_but_parent_not_when_filter_then_ancestor_chain_completed() {
+        // Given: 父子菜单
         Long menu1Id = menuManagementAppService.create(
             new CreateMenuCommand("系统管理", "/system", "system", null, 1)
         );
@@ -185,13 +185,77 @@ class AdminMenuTreeTest {
             new CreateMenuCommand("用户管理", "/users", "user", menu1Id, 1)
         );
 
-        // When: 只包含子菜单，不包含父菜单
-        // 根据实现逻辑，子菜单的父节点不在过滤集中时，子菜单不会出现在树中
+        // When: 只包含子菜单（父菜单未分配）
         List<MenuResponse> filteredTree = menuManagementAppService.findTree(
             java.util.Set.of(menu2Id)
         );
 
-        // Then: 结果为空，因为子菜单的父节点不在过滤集中
-        assertThat(filteredTree).isEmpty();
+        // Then: 祖先链补全——父分组自动补回，子菜单不丢弃（修原"叶子静默丢弃"bug）
+        assertThat(filteredTree).hasSize(1);
+        assertThat(filteredTree.get(0).id()).isEqualTo(menu1Id);
+        assertThat(filteredTree.get(0).children()).hasSize(1);
+        assertThat(filteredTree.get(0).children().get(0).id()).isEqualTo(menu2Id);
+    }
+
+    @Test
+    void given_empty_group_assigned_when_filter_then_trimmed() {
+        // Given: 分组被分配但无可见子
+        Long groupId = menuManagementAppService.create(
+            new CreateMenuCommand("空分组", null, null, null, 1, MenuType.GROUP)
+        );
+
+        // When: 消费侧过滤
+        List<MenuResponse> tree = menuManagementAppService.findTree(java.util.Set.of(groupId));
+
+        // Then: 空 GROUP 被裁掉
+        assertThat(tree).isEmpty();
+    }
+
+    @Test
+    void given_dangling_divider_when_filter_then_trimmed() {
+        // Given: 分隔线无可见内容兄弟
+        Long dividerId = menuManagementAppService.create(
+            new CreateMenuCommand("--", null, null, null, 1, MenuType.DIVIDER)
+        );
+
+        // When
+        List<MenuResponse> tree = menuManagementAppService.findTree(java.util.Set.of(dividerId));
+
+        // Then: 悬空 DIVIDER 被裁掉
+        assertThat(tree).isEmpty();
+    }
+
+    @Test
+    void given_divider_between_menus_when_filter_then_kept() {
+        // Given: MENU - DIVIDER - MENU（同级，三者都分配给角色）
+        Long aId = menuManagementAppService.create(
+            new CreateMenuCommand("A", "/a", null, null, 1, MenuType.MENU));
+        Long dividerId = menuManagementAppService.create(
+            new CreateMenuCommand("--", null, null, null, 2, MenuType.DIVIDER));
+        Long bId = menuManagementAppService.create(
+            new CreateMenuCommand("B", "/b", null, null, 3, MenuType.MENU));
+
+        // When: 两个 MENU + 分隔线都在过滤集
+        List<MenuResponse> tree = menuManagementAppService.findTree(java.util.Set.of(aId, dividerId, bId));
+
+        // Then: 两个 MENU 之间的 DIVIDER 保留（有内容兄弟），并按 sortOrder 排序
+        assertThat(tree).extracting(MenuResponse::type)
+                .containsExactly(MenuType.MENU, MenuType.DIVIDER, MenuType.MENU);
+    }
+
+    @Test
+    void given_admin_view_when_findTree_then_emptyGroupAndDivider_kept() {
+        // Given: 空 GROUP + DIVIDER
+        menuManagementAppService.create(
+            new CreateMenuCommand("空分组", null, null, null, 1, MenuType.GROUP));
+        menuManagementAppService.create(
+            new CreateMenuCommand("--", null, null, null, 2, MenuType.DIVIDER));
+
+        // When: /menus 管理视图（menuIds=null，不裁剪）
+        List<MenuResponse> tree = menuManagementAppService.findTree();
+
+        // Then: 空 GROUP 与 DIVIDER 均保留
+        assertThat(tree).extracting(MenuResponse::type)
+                .containsExactly(MenuType.GROUP, MenuType.DIVIDER);
     }
 }

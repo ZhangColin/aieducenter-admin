@@ -1,11 +1,7 @@
 package com.aieducenter.admin.application;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-
-import cn.hutool.core.collection.CollUtil;
-import cn.hutool.core.map.MapUtil;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,35 +33,20 @@ public class MenuManagementAppService {
     }
 
     /**
-     * 构建菜单树（支持按 menuIds 过滤）。
+     * 构建菜单树。
+     *
+     * <p>{@code /menus} 管理视图与 {@code /auth/current} 消费侧共用此入口，组装差异由
+     * {@link MenuTreeAssembler} 按 {@code menuIds} 是否为 null 区分：</p>
+     * <ul>
+     *   <li>{@code menuIds == null}：全量、排序、不裁剪（管理员可编辑空分组/分隔线）；</li>
+     *   <li>{@code menuIds != null}：角色过滤、祖先链补全、排序、裁空 GROUP/悬空 DIVIDER。</li>
+     * </ul>
      *
      * @param menuIds 菜单 ID 集合，null 表示全部菜单
      * @return 菜单 DTO 列表
      */
     public List<MenuResponse> findTree(Set<Long> menuIds) {
-        List<AdminMenu> allMenus = menuRepository.findAll();
-
-        // 构建映射（如果 menuIds 为 null，则包含所有菜单）
-        Map<Long, AdminMenu> menuMap = MapUtil.newHashMap();
-        for (AdminMenu menu : allMenus) {
-            if (menuIds == null || menuIds.contains(menu.getId())) {
-                menuMap.put(menu.getId(), menu);
-            }
-        }
-
-        // 建立父子关系
-        List<AdminMenu> roots = CollUtil.newArrayList();
-        for (AdminMenu menu : menuMap.values()) {
-            if (menu.getParentId() == null) {
-                roots.add(menu);
-            } else {
-                AdminMenu parent = menuMap.get(menu.getParentId());
-                if (parent != null) {
-                    parent.addChild(menu);
-                }
-            }
-        }
-
+        List<AdminMenu> roots = MenuTreeAssembler.assemble(menuRepository.findAll(), menuIds);
         return adminMenuMapper.convertList(roots);
     }
 
