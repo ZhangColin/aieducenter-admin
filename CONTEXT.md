@@ -23,7 +23,7 @@ _Avoid_: 把 Operator 塞进用户域/IdP；把 Operator 与终端用户(Account
 _Avoid_: 给 `system` 列塞"系统管理员"的授权含义；把破窗号设计成随角色成员漂移的"最后一个超管"规则（脆、难文档化）。
 
 **菜单树与节点类型 (Menu tree & MenuType)**:
-导航是一棵树（`AdminMenu`，`parentId` 组装，`MAX_DEPTH=3`）。**节点的 `type` 描述"这个节点怎么渲染"，与深度正交**——深度由树结构推出（前端据深度决定"画成一级图标 / 二级面板项"，据 `type` 决定"分组头 / 可路由叶子 / 分隔线"组件）。三型：`MENU`(1)=可路由叶子、`path` 必填；`GROUP`(2)=分组容器/小节标题、`path` 空、有子节点；`DIVIDER`(3)=**同级分隔线（非容器）**——作兄弟节点插入、仅靠 `parentId`+`sortOrder` 定位、无 `path`、无子、`name` 仅作维护备注不渲染。可见性派生（过滤层职责，非聚合）：GROUP 仅当 ≥1 子节点可见才显示，DIVIDER 仅当存在可见邻居才显示——按权限裁剪菜单树时需一并裁掉空 GROUP 与悬空 DIVIDER。不变量（待在聚合强制）：MENU 必有非空 path；GROUP/DIVIDER 的 path 为 null。
+导航是一棵树（`AdminMenu`，`parentId` 组装，`MAX_DEPTH=3`）。**节点的 `type` 描述"这个节点怎么渲染"，与深度正交**——深度由树结构推出（前端据深度决定"画成一级图标 / 二级面板项"，据 `type` 决定"分组头 / 可路由叶子 / 分隔线"组件）。三型：`MENU`(1)=可路由叶子、`path` 必填；`GROUP`(2)=分组容器/小节标题、`path` 空、有子节点；`DIVIDER`(3)=**同级分隔线（非容器）**——作兄弟节点插入、仅靠 `parentId`+`sortOrder` 定位、无 `path`、无子、`name` 仅作维护备注不渲染。可见性派生（过滤层职责，非聚合）：GROUP 仅当 ≥1 子节点可见才显示，DIVIDER 仅当存在可见邻居才显示——按权限裁剪菜单树时一并裁掉空 GROUP 与悬空 DIVIDER（已实现于 `MenuTreeAssembler`：祖先链补全 + 每层按 `sortOrder` 排序 + 裁剪；DIVIDER 不分配、按结构自动纳入，仅靠有无可见邻居决定去留）。不变量（已在聚合 `AdminMenu.applyTypeAndPath` 强制，错误码 `ADMIN_014_3`）：MENU 必有非空 path；GROUP/DIVIDER 的 path 为 null。
 _Avoid_: 把 `type` 当层级标识（GROUP≠"一级"、MENU≠"二级"）；把 DIVIDER 做成"挂在下一个节点上的 dividerBefore 标志位"（CRUD 时不直观、排序别扭、违背"维护时可读"，已否决）。
 
 **财务上下文 (Finance Context)**:
@@ -56,7 +56,7 @@ _Avoid_: 把 `type` 当层级标识（GROUP≠"一级"、MENU≠"二级"）；�
 - ⏳ cartisan-openapi 签名客户端
 
 ### Issue 处置（前端 aieducenter-admin-web 提的需求）
-- **[REQ-1] `MenuResponse` 补 `type`**：模型已定——单棵树 + 每节点 `type`（见上「菜单树与节点类型」），DIVIDER 用 fake-row（非 dividerBefore 标志位）。实现范围 = 加 `type` 字段 + 聚合补 path/type 不变量 + 修 `findTree` 两坑（按 `sortOrder` 排序、裁空 GROUP/悬空 DIVIDER、不孤儿）。**待前端确认契约后启动**（后端兜底排序+裁剪、前端 naive 渲染）。对齐评论：[issue #1](https://github.com/ZhangColin/aieducenter-admin/issues/1#issuecomment-5102496878)。
+- ✅ **[REQ-1] `MenuResponse` 补 `type`**：模型已定——单棵树 + 每节点 `type`（见上「菜单树与节点类型」），DIVIDER 用 fake-row（非 dividerBefore 标志位）。**已实现**（契约 issue #1 选 A：后端兜底排序+裁剪、前端 naive 渲染）：加 `type` 字段（`8c982ad`）+ 聚合内 path/type 不变量（`8ce8730`，`ADMIN_014_3`）+ 修 `findTree`（`00f1893`：按 `sortOrder` 排序、祖先链补全、裁空 GROUP/悬空 DIVIDER）+ 分隔线按结构自动出现（`5ee29ea`）。issues #4/#5/#6 已关闭。对齐评论：[issue #1](https://github.com/Zhangcolin/aieducenter-admin/issues/1#issuecomment-5102496878)。
 - **[REQ-3] `/auth/captcha`**：**不做**（内部员工后台无 botnet 撞库场景，图形验证码收益≈0、徒增真人摩擦；内部账号安全靠 BCrypt + 账号锁定 + 内网访问控制）。已从 `application.yml` 放行名单删占位、关闭 [issue #2](https://github.com/ZhangColin/aieducenter-admin/issues/2)（won't fix）。未来登录防自动化走「失败 N 次锁定 + IP 限流」，非图形码。
 
 ## ADR
