@@ -16,4 +16,9 @@ spring:
   jpa:
     show-sql: true
     hibernate:
-      ddl-auto: create-drop
+      # create（非 create-drop）：SessionFactory 启动时 drop+重建表、关闭时不 drop。
+      # 套件有多个 @SpringBootTest 上下文（MOCK / RANDOM_PORT）共用本物理库，
+      # create-drop 会在某上下文 teardown 时 DROP 共享表，连累仍缓存的上下文
+      # （SoftDeleteReadFilterIntegrationTest 全量套件确定性失败，见 #10）。
+      # create 既给每个上下文干净表、又无跨上下文清表 / 无脏数据累积。
+      ddl-auto: create
