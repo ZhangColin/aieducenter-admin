@@ -61,14 +61,23 @@ public class AdminRole extends AuditableSoftDeletable implements AggregateRoot<A
     @Column(name = "sort_order", nullable = false)
     private Integer sortOrder = 0;
 
-    // 关联的菜单
+    /**
+     * 角色-菜单关联（聚合内实体）。
+     *
+     * <p>{@code @JoinColumn} 标记只读（{@code insertable=false, updatable=false}）：role_id 列由
+     * {@link AdminRoleMenu#getRoleId()} 属性独占可写。否则两侧双写时，{@link #clearMenus()}
+     * 移除关联会走「UPDATE role_id=null 解引用」而非 orphanRemoval 的 DELETE，在 role_id NOT NULL
+     * 上必现违例——重新分配（clear + add）整路径失败（REQ-7）。与 {@link AdminUser} 的 userRoles 同模式。</p>
+     */
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
-    @JoinColumn(name = "role_id")
+    @JoinColumn(name = "role_id", insertable = false, updatable = false)
     private Set<AdminRoleMenu> roleMenus = new HashSet<>();
 
-    // 关联的权限
+    /**
+     * 角色-权限关联（聚合内实体）。同 {@link #roleMenus}，JoinColumn 只读以避免双写 orphanRemoval 撞 NOT NULL。
+     */
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
-    @JoinColumn(name = "role_id")
+    @JoinColumn(name = "role_id", insertable = false, updatable = false)
     private Set<AdminRolePermission> rolePermissions = new HashSet<>();
 
     /**

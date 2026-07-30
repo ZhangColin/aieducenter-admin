@@ -6,6 +6,7 @@ import jakarta.persistence.*;
 import lombok.Getter;
 
 import com.cartisan.core.domain.DomainEntity;
+import com.cartisan.data.jpa.id.TsidGenerator;
 
 /**
  * 管理员-角色关联实体。
@@ -23,7 +24,6 @@ import com.cartisan.core.domain.DomainEntity;
 public class AdminUserRole implements DomainEntity<AdminUserRole, Long> {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", nullable = false, updatable = false)
     private Long id;
 
@@ -52,6 +52,16 @@ public class AdminUserRole implements DomainEntity<AdminUserRole, Long> {
     public AdminUserRole(Long adminId, Long roleId) {
         this.adminId = adminId;
         this.roleId = roleId;
+    }
+
+    /**
+     * JPA 保存前生成 ID（应用层 TSID，与聚合根一致；DDL 主键无自增）。
+     */
+    @PrePersist
+    void prePersist() {
+        if (id == null) {
+            this.id = TsidGenerator.newInstance().generate();
+        }
     }
 
     @Override

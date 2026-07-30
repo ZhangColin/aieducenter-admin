@@ -2,6 +2,7 @@ package com.aieducenter.admin.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -25,6 +26,7 @@ import com.aieducenter.admin.application.dto.response.RoleResponse;
 import com.aieducenter.admin.application.mapper.AdminRoleMapper;
 import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.domain.aggregate.AdminMenu;
+import com.aieducenter.admin.domain.entity.AdminRolePermission;
 import com.aieducenter.admin.domain.error.AdminMessage;
 import com.aieducenter.admin.domain.repository.AdminRoleRepository;
 import com.aieducenter.admin.domain.repository.AdminMenuRepository;
@@ -343,13 +345,15 @@ class RoleManagementAppServiceTest {
         );
         AdminRole role = new AdminRole("测试角色", "TEST", "测试", 1);
 
-        // Create mock Permission objects
+        // Create mock Permission objects（PermissionScanner 返回 {code, name, scope}）
         var perm1 = org.mockito.Mockito.mock(com.cartisan.security.permission.Permission.class);
         org.mockito.Mockito.lenient().when(perm1.code()).thenReturn("admin:user:read");
+        org.mockito.Mockito.lenient().when(perm1.name()).thenReturn("用户查看");
         org.mockito.Mockito.lenient().when(perm1.scope()).thenReturn(AdminScopes.ADMIN);
 
         var perm2 = org.mockito.Mockito.mock(com.cartisan.security.permission.Permission.class);
         org.mockito.Mockito.lenient().when(perm2.code()).thenReturn("admin:user:write");
+        org.mockito.Mockito.lenient().when(perm2.name()).thenReturn("用户编辑");
         org.mockito.Mockito.lenient().when(perm2.scope()).thenReturn(AdminScopes.ADMIN);
 
         when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
@@ -359,8 +363,14 @@ class RoleManagementAppServiceTest {
         // When
         roleManagementAppService.assignPermissions(roleId, command);
 
-        // Then
+        // Then：权限码落库
         assertThat(role.getPermissionCodes()).containsExactlyInAnyOrder("admin:user:read", "admin:user:write");
+        // 且权限名被回填（permission_name NOT NULL，见 REQ-7 Bug ②）
+        assertThat(role.getRolePermissions())
+            .extracting(AdminRolePermission::getPermissionCode, AdminRolePermission::getPermissionName)
+            .containsExactlyInAnyOrder(
+                tuple("admin:user:read", "用户查看"),
+                tuple("admin:user:write", "用户编辑"));
         verify(roleRepository).save(role);
     }
 

@@ -1,11 +1,13 @@
 package com.aieducenter.admin.application;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.map.MapUtil;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -174,12 +176,15 @@ public class RoleManagementAppService {
         );
 
         // 验证权限 codes 有效性（通过 PermissionScanner 扫描代码中定义的权限）
-        Set<String> validPermissionCodes = permissionScanner.scanByScope(AdminScopes.ADMIN).stream()
-                .map(Permission::code)
-                .collect(Collectors.toSet());
+        // 同时建立 code → name 映射：sys_admin_role_permissions.permission_name 为 NOT NULL，
+        // 落库时必须回填权限名（见 REQ-7 Bug ②），不能再传 null。用手写 put 而非
+        // Collectors.toMap，以容忍个别权限缺名（toMap 遇 null value 会抛 NPE）。
+        Map<String, String> permissionNameByCode = MapUtil.newHashMap();
+        permissionScanner.scanByScope(AdminScopes.ADMIN)
+                .forEach(p -> permissionNameByCode.put(p.code(), p.name()));
 
         for (String permissionCode : command.permissionCodes()) {
-            if (!validPermissionCodes.contains(permissionCode)) {
+            if (!permissionNameByCode.containsKey(permissionCode)) {
                 throw new DomainException(AdminMessage.PERMISSION_NOT_FOUND);
             }
         }
@@ -187,7 +192,7 @@ public class RoleManagementAppService {
         // 清除现有权限并添加新权限
         role.clearPermissions();
         for (String permissionCode : command.permissionCodes()) {
-            role.addPermission(permissionCode, null);
+            role.addPermission(permissionCode, permissionNameByCode.get(permissionCode));
         }
         roleRepository.save(role);
     }
