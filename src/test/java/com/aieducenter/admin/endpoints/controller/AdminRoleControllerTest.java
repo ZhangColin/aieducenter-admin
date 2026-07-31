@@ -27,6 +27,8 @@ import com.aieducenter.admin.application.dto.command.CreateRoleCommand;
 import com.aieducenter.admin.application.dto.command.UpdateRoleCommand;
 import com.aieducenter.admin.application.dto.query.AdminRoleQuery;
 import com.aieducenter.admin.application.dto.response.RoleResponse;
+import com.aieducenter.admin.application.dto.response.RoleOptionResponse;
+import com.aieducenter.admin.domain.enums.AdminRoleStatus;
 
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -55,7 +57,7 @@ class AdminRoleControllerTest {
         // Given
         when(roleManagementAppService.findAll(any(AdminRoleQuery.class), any()))
                 .thenReturn(new com.cartisan.web.response.PageResponse<>(
-                        List.of(new RoleResponse(1L, "管理员", "ADMIN", "系统管理员", 1, null, null)),
+                        List.of(new RoleResponse(1L, "管理员", "ADMIN", "系统管理员", 1, null, null, null, null, null, null)),
                         1L, 1, 20
                 ));
 
@@ -73,7 +75,7 @@ class AdminRoleControllerTest {
     void given_authenticatedUser_when_findById_then_returnRole() throws Exception {
         // Given
         when(roleManagementAppService.findById(1L))
-                .thenReturn(new RoleResponse(1L, "管理员", "ADMIN", "系统管理员", 1, null, null));
+                .thenReturn(new RoleResponse(1L, "管理员", "ADMIN", "系统管理员", 1, null, null, null, null, null, null));
 
         // When & Then
         mvc.perform(get("/api/admin/roles/1"))
@@ -172,5 +174,34 @@ class AdminRoleControllerTest {
                 .andExpect(status().isOk());
 
         verify(roleManagementAppService).assignPermissions(eq(1L), any(AssignPermissionsCommand.class));
+    }
+
+    @Test
+    void given_enabledRoles_when_findAllEnabled_then_returnOptions() throws Exception {
+        // Given
+        when(roleManagementAppService.listEnabledOptions())
+                .thenReturn(List.of(
+                        new RoleOptionResponse(1L, "超级管理员", "SUPER_ADMIN"),
+                        new RoleOptionResponse(2L, "运营", "OPERATOR")
+                ));
+
+        // When & Then
+        mvc.perform(get("/api/admin/roles/all"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].id").value(1))
+                .andExpect(jsonPath("$.data[0].name").value("超级管理员"))
+                .andExpect(jsonPath("$.data[0].code").value("SUPER_ADMIN"));
+
+        verify(roleManagementAppService).listEnabledOptions();
+    }
+
+    @Test
+    void given_validStatus_when_updateStatus_then_success() throws Exception {
+        // MockMvc standalone 不加载 cartisan-boot 自动配置，BaseEnum (?status=) 参数绑定需集成测试验证；
+        // 单元测试只验证 Controller 委托 AppService（仿 AdminUserControllerTest）。
+        controller.updateStatus(1L, AdminRoleStatus.DISABLED);
+
+        verify(roleManagementAppService).updateStatus(eq(1L), eq(AdminRoleStatus.DISABLED));
     }
 }

@@ -90,7 +90,7 @@ class AdminUserRolesEchoIntegrationTest {
         Long superAdminRoleId = adminRoleRepository.findByCode(AdminRole.SUPER_ADMIN_CODE)
                 .map(AdminRole::getId)
                 .orElseGet(() -> roleAppService.create(
-                        new CreateRoleCommand("超级管理员", AdminRole.SUPER_ADMIN_CODE, "超级管理员", 0)));
+                        new CreateRoleCommand("超级管理员", AdminRole.SUPER_ADMIN_CODE, "超级管理员", 0, null)));
 
         // 调用者：超管（bypass 权限检查，以便调用 admin:user:* 端点）
         callerUsername = "roleecho";
@@ -106,8 +106,8 @@ class AdminUserRolesEchoIntegrationTest {
     void given_assignedRoles_when_getUserDetail_then_rolesEchoed() throws Exception {
         String suffixA = uuidSuffix();
         String suffixB = uuidSuffix();
-        Long roleA = roleAppService.create(new CreateRoleCommand("运营_" + suffixA, "OP_A_" + suffixA, "运营A", 10));
-        Long roleB = roleAppService.create(new CreateRoleCommand("客服_" + suffixB, "OP_B_" + suffixB, "客服B", 20));
+        Long roleA = roleAppService.create(new CreateRoleCommand("运营_" + suffixA, "OP_A_" + suffixA, "运营A", 10, null));
+        Long roleB = roleAppService.create(new CreateRoleCommand("客服_" + suffixB, "OP_B_" + suffixB, "客服B", 20, null));
         Long userId = userAppService.create(
                 new CreateAdminUserCommand("echo_" + uuidSuffix(), PASSWORD, "回显用户", null, null));
         userAppService.assignRoles(userId, new AssignRolesCommand(List.of(roleA, roleB)));
@@ -133,9 +133,9 @@ class AdminUserRolesEchoIntegrationTest {
     @DisplayName("角色被软删但关联行仍在 → 详情 roles 不含该角色（显式过滤真实行为）")
     void given_softDeletedRoleStillLinked_when_getUserDetail_then_roleExcluded() throws Exception {
         Long aliveRoleId = roleAppService.create(
-                new CreateRoleCommand("存活_" + uuidSuffix(), "ALIVE_" + uuidSuffix(), "存活角色", 10));
+                new CreateRoleCommand("存活_" + uuidSuffix(), "ALIVE_" + uuidSuffix(), "存活角色", 10, null));
         Long doomedRoleId = roleAppService.create(
-                new CreateRoleCommand("将删_" + uuidSuffix(), "DOOMED_" + uuidSuffix(), "将删角色", 20));
+                new CreateRoleCommand("将删_" + uuidSuffix(), "DOOMED_" + uuidSuffix(), "将删角色", 20, null));
         Long userId = userAppService.create(
                 new CreateAdminUserCommand("stale_" + uuidSuffix(), PASSWORD, "残留关联用户", null, null));
         userAppService.assignRoles(userId, new AssignRolesCommand(List.of(aliveRoleId, doomedRoleId)));
@@ -165,8 +165,8 @@ class AdminUserRolesEchoIntegrationTest {
     @Test
     @DisplayName("PUT 分配后再查详情 → roles 反映最新分配（全量覆盖语义）")
     void given_reassignedRoles_when_getUserDetail_then_reflectsLatest() throws Exception {
-        Long roleA = roleAppService.create(new CreateRoleCommand("旧角色_" + uuidSuffix(), "OLD_" + uuidSuffix(), "旧", 10));
-        Long roleB = roleAppService.create(new CreateRoleCommand("新角色_" + uuidSuffix(), "NEW_" + uuidSuffix(), "新", 20));
+        Long roleA = roleAppService.create(new CreateRoleCommand("旧角色_" + uuidSuffix(), "OLD_" + uuidSuffix(), "旧", 10, null));
+        Long roleB = roleAppService.create(new CreateRoleCommand("新角色_" + uuidSuffix(), "NEW_" + uuidSuffix(), "新", 20, null));
         Long userId = userAppService.create(
                 new CreateAdminUserCommand("swap_" + uuidSuffix(), PASSWORD, "换角色用户", null, null));
         userAppService.assignRoles(userId, new AssignRolesCommand(List.of(roleA)));

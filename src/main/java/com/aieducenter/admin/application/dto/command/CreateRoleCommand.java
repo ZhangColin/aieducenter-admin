@@ -21,7 +21,10 @@ public record CreateRoleCommand(
         @Size(max = 255, message = "描述长度不能超过255")
         String description,
 
-        Integer sortOrder
+        Integer sortOrder,
+
+        @Size(max = 100, message = "默认首页长度不能超过100")
+        String home
 
 ) {
 }

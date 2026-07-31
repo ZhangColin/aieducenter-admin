@@ -62,8 +62,8 @@ class RoleAssignmentConcurrencyIntegrationTest {
         userId = adminUserManagementAppService.create(userCmd);
 
         // Create test roles
-        CreateRoleCommand role1Cmd = new CreateRoleCommand("角色1", "ROLE1", "角色1", 1);
-        CreateRoleCommand role2Cmd = new CreateRoleCommand("角色2", "ROLE2", "角色2", 2);
+        CreateRoleCommand role1Cmd = new CreateRoleCommand("角色1", "ROLE1", "角色1", 1, null);
+        CreateRoleCommand role2Cmd = new CreateRoleCommand("角色2", "ROLE2", "角色2", 2, null);
         role1Id = roleManagementAppService.create(role1Cmd);
         role2Id = roleManagementAppService.create(role2Cmd);
     }

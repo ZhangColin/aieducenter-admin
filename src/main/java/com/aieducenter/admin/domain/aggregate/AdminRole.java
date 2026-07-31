@@ -6,10 +6,13 @@ import java.util.stream.Collectors;
 
 import com.cartisan.core.domain.AggregateRoot;
 import com.cartisan.core.stereotype.Aggregate;
+import static com.cartisan.core.util.Assertions.require;
 import com.cartisan.data.jpa.domain.AuditableSoftDeletable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 import com.aieducenter.admin.domain.entity.AdminRoleMenu;
 import com.aieducenter.admin.domain.entity.AdminRolePermission;
+import com.aieducenter.admin.domain.enums.AdminRoleStatus;
+import com.aieducenter.admin.domain.error.AdminMessage;
 
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -60,6 +63,22 @@ public class AdminRole extends AuditableSoftDeletable implements AggregateRoot<A
     @Getter
     @Column(name = "sort_order", nullable = false)
     private Integer sortOrder = 0;
+
+    /**
+     * 角色状态（启用/禁用）。仅经 {@link #disable()} / {@link #enable()} 变更——
+     * 无 @Setter，避免绕过 SUPER_ADMIN 守卫直写。
+     */
+    @Getter
+    @Column(name = "status", nullable = false)
+    private AdminRoleStatus status = AdminRoleStatus.ENABLED;
+
+    /**
+     * 默认首页 route name（登录后按角色落地页，Soybean home）。可空。
+     */
+    @Setter
+    @Getter
+    @Column(name = "home", length = 100)
+    private String home;
 
     /**
      * 角色-菜单关联（聚合内实体）。
@@ -135,6 +154,34 @@ public class AdminRole extends AuditableSoftDeletable implements AggregateRoot<A
      */
     public boolean isSuperAdmin() {
         return "SUPER_ADMIN".equals(this.code);
+    }
+
+    /**
+     * 软删入口（框架 {@code BaseRepositoryImpl.delete} 经此方法执行软删）。
+     *
+     * <p>SUPER_ADMIN 角色不可删——它是破窗号（内置 {@code admin}）的全权救援角色；
+     * 删了则破窗号虽在、救援能力失效，仍会锁死（ADR-0003 修订）。守卫在聚合内单一执行点，
+     * 仿 {@link AdminUser#markAsDeleted()} 破窗号 guard。</p>
+     */
+    @Override
+    public void markAsDeleted() {
+        require(!isSuperAdmin(), AdminMessage.SUPER_ADMIN_CANNOT_DELETE);
+        super.markAsDeleted();
+    }
+
+    /**
+     * 禁用角色。SUPER_ADMIN 角色不可禁（同理保救援角色永不失效）。
+     */
+    public void disable() {
+        require(!isSuperAdmin(), AdminMessage.SUPER_ADMIN_CANNOT_DISABLE);
+        this.status = AdminRoleStatus.DISABLED;
+    }
+
+    /**
+     * 启用角色。
+     */
+    public void enable() {
+        this.status = AdminRoleStatus.ENABLED;
     }
 
     /**

@@ -23,11 +23,13 @@ import com.aieducenter.admin.application.dto.command.CreateRoleCommand;
 import com.aieducenter.admin.application.dto.command.UpdateRoleCommand;
 import com.aieducenter.admin.application.dto.query.AdminRoleQuery;
 import com.aieducenter.admin.application.dto.response.RoleResponse;
+import com.aieducenter.admin.application.dto.response.RoleOptionResponse;
 import com.aieducenter.admin.application.mapper.AdminRoleMapper;
 import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.domain.aggregate.AdminMenu;
 import com.aieducenter.admin.domain.entity.AdminRolePermission;
 import com.aieducenter.admin.domain.error.AdminMessage;
+import com.aieducenter.admin.domain.enums.AdminRoleStatus;
 import com.aieducenter.admin.domain.repository.AdminRoleRepository;
 import com.aieducenter.admin.domain.repository.AdminMenuRepository;
 import com.aieducenter.admin.constants.AdminScopes;
@@ -75,7 +77,7 @@ class RoleManagementAppServiceTest {
     @Test
     void given_no_filter_when_findAll_then_return_all_roles() {
         // Given
-        AdminRoleQuery query = new AdminRoleQuery(null, null, null);
+        AdminRoleQuery query = new AdminRoleQuery(null, null, null, null);
         Pageable pageable = PageRequest.of(0, 20);
 
         AdminRole role = new AdminRole("管理员", "ADMIN", "系统管理员", 1);
@@ -84,7 +86,7 @@ class RoleManagementAppServiceTest {
         when(roleRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), any(Pageable.class)))
             .thenReturn(rolePage);
         when(adminRoleMapper.convertList(List.of(role)))
-            .thenReturn(List.of(new RoleResponse(1L, "管理员", "ADMIN", "系统管理员", 1, null, null)));
+            .thenReturn(List.of(new RoleResponse(1L, "管理员", "ADMIN", "系统管理员", 1, null, null, null, null, null, null)));
 
         // When
         var response = roleManagementAppService.findAll(query, pageable);
@@ -99,7 +101,7 @@ class RoleManagementAppServiceTest {
     @Test
     void given_valid_input_when_create_role_then_success() {
         // Given
-        CreateRoleCommand command = new CreateRoleCommand("测试角色", "TEST", "测试角色描述", 1);
+        CreateRoleCommand command = new CreateRoleCommand("测试角色", "TEST", "测试角色描述", 1, null);
 
         when(roleRepository.findByCode("TEST")).thenReturn(Optional.empty());
         when(roleRepository.save(any(AdminRole.class))).thenAnswer(invocation -> {
@@ -125,7 +127,7 @@ class RoleManagementAppServiceTest {
     @Test
     void given_duplicate_code_when_create_role_then_throw_exception() {
         // Given
-        CreateRoleCommand command = new CreateRoleCommand("测试角色", "ADMIN", "测试角色描述", 1);
+        CreateRoleCommand command = new CreateRoleCommand("测试角色", "ADMIN", "测试角色描述", 1, null);
 
         when(roleRepository.findByCode("ADMIN")).thenReturn(Optional.of(new AdminRole("管理员", "ADMIN", "系统管理员", 1)));
 
@@ -141,7 +143,7 @@ class RoleManagementAppServiceTest {
     void given_valid_input_when_update_role_then_success() {
         // Given
         Long roleId = 1L;
-        UpdateRoleCommand command = new UpdateRoleCommand("新角色名", "NEW_CODE", "新描述", 2);
+        UpdateRoleCommand command = new UpdateRoleCommand("新角色名", "NEW_CODE", "新描述", 2, null);
         AdminRole existingRole = new AdminRole("旧角色名", "OLD_CODE", "旧描述", 1);
 
         when(roleRepository.findById(roleId)).thenReturn(Optional.of(existingRole));
@@ -162,7 +164,7 @@ class RoleManagementAppServiceTest {
     void given_nonexistent_role_when_update_then_throw_exception() {
         // Given
         Long roleId = 999L;
-        UpdateRoleCommand command = new UpdateRoleCommand("新角色名", "NEW_CODE", "新描述", 1);
+        UpdateRoleCommand command = new UpdateRoleCommand("新角色名", "NEW_CODE", "新描述", 1, null);
 
         when(roleRepository.findById(roleId)).thenReturn(Optional.empty());
 
@@ -176,7 +178,7 @@ class RoleManagementAppServiceTest {
     void given_duplicate_code_when_update_role_then_throw_exception() {
         // Given
         Long roleId = 1L;
-        UpdateRoleCommand command = new UpdateRoleCommand("新角色名", "EXISTING_CODE", "新描述", 1);
+        UpdateRoleCommand command = new UpdateRoleCommand("新角色名", "EXISTING_CODE", "新描述", 1, null);
         AdminRole existingRole = new AdminRole("旧角色名", "OLD_CODE", "旧描述", 1);
         AdminRole otherRole = new AdminRole("其他角色", "EXISTING_CODE", "其他", 2);
 
@@ -193,7 +195,7 @@ class RoleManagementAppServiceTest {
     void given_same_code_when_update_role_then_success() {
         // Given
         Long roleId = 1L;
-        UpdateRoleCommand command = new UpdateRoleCommand("新角色名", "OLD_CODE", "新描述", 1);
+        UpdateRoleCommand command = new UpdateRoleCommand("新角色名", "OLD_CODE", "新描述", 1, null);
         AdminRole existingRole = new AdminRole("旧角色名", "OLD_CODE", "旧描述", 1);
 
         when(roleRepository.findById(roleId)).thenReturn(Optional.of(existingRole));
@@ -238,17 +240,22 @@ class RoleManagementAppServiceTest {
     }
 
     @Test
-    void given_super_admin_role_when_delete_then_throw_exception() {
+    void given_super_admin_role_when_delete_then_delegatesToAggregateGuard() {
+        // SUPER_ADMIN 不可删守卫在聚合 markAsDeleted（单一执行点，仿 AdminUser）。服务层只确保：
+        // 超管角色跳过 in-use 检查（否则恒命中 ROLE_IN_USE，遮蔽 SUPER_ADMIN_CANNOT_DELETE），
+        // 放行至 repository.delete → 聚合守卫在真库抛正确错误码（聚合单测 + 集成测试覆盖）。
         // Given
         Long roleId = 1L;
         AdminRole superAdminRole = new AdminRole("超级管理员", "SUPER_ADMIN", "超级管理员", 0);
 
         when(roleRepository.findById(roleId)).thenReturn(Optional.of(superAdminRole));
 
-        // When & Then
-        assertThatThrownBy(() -> roleManagementAppService.delete(roleId))
-            .isInstanceOf(DomainException.class)
-            .hasMessageContaining(AdminMessage.SUPER_ADMIN_CANNOT_DELETE.message());
+        // When
+        roleManagementAppService.delete(roleId);
+
+        // Then：未查 in-use、直接委托仓储
+        verify(roleRepository, org.mockito.Mockito.never()).isUsedByAnyAdmin(roleId);
+        verify(roleRepository).delete(superAdminRole);
     }
 
     @Test
@@ -419,7 +426,7 @@ class RoleManagementAppServiceTest {
         // Given
         Long roleId = 1L;
         AdminRole role = new AdminRole("管理员", "ADMIN", "系统管理员", 1);
-        RoleResponse response = new RoleResponse(1L, "管理员", "ADMIN", "系统管理员", 1, null, null);
+        RoleResponse response = new RoleResponse(1L, "管理员", "ADMIN", "系统管理员", 1, null, null, null, null, null, null);
 
         when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
         when(adminRoleMapper.convert(role)).thenReturn(response);
@@ -444,6 +451,91 @@ class RoleManagementAppServiceTest {
         assertThatThrownBy(() -> roleManagementAppService.findById(roleId))
             .isInstanceOf(DomainException.class)
             .hasMessageContaining(AdminMessage.ROLE_NOT_FOUND.message());
+    }
+
+    // ========== updateStatus tests ==========
+
+    @Test
+    void given_normal_role_when_updateStatusDisabled_then_roleDisabled() {
+        Long roleId = 1L;
+        AdminRole role = new AdminRole("运营", "OPERATOR", "运营", 1);
+        when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
+
+        roleManagementAppService.updateStatus(roleId, AdminRoleStatus.DISABLED);
+
+        assertThat(role.getStatus()).isEqualTo(AdminRoleStatus.DISABLED);
+        verify(roleRepository).save(role);
+    }
+
+    @Test
+    void given_normal_role_when_updateStatusEnabled_then_roleEnabled() {
+        Long roleId = 1L;
+        AdminRole role = new AdminRole("运营", "OPERATOR", "运营", 1);
+        role.disable();
+        when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
+
+        roleManagementAppService.updateStatus(roleId, AdminRoleStatus.ENABLED);
+
+        assertThat(role.getStatus()).isEqualTo(AdminRoleStatus.ENABLED);
+        verify(roleRepository).save(role);
+    }
+
+    @Test
+    void given_super_admin_role_when_updateStatusDisabled_then_throwException() {
+        // 守卫在聚合 disable()——服务层委托即触发
+        Long roleId = 1L;
+        AdminRole superAdmin = new AdminRole("超级管理员", "SUPER_ADMIN", "超级管理员", 0);
+        when(roleRepository.findById(roleId)).thenReturn(Optional.of(superAdmin));
+
+        assertThatThrownBy(() -> roleManagementAppService.updateStatus(roleId, AdminRoleStatus.DISABLED))
+            .isInstanceOf(DomainException.class)
+            .hasMessageContaining(AdminMessage.SUPER_ADMIN_CANNOT_DISABLE.message());
+    }
+
+    // ========== listEnabledOptions tests ==========
+
+    @Test
+    void given_enabledRoles_when_listEnabledOptions_then_mappedToOptions() {
+        // 仓储已按 status=ENABLED + 未软删 过滤，服务层只做 {id,name,code} 映射
+        AdminRole enabled = new AdminRole("运营", "OPERATOR", "运营", 1);
+        when(roleRepository.findByStatusAndDeletedFalse(AdminRoleStatus.ENABLED))
+            .thenReturn(List.of(enabled));
+
+        var options = roleManagementAppService.listEnabledOptions();
+
+        assertThat(options).containsExactly(
+            new RoleOptionResponse(enabled.getId(), "运营", "OPERATOR"));
+    }
+
+    // ========== assign-empty（清空）tests ==========
+
+    @Test
+    void given_roleWithMenus_when_assignEmptyMenuIds_then_menusCleared() {
+        // 去掉 @NotEmpty 后，空集 = 清空（服务层 clear-then-add）
+        Long roleId = 1L;
+        AdminRole role = new AdminRole("运营", "OPERATOR", "运营", 1);
+        role.addMenu(10L);
+        when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
+        when(menuRepository.findAllById(List.of())).thenReturn(List.of());
+
+        roleManagementAppService.assignMenus(roleId, new AssignMenusCommand(List.of()));
+
+        assertThat(role.getMenuIds()).isEmpty();
+        verify(roleRepository).save(role);
+    }
+
+    @Test
+    void given_roleWithPermissions_when_assignEmptyPermissionCodes_then_permissionsCleared() {
+        Long roleId = 1L;
+        AdminRole role = new AdminRole("运营", "OPERATOR", "运营", 1);
+        role.addPermission("admin:user:read", "查看");
+        when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
+        when(permissionScanner.scanByScope(AdminScopes.ADMIN)).thenReturn(List.of());
+
+        roleManagementAppService.assignPermissions(roleId, new AssignPermissionsCommand(List.of()));
+
+        assertThat(role.getPermissionCodes()).isEmpty();
+        verify(roleRepository).save(role);
     }
 
     /** 便捷构造菜单（Soybean 模型全字段，本测试只关心 id）。 */

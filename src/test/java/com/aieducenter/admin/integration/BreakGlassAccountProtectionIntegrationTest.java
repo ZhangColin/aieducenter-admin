@@ -97,7 +97,7 @@ class BreakGlassAccountProtectionIntegrationTest {
         superAdminRoleId = adminRoleRepository.findByCode(AdminRole.SUPER_ADMIN_CODE)
                 .map(AdminRole::getId)
                 .orElseGet(() -> roleAppService.create(
-                        new CreateRoleCommand("超级管理员", AdminRole.SUPER_ADMIN_CODE, "超级管理员", 0)));
+                        new CreateRoleCommand("超级管理员", AdminRole.SUPER_ADMIN_CODE, "超级管理员", 0, null)));
 
         // 破窗号 admin（保留 ID = 1，按 id 幂等——所有破窗号操作均被拒，不会变更/删除它）
         if (adminUserRepository.findById(AdminUser.BREAK_GLASS_ADMIN_ID).isEmpty()) {
@@ -143,7 +143,7 @@ class BreakGlassAccountProtectionIntegrationTest {
     @DisplayName("从破窗号移除 SUPER_ADMIN 角色 → 403，错误体命中「内置账号必须保留超级管理员角色」")
     void given_breakGlassAdmin_when_assignRolesWithoutSuperAdmin_then_403() {
         Long operatorRoleId = roleAppService.create(
-                new CreateRoleCommand("运营_" + uuidSuffix(), "OPERATOR_" + uuidSuffix(), "运营", 10));
+                new CreateRoleCommand("运营_" + uuidSuffix(), "OPERATOR_" + uuidSuffix(), "运营", 10, null));
         String token = login(callerUsername);
 
         ResponseEntity<String> response = withToken(HttpMethod.PUT,

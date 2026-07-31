@@ -1,5 +1,6 @@
 package com.aieducenter.admin.application.dto.query;
 
+import com.aieducenter.admin.domain.enums.AdminRoleStatus;
 import com.cartisan.data.jpa.specification.Condition;
 import com.cartisan.data.jpa.specification.ConditionType;
 
@@ -18,6 +19,11 @@ public record AdminRoleQuery(
      * 角色编码模糊查询。
      */
     @Condition(type = ConditionType.INNER_LIKE) String code,
+
+    /**
+     * 状态查询（启用/禁用）。
+     */
+    @Condition(type = ConditionType.EQUAL) AdminRoleStatus status,
 
     /**
      * 关键字模糊搜索（角色名称、编码、描述）。

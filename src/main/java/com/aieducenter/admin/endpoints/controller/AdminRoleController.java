@@ -14,7 +14,9 @@ import com.aieducenter.admin.application.dto.command.CreateRoleCommand;
 import com.aieducenter.admin.application.dto.command.UpdateRoleCommand;
 import com.aieducenter.admin.application.dto.query.AdminRoleQuery;
 import com.aieducenter.admin.application.dto.response.RoleResponse;
+import com.aieducenter.admin.application.dto.response.RoleOptionResponse;
 import com.aieducenter.admin.constants.AdminScopes;
+import com.aieducenter.admin.domain.enums.AdminRoleStatus;
 import com.cartisan.security.annotation.RequireAuth;
 import com.cartisan.security.annotation.RequirePermission;
 import com.cartisan.web.response.ApiResponse;
@@ -51,6 +53,18 @@ public class AdminRoleController {
             AdminRoleQuery query,
             @PageableDefault(size = 20) Pageable pageable) {
         return ApiResponse.ok(roleManagementAppService.findAll(query, pageable));
+    }
+
+    @GetMapping("/all")
+    @RequireAuth
+    @RequirePermission(
+        value = "admin:role:read",
+        name = "平台管理 / 角色管理 / 查看",
+        scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "查询启用角色字典（不分页，精简 {id,name,code}）")
+    public ApiResponse<List<RoleOptionResponse>> findAllEnabled() {
+        return ApiResponse.ok(roleManagementAppService.listEnabledOptions());
     }
 
     @GetMapping("/{id}")
@@ -102,6 +116,22 @@ public class AdminRoleController {
     @Operation(summary = "删除角色")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         roleManagementAppService.delete(id);
+        return ApiResponse.ok();
+    }
+
+    @PutMapping("/{id}/status")
+    @RequireAuth
+    @RequirePermission(
+        value = "admin:role:write",
+        name = "平台管理 / 角色管理 / 编辑",
+        scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "修改角色状态")
+    public ApiResponse<Void> updateStatus(
+            @PathVariable Long id,
+            @RequestParam AdminRoleStatus status) {
+        // cartisan-boot 自动转换：?status=1 → AdminRoleStatus.ENABLED / ?status=0 → DISABLED
+        roleManagementAppService.updateStatus(id, status);
         return ApiResponse.ok();
     }
 

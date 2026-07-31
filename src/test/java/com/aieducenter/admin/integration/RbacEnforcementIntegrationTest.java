@@ -95,7 +95,7 @@ class RbacEnforcementIntegrationTest {
         usernameWithoutPermission = "opnone" + suffix;
 
         Long roleId = roleAppService.create(
-                new CreateRoleCommand("用户运营_" + suffix, "USEROP_" + suffix, "仅有用户查看权限", 10));
+                new CreateRoleCommand("用户运营_" + suffix, "USEROP_" + suffix, "仅有用户查看权限", 10, null));
         roleAppService.assignPermissions(roleId, new AssignPermissionsCommand(List.of(PERMISSION_CODE)));
 
         Long userWithPermissionId = userAppService.create(
@@ -124,7 +124,7 @@ class RbacEnforcementIntegrationTest {
         String suffix = uuidSuffix();
         String superAdminUsername = "superadmin" + suffix;
         Long superAdminRoleId = roleAppService.create(
-                new CreateRoleCommand("超管_" + suffix, AdminRole.SUPER_ADMIN_CODE, "超级管理员", 0));
+                new CreateRoleCommand("超管_" + suffix, AdminRole.SUPER_ADMIN_CODE, "超级管理员", 0, null));
         Long superAdminUserId = userAppService.create(
                 new CreateAdminUserCommand(superAdminUsername, PASSWORD, "超管", null, null));
         userAppService.assignRoles(superAdminUserId, new AssignRolesCommand(List.of(superAdminRoleId)));

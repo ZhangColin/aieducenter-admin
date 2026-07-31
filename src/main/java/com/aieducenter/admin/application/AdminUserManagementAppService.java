@@ -206,13 +206,16 @@ public class AdminUserManagementAppService {
                 AdminMessage.ADMIN_NOT_FOUND
         );
 
+        // 空集 = 清空（去掉 @NotEmpty 后，null 归一为空集，clear-then-add 支持清空）
+        List<Long> roleIds = command.roleIds() == null ? List.of() : command.roleIds();
+
         // 验证所有角色 ID 存在（批量查询避免 N+1）
-        Set<Long> existingRoleIds = adminRoleRepository.findAllById(command.roleIds())
+        Set<Long> existingRoleIds = adminRoleRepository.findAllById(roleIds)
                 .stream()
                 .map(AdminRole::getId)
                 .collect(Collectors.toSet());
 
-        if (!CollUtil.containsAll(existingRoleIds, command.roleIds())) {
+        if (!CollUtil.containsAll(existingRoleIds, roleIds)) {
             throw new ApplicationException(AdminMessage.ROLE_NOT_FOUND);
         }
 
@@ -222,7 +225,7 @@ public class AdminUserManagementAppService {
             Long superAdminRoleId = adminRoleRepository.findByCode(AdminRole.SUPER_ADMIN_CODE)
                     .map(AdminRole::getId)
                     .orElse(null);
-            require(command.roleIds().contains(superAdminRoleId),
+            require(roleIds.contains(superAdminRoleId),
                     AdminMessage.BREAK_GLASS_SUPER_ADMIN_REQUIRED);
         }
 
@@ -230,7 +233,7 @@ public class AdminUserManagementAppService {
         adminUser.clearRoles();
 
         // 添加新角色关联
-        for (Long roleId : command.roleIds()) {
+        for (Long roleId : roleIds) {
             adminUser.addRole(roleId);
         }
 

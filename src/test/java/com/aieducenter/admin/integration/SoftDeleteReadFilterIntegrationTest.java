@@ -103,7 +103,7 @@ class SoftDeleteReadFilterIntegrationTest {
     void given_softDeletedRole_when_readPaths_then_filteredOutAndDbFlagSet() {
         // REQ-5 评论实测 Role 同样中招；启动日志已见 Contributor 为 AdminRole 注册过滤，此处运行时坐实
         String code = "SDR" + UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
-        Long roleId = roleAppService.create(new CreateRoleCommand("软删角色_" + code, code, "验证 Role 读过滤", 99));
+        Long roleId = roleAppService.create(new CreateRoleCommand("软删角色_" + code, code, "验证 Role 读过滤", 99, null));
 
         // 经仓储直接软删（绕过应用层「使用中不可删」守卫，聚焦读路径）
         adminRoleRepository.delete(adminRoleRepository.findById(roleId).orElseThrow());

@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.aieducenter.admin.domain.aggregate.AdminRole;
+import com.aieducenter.admin.domain.enums.AdminRoleStatus;
 import com.cartisan.data.jpa.repository.BaseRepository;
 
 /**
@@ -18,6 +19,12 @@ import com.cartisan.data.jpa.repository.BaseRepository;
 public interface AdminRoleRepository extends BaseRepository<AdminRole, Long> {
 
     Optional<AdminRole> findByCode(String code);
+
+    /**
+     * 按状态查询未软删角色（{@code GET /roles/all} 字典：仅启用）。显式 {@code DeletedFalse}
+     * （框架级软删读过滤当前不生效，见 cartisan-boot#2）。
+     */
+    List<AdminRole> findByStatusAndDeletedFalse(AdminRoleStatus status);
 
     /**
      * 批量按 id 查询未软删角色。

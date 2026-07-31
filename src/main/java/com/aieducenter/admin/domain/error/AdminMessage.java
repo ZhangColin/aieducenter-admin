@@ -117,6 +117,11 @@ public enum AdminMessage implements CodeMessage {
      */
     SUPER_ADMIN_CANNOT_DELETE(403, "ADMIN_013_1", "超级管理员角色不能删除"),
 
+    /**
+     * 超级管理员角色不能禁用（破窗韧性：保破窗号所挂的全权救援角色永不失效，ADR-0003 修订）。
+     */
+    SUPER_ADMIN_CANNOT_DISABLE(403, "ADMIN_013_2", "超级管理员角色不能禁用"),
+
     // ========== 破窗账号（运维韧性）限制 (403) ==========
     // 内置 admin（保留 ID = 1）不可删/不可禁、可改密；授权仍走其挂的 SUPER_ADMIN 角色。
     // 识别按保留 ID（AdminUser.BREAK_GLASS_ADMIN_ID），不靠列。详见 CONTEXT.md「破窗账号」。

@@ -1,8 +1,13 @@
 package com.aieducenter.admin.domain.aggregate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
+
+import com.aieducenter.admin.domain.enums.AdminRoleStatus;
+import com.aieducenter.admin.domain.error.AdminMessage;
+import com.cartisan.core.exception.DomainException;
 
 /**
  * AdminRole 测试。
@@ -86,5 +91,75 @@ class AdminRoleTest {
 
         // When & Then
         assertThat(role.isSuperAdmin()).isFalse();
+    }
+
+    // ========== 状态（启用/禁用）==========
+
+    @Test
+    void given_new_role_when_create_then_status_enabled() {
+        AdminRole role = new AdminRole("管理员", "ADMIN", "系统管理员", 1);
+
+        assertThat(role.getStatus()).isEqualTo(AdminRoleStatus.ENABLED);
+    }
+
+    @Test
+    void given_enabled_role_when_disable_then_status_disabled() {
+        AdminRole role = new AdminRole("管理员", "ADMIN", "系统管理员", 1);
+
+        role.disable();
+
+        assertThat(role.getStatus()).isEqualTo(AdminRoleStatus.DISABLED);
+    }
+
+    @Test
+    void given_disabled_role_when_enable_then_status_enabled() {
+        AdminRole role = new AdminRole("管理员", "ADMIN", "系统管理员", 1);
+        role.disable();
+
+        role.enable();
+
+        assertThat(role.getStatus()).isEqualTo(AdminRoleStatus.ENABLED);
+    }
+
+    @Test
+    void given_home_when_setHome_then_round_trip() {
+        AdminRole role = new AdminRole("管理员", "ADMIN", "系统管理员", 1);
+
+        role.setHome("home");
+
+        assertThat(role.getHome()).isEqualTo("home");
+    }
+
+    // ========== SUPER_ADMIN 角色守卫（破窗韧性，ADR-0003 修订）==========
+
+    @Test
+    void given_super_admin_role_when_disable_then_throwAndStatusUnchanged() {
+        AdminRole superAdmin = new AdminRole("超级管理员", "SUPER_ADMIN", "超级管理员", 0);
+
+        assertThatThrownBy(superAdmin::disable)
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining(AdminMessage.SUPER_ADMIN_CANNOT_DISABLE.message());
+        // 不可禁 → 状态保持 ENABLED
+        assertThat(superAdmin.getStatus()).isEqualTo(AdminRoleStatus.ENABLED);
+    }
+
+    @Test
+    void given_super_admin_role_when_markAsDeleted_then_throwAndNotDeleted() {
+        AdminRole superAdmin = new AdminRole("超级管理员", "SUPER_ADMIN", "超级管理员", 0);
+
+        assertThatThrownBy(superAdmin::markAsDeleted)
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining(AdminMessage.SUPER_ADMIN_CANNOT_DELETE.message());
+        // 不可删 → 软删标记不应置位
+        assertThat(superAdmin.isDeleted()).isFalse();
+    }
+
+    @Test
+    void given_normal_role_when_markAsDeleted_then_markedDeleted() {
+        AdminRole role = new AdminRole("管理员", "ADMIN", "系统管理员", 1);
+
+        role.markAsDeleted();
+
+        assertThat(role.isDeleted()).isTrue();
     }
 }
