@@ -8,10 +8,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.annotation.DirtiesContext;
 
+import com.aieducenter.admin.application.MenuManagementAppService;
 import com.aieducenter.admin.application.RoleManagementAppService;
 import com.aieducenter.admin.application.dto.command.CreateRoleCommand;
+import com.aieducenter.admin.application.dto.query.MenuQuery;
+import com.aieducenter.admin.application.dto.response.MenuResponse;
 import com.aieducenter.admin.domain.aggregate.AdminMenu;
 import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.domain.aggregate.AdminUser;
@@ -19,6 +23,7 @@ import com.aieducenter.admin.domain.enums.MenuType;
 import com.aieducenter.admin.domain.repository.AdminMenuRepository;
 import com.aieducenter.admin.domain.repository.AdminRoleRepository;
 import com.aieducenter.admin.domain.repository.AdminUserRepository;
+import com.cartisan.web.response.PageResponse;
 
 import jakarta.persistence.EntityManager;
 
@@ -61,6 +66,9 @@ class SoftDeleteReadFilterIntegrationTest {
 
     @Autowired
     private AdminMenuRepository adminMenuRepository;
+
+    @Autowired
+    private MenuManagementAppService menuAppService;
 
     @Test
     @DisplayName("软删后 findById 为空、findAll 不含、DB deleted=true（读过滤真实生效）")
@@ -138,6 +146,61 @@ class SoftDeleteReadFilterIntegrationTest {
                 .getSingleResult();
         assertThat(deletedFlag)
                 .as("Menu DB deleted 标志应已置为 true")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("扁平分页 findAll(spec, pageable) 过滤软删行（issue #15 AC#2/#4）")
+    void given_softDeletedMenu_when_findAllPaginated_then_filteredOutAndPageCorrect() {
+        // 唯一前缀：默认测试库 ddl-auto=create、无 Flyway 种子，但同一 ApplicationContext 下
+        // 可能有本类其它方法残留；用 UUID 前缀 + menuName INNER_LIKE 把分页范围精确锁到本例 3 条。
+        String prefix = "pagsd" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+
+        // 种 3 条扁平菜单：一对父子（证明扁平——父子各计一条，非树组装）+ 一条独立菜单
+        AdminMenu parent = adminMenuRepository.save(new AdminMenu(
+                prefix + "_p", prefix + "_p", "/" + prefix + "_p", null, null, null,
+                null, 0, MenuType.DIRECTORY, null, false, false, false, false,
+                null, null, null, null, null));
+        AdminMenu child = adminMenuRepository.save(new AdminMenu(
+                prefix + "_c", prefix + "_c", "/" + prefix + "_c", null, null, null,
+                parent.getId(), 0, MenuType.MENU, null, false, false, false, false,
+                null, null, null, null, null));
+        AdminMenu lone = adminMenuRepository.save(new AdminMenu(
+                prefix + "_l", prefix + "_l", "/" + prefix + "_l", null, null, null,
+                null, 0, MenuType.MENU, null, false, false, false, false,
+                null, null, null, null, null));
+
+        // 软删子菜单（走框架 BaseRepositoryImpl.delete → markAsDeleted + save，方法内事务即提交）
+        adminMenuRepository.delete(child);
+
+        // 扁平分页：menuName INNER_LIKE 前缀 → 锁定本例 3 条；请求 page=0（0-based）、size=10
+        PageResponse<MenuResponse> page = menuAppService.findAll(
+                new MenuQuery(prefix, null, null, null),
+                PageRequest.of(0, 10));
+
+        // AC#2/#4：软删行被分页查询过滤——3 条中删 1 条 → total=2、items 不含子菜单
+        assertThat(page.total())
+                .as("扁平分页应过滤软删行，total=2（父 + 独立）")
+                .isEqualTo(2);
+        assertThat(page.items())
+                .as("items 应为 2 条扁平菜单（父子各计一条，非树组装），且不含软删的子菜单")
+                .hasSize(2)
+                .extracting(MenuResponse::menuName)
+                .containsExactlyInAnyOrder(prefix + "_p", prefix + "_l");
+        // AC#1：PageResponse 外壳——响应 page 为 1-based（请求 0-based page=0 + 1，对齐 /users /roles）、size 透传
+        assertThat(page.page())
+                .as("响应 page 为 1-based（请求 page=0 → 响应 page=1，对齐 /users /roles）")
+                .isEqualTo(1);
+        assertThat(page.size()).isEqualTo(10);
+
+        // 反向证据：原生 SQL 直查（不经 Hibernate SQL 生成）确认子菜单 deleted 已置位——
+        // 证明是「读过滤生效」而非「软删没写成功」的假阳性（沿用本类既有 menu 用例的钉法）
+        Boolean deletedFlag = (Boolean) entityManager
+                .createNativeQuery("SELECT deleted FROM sys_admin_menus WHERE id = :id")
+                .setParameter("id", child.getId())
+                .getSingleResult();
+        assertThat(deletedFlag)
+                .as("子菜单 deleted 标志应已置为 true（排除「删除没成功」的假阳性）")
                 .isTrue();
     }
 }
