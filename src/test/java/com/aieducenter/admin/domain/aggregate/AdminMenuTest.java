@@ -1,169 +1,165 @@
 package com.aieducenter.admin.domain.aggregate;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import com.aieducenter.admin.domain.entity.MenuQueryParam;
+import com.aieducenter.admin.domain.enums.AdminUserStatus;
+import com.aieducenter.admin.domain.enums.MenuIconType;
 import com.aieducenter.admin.domain.enums.MenuType;
-import com.aieducenter.admin.domain.error.AdminMessage;
-import com.cartisan.core.exception.DomainException;
 
 /**
- * AdminMenu 聚合根测试。
+ * AdminMenu 聚合根测试（Soybean 路由生成器模型）。
  */
 class AdminMenuTest {
 
     @Test
-    void given_valid_input_when_create_menu_then_success() {
+    void given_full_soybean_fields_when_create_menu_then_all_fields_set() {
         // When
-        AdminMenu menu = new AdminMenu("用户管理", "/users", "user", null, 1);
+        AdminMenu menu = new AdminMenu(
+                "用户管理", "manage_user", "/manage/user", "view.manage_user",
+                "mdi:account", MenuIconType.ICONIFY, 60L, 1, MenuType.MENU,
+                "route.manage_user", true, false, true, false,
+                null, null, 2,
+                List.of(new MenuQueryParam("id", "1")), AdminUserStatus.ACTIVE);
 
         // Then
-        assertThat(menu.getName()).isEqualTo("用户管理");
-        assertThat(menu.getPath()).isEqualTo("/users");
-        assertThat(menu.getIcon()).isEqualTo("user");
-        assertThat(menu.getParentId()).isNull();
+        assertThat(menu.getMenuName()).isEqualTo("用户管理");
+        assertThat(menu.getRouteName()).isEqualTo("manage_user");
+        assertThat(menu.getRoutePath()).isEqualTo("/manage/user");
+        assertThat(menu.getComponent()).isEqualTo("view.manage_user");
+        assertThat(menu.getIcon()).isEqualTo("mdi:account");
+        assertThat(menu.getIconType()).isEqualTo(MenuIconType.ICONIFY);
+        assertThat(menu.getParentId()).isEqualTo(60L);
         assertThat(menu.getSortOrder()).isEqualTo(1);
-        assertThat(menu.getType()).isEqualTo(MenuType.MENU);
+        assertThat(menu.getMenuType()).isEqualTo(MenuType.MENU);
+        assertThat(menu.getI18nKey()).isEqualTo("route.manage_user");
+        assertThat(menu.isKeepAlive()).isTrue();
+        assertThat(menu.isConstant()).isFalse();
+        assertThat(menu.isMultiTab()).isTrue();
+        assertThat(menu.isHideInMenu()).isFalse();
+        assertThat(menu.getFixedIndexInTab()).isEqualTo(2);
+        assertThat(menu.getQuery()).containsExactly(new MenuQueryParam("id", "1"));
+        assertThat(menu.getStatus()).isEqualTo(AdminUserStatus.ACTIVE);
+    }
+
+    @Test
+    void given_omitted_optionals_when_create_then_defaults_applied() {
+        // When（iconType/menuType/status/query/sortOrder 全缺省）
+        AdminMenu menu = menu("用户管理", "manage_user", "/manage/user", null, null, null);
+
+        // Then
+        assertThat(menu.getMenuType()).isEqualTo(MenuType.MENU);     // 缺省 menu
+        assertThat(menu.getIconType()).isEqualTo(MenuIconType.ICONIFY); // 缺省 iconify
+        assertThat(menu.getStatus()).isEqualTo(AdminUserStatus.ACTIVE);  // 缺省启用
+        assertThat(menu.getSortOrder()).isZero();                    // 缺省 0
+        assertThat(menu.isKeepAlive()).isFalse();
+        assertThat(menu.isConstant()).isFalse();
+        assertThat(menu.isMultiTab()).isFalse();
+        assertThat(menu.isHideInMenu()).isFalse();
+        assertThat(menu.getQuery()).isEmpty();                       // 缺省空集合
+    }
+
+    @Test
+    void given_directory_type_when_create_then_menuType_directory() {
+        AdminMenu dir = menu("系统管理", "manage", "/manage", null, 2, MenuType.DIRECTORY);
+
+        assertThat(dir.getMenuType()).isEqualTo(MenuType.DIRECTORY);
+        assertThat(dir.getRoutePath()).isEqualTo("/manage"); // directory 也可带 path（Soybean 语义，后端不强制）
     }
 
     @Test
     void given_root_menu_when_isRoot_then_true() {
-        // Given
-        AdminMenu menu = new AdminMenu("用户管理", "/users", "user", null, 1);
-
-        // When & Then
-        assertThat(menu.isRoot()).isTrue();
+        assertThat(menu("用户管理", "manage_user", "/manage/user", null, 1, MenuType.MENU).isRoot()).isTrue();
     }
 
     @Test
     void given_child_menu_when_isRoot_then_false() {
-        // Given
-        AdminMenu menu = new AdminMenu("用户列表", "/users/list", "list", 1L, 1);
-
-        // When & Then
-        assertThat(menu.isRoot()).isFalse();
+        assertThat(menu("用户列表", "manage_user_list", "/manage/user/list", 1L, 1, MenuType.MENU).isRoot()).isFalse();
     }
 
     @Test
     void given_menu_when_addChild_then_childAdded() {
-        // Given
-        AdminMenu parent = new AdminMenu("用户管理", "/users", "user", null, 1);
-        AdminMenu child = new AdminMenu("用户列表", "/users/list", "list", 1L, 1);
+        AdminMenu parent = menu("用户管理", "manage_user", "/manage/user", null, 1, MenuType.MENU);
+        AdminMenu child = menu("详情", "manage_user_detail", "/manage/user/detail", 1L, 1, MenuType.MENU);
 
-        // When
         parent.addChild(child);
 
-        // Then
         assertThat(parent.getChildren()).containsExactly(child);
     }
 
     @Test
     void given_null_children_when_setChildren_then_emptyList() {
-        // Given
-        AdminMenu menu = new AdminMenu("用户管理", "/users", "user", null, 1);
+        AdminMenu menu = menu("用户管理", "manage_user", "/manage/user", null, 1, MenuType.MENU);
 
-        // When
         menu.setChildren(null);
 
-        // Then
         assertThat(menu.getChildren()).isNotNull().isEmpty();
     }
 
     @Test
-    void given_menuType_when_setType_then_typeUpdated() {
-        // Given
-        AdminMenu menu = new AdminMenu("用户管理", "/users", "user", null, 1);
-
-        // When
-        menu.setType(MenuType.GROUP);
-
-        // Then
-        assertThat(menu.getType()).isEqualTo(MenuType.GROUP);
-    }
-
-    @Test
-    void given_null_type_when_setType_then_defaultToMenu() {
-        // Given
-        AdminMenu menu = new AdminMenu("用户管理", "/users", "user", null, 1);
-
-        // When
-        menu.setType(null);
-
-        // Then
-        assertThat(menu.getType()).isEqualTo(MenuType.MENU);
-    }
-
-    @Test
     void given_menu_with_children_when_setChildren_then_childrenReplaced() {
-        // Given
-        AdminMenu parent = new AdminMenu("用户管理", "/users", "user", null, 1);
-        AdminMenu child1 = new AdminMenu("用户列表", "/users/list", "list", 1L, 1);
-        AdminMenu child2 = new AdminMenu("用户添加", "/users/add", "add", 1L, 2);
+        AdminMenu parent = menu("用户管理", "manage_user", "/manage/user", null, 1, MenuType.MENU);
+        AdminMenu child1 = menu("列表", "manage_user_list", "/manage/user/list", 1L, 1, MenuType.MENU);
+        AdminMenu child2 = menu("新增", "manage_user_add", "/manage/user/add", 1L, 2, MenuType.MENU);
         parent.addChild(child1);
 
-        // When
         parent.setChildren(List.of(child2));
 
-        // Then
         assertThat(parent.getChildren()).containsExactly(child2);
     }
 
-    // ========== T2: type↔path 不变量（聚合内强制） ==========
-
     @Test
-    void given_menuType_without_path_when_construct_then_throw_admin014_3() {
-        // MENU 类型必须有非空 path；null 或空白都拒绝
-        assertThatThrownBy(() -> new AdminMenu("用户管理", null, "user", null, 1, MenuType.MENU))
-                .isInstanceOf(DomainException.class)
-                .extracting("codeMessage")
-                .isEqualTo(AdminMessage.MENU_TYPE_PATH_MISMATCH);
-        assertThatThrownBy(() -> new AdminMenu("用户管理", "   ", "user", null, 1, MenuType.MENU))
-                .isInstanceOf(DomainException.class)
-                .extracting("codeMessage")
-                .isEqualTo(AdminMessage.MENU_TYPE_PATH_MISMATCH);
+    void given_setMenuType_when_null_then_default_menu() {
+        AdminMenu menu = menu("用户管理", "manage_user", "/manage/user", null, 1, MenuType.DIRECTORY);
+
+        menu.setMenuType(null);
+
+        assertThat(menu.getMenuType()).isEqualTo(MenuType.MENU);
     }
 
     @Test
-    void given_group_or_divider_when_construct_then_path_normalized_to_null() {
-        // GROUP / DIVIDER 的 path 无意义，无论传入什么都归一为 null
-        AdminMenu group = new AdminMenu("分组", "/ignored", null, null, 1, MenuType.GROUP);
-        assertThat(group.getType()).isEqualTo(MenuType.GROUP);
-        assertThat(group.getPath()).isNull();
-
-        AdminMenu divider = new AdminMenu("--", null, null, null, 2, MenuType.DIVIDER);
-        assertThat(divider.getType()).isEqualTo(MenuType.DIVIDER);
-        assertThat(divider.getPath()).isNull();
+    void given_active_status_when_isEnabled_then_true() {
+        AdminMenu menu = menu("用户管理", "manage_user", "/manage/user", null, 1, MenuType.MENU);
+        assertThat(menu.isEnabled()).isTrue();
     }
 
     @Test
-    void given_omitted_type_when_construct_5arg_then_menu_with_path() {
-        // 旧 5 参构造：type 缺省 → MENU，path 正常保留
-        AdminMenu menu = new AdminMenu("用户管理", "/users", "user", null, 1);
-        assertThat(menu.getType()).isEqualTo(MenuType.MENU);
-        assertThat(menu.getPath()).isEqualTo("/users");
+    void given_updateDetails_when_update_then_all_fields_replaced() {
+        AdminMenu menu = menu("旧名", "old", "/old", null, 1, MenuType.MENU);
+
+        menu.updateDetails(
+                "新名", "manage_user", "/manage/user", "view.manage_user",
+                "mdi:account", MenuIconType.LOCAL, 60L, 3, MenuType.MENU,
+                "route.manage_user", true, true, false, true,
+                "manage", "/ext", 1,
+                List.of(new MenuQueryParam("tab", "detail")), AdminUserStatus.DISABLED);
+
+        assertThat(menu.getMenuName()).isEqualTo("新名");
+        assertThat(menu.getRouteName()).isEqualTo("manage_user");
+        assertThat(menu.getRoutePath()).isEqualTo("/manage/user");
+        assertThat(menu.getComponent()).isEqualTo("view.manage_user");
+        assertThat(menu.getIconType()).isEqualTo(MenuIconType.LOCAL);
+        assertThat(menu.getSortOrder()).isEqualTo(3);
+        assertThat(menu.isKeepAlive()).isTrue();
+        assertThat(menu.isConstant()).isTrue();
+        assertThat(menu.isHideInMenu()).isTrue();
+        assertThat(menu.getActiveMenu()).isEqualTo("manage");
+        assertThat(menu.getHref()).isEqualTo("/ext");
+        assertThat(menu.getStatus()).isEqualTo(AdminUserStatus.DISABLED);
+        assertThat(menu.isEnabled()).isFalse();
     }
 
-    @Test
-    void given_updateDetails_to_menu_without_path_when_update_then_throw() {
-        AdminMenu menu = new AdminMenu("用户管理", "/users", "user", null, 1);
+    // ========== helper ==========
 
-        assertThatThrownBy(() -> menu.updateDetails("用户管理", null, "user", null, 1, MenuType.MENU))
-                .isInstanceOf(DomainException.class)
-                .extracting("codeMessage")
-                .isEqualTo(AdminMessage.MENU_TYPE_PATH_MISMATCH);
-    }
-
-    @Test
-    void given_updateDetails_to_group_then_path_normalized_to_null() {
-        AdminMenu menu = new AdminMenu("用户管理", "/users", "user", null, 1);
-
-        menu.updateDetails("分组", "/whatever", "icon", null, 1, MenuType.GROUP);
-
-        assertThat(menu.getType()).isEqualTo(MenuType.GROUP);
-        assertThat(menu.getPath()).isNull();
+    /** 便捷构造：仅指定关键字段，其余缺省（iconType/menuType/status 等交由聚合归一）。 */
+    private static AdminMenu menu(String menuName, String routeName, String routePath,
+                                  Long parentId, Integer sortOrder, MenuType menuType) {
+        return new AdminMenu(menuName, routeName, routePath, null, null, null,
+                parentId, sortOrder, menuType, null, false, false, false, false,
+                null, null, null, null, null);
     }
 }

@@ -27,6 +27,7 @@ import com.aieducenter.admin.application.dto.command.UpdatePasswordCommand;
 import com.aieducenter.admin.application.dto.response.AdminUserResponse;
 import com.aieducenter.admin.application.dto.response.CurrentUserResponse;
 import com.aieducenter.admin.application.dto.response.MenuResponse;
+import com.aieducenter.admin.domain.enums.MenuType;
 import com.aieducenter.admin.domain.enums.AdminUserStatus;
 import com.cartisan.core.context.RequestContext;
 import com.cartisan.security.authentication.TokenInfo;
@@ -98,7 +99,10 @@ class AdminAuthControllerTest {
                 AdminUserStatus.ACTIVE, null, true, null, null, null);
         List<String> roleCodes = List.of("SUPER_ADMIN");
         List<String> permissions = List.of("admin:user:read", "admin:user:write");
-        List<MenuResponse> menus = List.of(new MenuResponse(1L, "用户管理", "/users", "user", null, 1, null));
+        List<MenuResponse> menus = List.of(new MenuResponse(
+                1L, "用户管理", "manage_user", "/users", null, null, null, null, 1,
+                MenuType.MENU, null, false, false, false, false, null, null, null, null, null,
+                null, null, null));
 
         when(adminAuthAppService.getCurrentAdmin(TEST_USER_ID))
                 .thenReturn(new CurrentUserResponse(user, roleCodes, menus, permissions));

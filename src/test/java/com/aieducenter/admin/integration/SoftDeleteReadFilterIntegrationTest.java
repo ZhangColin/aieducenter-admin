@@ -12,8 +12,11 @@ import org.springframework.test.annotation.DirtiesContext;
 
 import com.aieducenter.admin.application.RoleManagementAppService;
 import com.aieducenter.admin.application.dto.command.CreateRoleCommand;
+import com.aieducenter.admin.domain.aggregate.AdminMenu;
 import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.domain.aggregate.AdminUser;
+import com.aieducenter.admin.domain.enums.MenuType;
+import com.aieducenter.admin.domain.repository.AdminMenuRepository;
 import com.aieducenter.admin.domain.repository.AdminRoleRepository;
 import com.aieducenter.admin.domain.repository.AdminUserRepository;
 
@@ -55,6 +58,9 @@ class SoftDeleteReadFilterIntegrationTest {
 
     @Autowired
     private AdminRoleRepository adminRoleRepository;
+
+    @Autowired
+    private AdminMenuRepository adminMenuRepository;
 
     @Test
     @DisplayName("软删后 findById 为空、findAll 不含、DB deleted=true（读过滤真实生效）")
@@ -106,6 +112,32 @@ class SoftDeleteReadFilterIntegrationTest {
                 .getSingleResult();
         assertThat(deletedFlag)
                 .as("Role DB deleted 标志应已置为 true")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("Menu 聚合软删读过滤同样生效（issue #13 回归）")
+    void given_softDeletedMenu_when_readPaths_then_filteredOutAndDbFlagSet() {
+        // 菜单模型切到 Soybean 后，确认三聚合共用同一读过滤 Contributor 在 Menu 上也生效
+        AdminMenu menu = adminMenuRepository.save(new AdminMenu("软删菜单", "sd_menu", "/sd", null, null, null,
+                null, 0, MenuType.MENU, null, false, false, false, false,
+                null, null, null, null, null));
+        Long id = menu.getId();
+
+        adminMenuRepository.delete(adminMenuRepository.findById(id).orElseThrow());
+
+        assertThat(adminMenuRepository.findById(id))
+                .as("Menu findById 应过滤已软删记录")
+                .isEmpty();
+        assertThat(adminMenuRepository.findAll().stream().map(AdminMenu::getMenuName))
+                .as("Menu findAll 应过滤已软删记录")
+                .doesNotContain("软删菜单");
+        Boolean deletedFlag = (Boolean) entityManager
+                .createNativeQuery("SELECT deleted FROM sys_admin_menus WHERE id = :id")
+                .setParameter("id", id)
+                .getSingleResult();
+        assertThat(deletedFlag)
+                .as("Menu DB deleted 标志应已置为 true")
                 .isTrue();
     }
 }

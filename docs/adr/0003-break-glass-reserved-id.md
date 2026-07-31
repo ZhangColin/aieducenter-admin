@@ -47,6 +47,10 @@
 - ✅ `AdminUserResponse.breakGlass` 供前端平滑跟进（增量、向后兼容）。
 - ✅ Bug ④（登录写 userName）框架根因已修（cartisan-boot commit `efcb1e7` 破坏性补全 `login` 签名）、admin 已迁到新签名并删 `StpUtil` workaround，见 CONTEXT.md 决策记录。
 
+## 修订（2026-07-31，REQ-10）
+
+补全破窗韧性的最后一环：**`SUPER_ADMIN` 角色自身不可禁用、不可删除**。原 ADR 守住了"破窗号用户不可删/不可禁"与"不许从破窗号移除 SUPER_ADMIN 绑定"，但未守"SUPER_ADMIN 角色被禁/被删"这条路径——禁用/删除该角色会使破窗号虽在、救援角色失效，同样锁死。故 `AdminRole` 加 guard（错误码 `SUPER_ADMIN_CANNOT_DISABLE` / `SUPER_ADMIN_CANNOT_DELETE`，仿 `AdminUser` 破窗号 guard）。普通角色启停不受影响（语义跟 Soybean）。详见 [CONTEXT.md「破窗账号」](../../CONTEXT.md)。
+
 ## 参见
 
 - 工作原则 memory：`framework-gaps-raise-requirement`。

@@ -13,9 +13,9 @@ import com.aieducenter.admin.domain.aggregate.AdminMenu;
 import com.aieducenter.admin.domain.enums.MenuType;
 
 /**
- * MenuTreeAssembler 纯单测：排序 / 祖先链补全 / 裁剪（空 GROUP、悬空 DIVIDER）/ 管理视图不裁。
+ * MenuTreeAssembler 纯单测（Soybean directory/menu 模型）：排序 / 祖先链补全 / 裁空 directory / 管理视图不裁。
  *
- * <p>不依赖 Spring 与 DB——直接构造 AdminMenu 喂给纯函数。</p>
+ * <p>不依赖 Spring 与 DB——直接构造 AdminMenu 喂给纯函数。DIVIDER 概念已随 ADR-0004 移除。</p>
  */
 @DisplayName("MenuTreeAssembler 菜单树组装")
 class MenuTreeAssemblerTest {
@@ -46,11 +46,11 @@ class MenuTreeAssemblerTest {
 
     @Test
     void given_leaf_assigned_but_parent_not_when_assemble_filtered_then_ancestor_chain_completed() {
-        AdminMenu root = menu("root", null, MenuType.GROUP, null, 0, 1L);
-        AdminMenu group = menu("group", null, MenuType.GROUP, 1L, 0, 2L);
+        AdminMenu root = menu("root", null, MenuType.DIRECTORY, null, 0, 1L);
+        AdminMenu dir = menu("dir", null, MenuType.DIRECTORY, 1L, 0, 2L);
         AdminMenu leaf = menu("leaf", "/x", MenuType.MENU, 2L, 0, 3L);
 
-        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, group, leaf), Set.of(3L));
+        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, dir, leaf), Set.of(3L));
 
         assertThat(roots).hasSize(1);
         assertThat(roots.get(0).getId()).isEqualTo(1L);
@@ -60,83 +60,47 @@ class MenuTreeAssemblerTest {
     }
 
     @Test
-    void given_empty_group_assigned_when_assemble_filtered_then_trimmed() {
-        AdminMenu root = menu("root", null, MenuType.GROUP, null, 0, 1L);
-        AdminMenu emptyGroup = menu("empty", null, MenuType.GROUP, 1L, 0, 2L); // 无子
+    void given_empty_directory_assigned_when_assemble_filtered_then_trimmed() {
+        // 空目录（无可见子）在消费侧裁掉，并级联收敛父
+        AdminMenu root = menu("root", null, MenuType.DIRECTORY, null, 0, 1L);
+        AdminMenu emptyDir = menu("empty", null, MenuType.DIRECTORY, 1L, 0, 2L); // 无子
 
-        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, emptyGroup), Set.of(2L));
-
-        assertThat(roots).isEmpty();
-    }
-
-    @Test
-    void given_dangling_divider_when_assemble_filtered_then_trimmed() {
-        AdminMenu root = menu("root", null, MenuType.GROUP, null, 0, 1L);
-        AdminMenu divider = menu("--", null, MenuType.DIVIDER, 1L, 0, 2L); // 无内容兄弟
-
-        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, divider), Set.of(2L));
+        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, emptyDir), Set.of(2L));
 
         assertThat(roots).isEmpty();
     }
 
     @Test
-    void given_two_adjacent_dividers_without_content_when_assemble_filtered_then_both_trimmed() {
-        AdminMenu root = menu("root", null, MenuType.GROUP, null, 0, 1L);
-        AdminMenu d1 = menu("--", null, MenuType.DIVIDER, 1L, 0, 2L);
-        AdminMenu d2 = menu("--", null, MenuType.DIVIDER, 1L, 1, 3L);
+    void given_directory_with_surviving_menu_when_assemble_filtered_then_kept() {
+        AdminMenu root = menu("root", null, MenuType.DIRECTORY, null, 0, 1L);
+        AdminMenu dir = menu("dir", null, MenuType.DIRECTORY, 1L, 0, 2L);
+        AdminMenu leaf = menu("leaf", "/x", MenuType.MENU, 2L, 0, 3L);
 
-        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, d1, d2), Set.of(2L, 3L));
+        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, dir, leaf), Set.of(3L));
 
-        assertThat(roots).isEmpty();
-    }
-
-    @Test
-    void given_divider_not_assigned_but_between_assigned_menus_when_assemble_filtered_then_auto_kept() {
-        // B：分隔线不分配——只要父容器可见、两侧有被分配的 MENU，就按结构自动出现
-        AdminMenu root = menu("root", null, MenuType.GROUP, null, 0, 1L);
-        AdminMenu a = menu("A", "/a", MenuType.MENU, 1L, 1, 2L);
-        AdminMenu divider = menu("--", null, MenuType.DIVIDER, 1L, 2, 3L);
-        AdminMenu b = menu("B", "/b", MenuType.MENU, 1L, 3, 4L);
-
-        // 只分配两个 MENU（分隔线 id 3 不在 menuIds）
-        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, a, divider, b), Set.of(2L, 4L));
-
-        assertThat(roots).hasSize(1);
-        assertThat(roots.get(0).getChildren()).extracting(AdminMenu::getId)
-                .containsExactly(2L, 3L, 4L); // 分隔线自动补在两个 MENU 之间
-    }
-
-    @Test
-    void given_divider_with_content_only_on_one_side_when_assemble_filtered_then_kept() {
-        // 钉死行为：分隔线只要有任一侧可见内容即保留（前导/尾随分隔线不在本规则裁剪范围）
-        AdminMenu root = menu("root", null, MenuType.GROUP, null, 0, 1L);
-        AdminMenu a = menu("A", "/a", MenuType.MENU, 1L, 1, 2L);
-        AdminMenu divider = menu("--", null, MenuType.DIVIDER, 1L, 2, 3L); // 后面无内容
-
-        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, a, divider), Set.of(2L));
-
-        assertThat(roots).hasSize(1);
-        assertThat(roots.get(0).getChildren()).extracting(AdminMenu::getId)
-                .containsExactly(2L, 3L); // 分隔线靠 a 这个内容兄弟保留（尾随）
+        // dir 因有存活子 leaf 而保留
+        assertThat(roots.get(0).getChildren()).extracting(AdminMenu::getId).containsExactly(2L);
+        assertThat(roots.get(0).getChildren().get(0).getChildren()).extracting(AdminMenu::getId)
+                .containsExactly(3L);
     }
 
     @Test
     void given_admin_view_when_assemble_then_no_trim() {
-        AdminMenu root = menu("root", null, MenuType.GROUP, null, 0, 1L);
-        AdminMenu emptyGroup = menu("empty", null, MenuType.GROUP, 1L, 0, 2L);
-        AdminMenu divider = menu("--", null, MenuType.DIVIDER, 1L, 1, 3L);
+        // 管理视图：空 directory 也保留（管理员要能编辑空目录）
+        AdminMenu root = menu("root", null, MenuType.DIRECTORY, null, 0, 1L);
+        AdminMenu emptyDir = menu("empty", null, MenuType.DIRECTORY, 1L, 0, 2L);
 
-        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, emptyGroup, divider), null);
+        List<AdminMenu> roots = MenuTreeAssembler.assemble(List.of(root, emptyDir), null);
 
         assertThat(roots).hasSize(1);
-        assertThat(roots.get(0).getChildren()).extracting(AdminMenu::getId)
-                .containsExactly(2L, 3L); // 空 GROUP + DIVIDER 均保留（管理视图不裁）
+        assertThat(roots.get(0).getChildren()).extracting(AdminMenu::getId).containsExactly(2L);
     }
 
     // ========== helper ==========
 
-    private static AdminMenu menu(String name, String path, MenuType type, Long parentId, int sortOrder, Long id) {
-        AdminMenu m = new AdminMenu(name, path, null, parentId, sortOrder, type);
+    private static AdminMenu menu(String name, String routePath, MenuType type, Long parentId, int sortOrder, Long id) {
+        AdminMenu m = new AdminMenu(name, name, routePath, null, null, null, parentId, sortOrder, type,
+                null, false, false, false, false, null, null, null, null, null);
         try {
             Field f = AdminMenu.class.getDeclaredField("id");
             f.setAccessible(true);

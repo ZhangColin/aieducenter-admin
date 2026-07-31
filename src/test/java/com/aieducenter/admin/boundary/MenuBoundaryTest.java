@@ -1,7 +1,6 @@
 package com.aieducenter.admin.boundary;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -12,46 +11,37 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import com.aieducenter.admin.domain.aggregate.AdminMenu;
 import com.aieducenter.admin.domain.enums.MenuType;
-import com.aieducenter.admin.domain.error.AdminMessage;
-import com.cartisan.core.exception.DomainException;
 
 /**
- * Menu 边界值测试。
+ * Menu 边界值测试（Soybean directory/menu 模型）。
  *
  * <h3>测试覆盖</h3>
  * <ul>
  *   <li>菜单名称边界值：空值、长度限制</li>
  *   <li>排序值边界值：负数、零、正数、null</li>
- *   <li>路径边界值：空值、长度限制</li>
- *   <li>图标边界值：空值、长度限制</li>
+ *   <li>路由路径边界值：directory/menu 均原样存储（后端不强制 path 不变量，见 ADR-0004）</li>
+ *   <li>图标边界值：空值、iconify id</li>
  *   <li>父级ID边界值：null、正数、零</li>
+ *   <li>菜单类型：directory/menu 两值</li>
  * </ul>
  */
 @DisplayName("Menu 边界值测试")
 class MenuBoundaryTest {
 
+    private static AdminMenu create(String menuName, String routePath, String icon,
+                                    Long parentId, Integer sortOrder) {
+        return new AdminMenu(menuName, "route_name", routePath, null, icon, null,
+                parentId, sortOrder, null, null, false, false, false, false,
+                null, null, null, null, null);
+    }
+
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = {"", "  ", "\t", "a", "ab", "测试菜单"})
-    @DisplayName("菜单名称边界值测试")
-    void given_name_boundary_when_create_menu_then_handle_appropriately(String name) {
-        // Given
-        String path = "/test";
-        String icon = "test-icon";
-        Long parentId = null;
-        Integer sortOrder = 0;
-
-        // When & Then
-        // AdminMenu 在构造函数中没有对 name 进行验证，只检查数据库约束
-        // 这里我们测试对象能正常创建，实际验证在数据库层
-        if (name == null || name.isBlank()) {
-            // 空值在domain层不阻止，但数据库会拒绝（nullable = false）
-            AdminMenu menu = new AdminMenu(name, path, icon, parentId, sortOrder);
-            assertThat(menu.getName()).isEqualTo(name);
-        } else {
-            AdminMenu menu = new AdminMenu(name, path, icon, parentId, sortOrder);
-            assertThat(menu.getName()).isEqualTo(name);
-        }
+    @DisplayName("菜单名称边界值：原样存储（非空校验在 DB/命令层）")
+    void given_menuName_boundary_when_create_menu_then_stored(String menuName) {
+        AdminMenu menu = create(menuName, "/test", "test-icon", null, 0);
+        assertThat(menu.getMenuName()).isEqualTo(menuName);
     }
 
     @ParameterizedTest
@@ -63,90 +53,48 @@ class MenuBoundaryTest {
         "100,            100",    // 大正数
         "2147483647,     2147483647"   // Integer.MAX_VALUE
     })
-    @DisplayName("排序值边界值测试")
+    @DisplayName("排序值边界值：原样存储")
     void given_sortOrder_boundary_when_create_menu_then_expected_result(
             Integer inputSortOrder, Integer expectedSortOrder) {
-        // Given
-        String name = "测试菜单";
-        String path = "/test";
-        String icon = "test-icon";
-        Long parentId = null;
-
-        // When
-        AdminMenu menu = new AdminMenu(name, path, icon, parentId, inputSortOrder);
-
-        // Then
+        AdminMenu menu = create("测试菜单", "/test", "test-icon", null, inputSortOrder);
         assertThat(menu.getSortOrder()).isEqualTo(expectedSortOrder);
     }
 
     @ParameterizedTest
     @NullSource
-    @DisplayName("排序值为null时默认为0")
+    @DisplayName("排序值为 null 时默认为 0")
     void given_null_sortOrder_when_create_menu_then_default_to_zero(Integer inputSortOrder) {
-        // Given
-        String name = "测试菜单";
-        String path = "/test";
-        String icon = "test-icon";
-        Long parentId = null;
-
-        // When
-        AdminMenu menu = new AdminMenu(name, path, icon, parentId, inputSortOrder);
-
-        // Then
+        AdminMenu menu = create("测试菜单", "/test", "test-icon", null, inputSortOrder);
         assertThat(menu.getSortOrder()).isEqualTo(0);
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {
-        "/",
-        "/test",
-        "/admin/users",
-        "/path/with/many/segments"
-    })
-    @DisplayName("MENU 有效 path 边界值：原样存储")
-    void given_valid_path_for_menu_when_create_then_path_stored(String path) {
-        // When
-        AdminMenu menu = new AdminMenu("测试菜单", path, "icon", null, 0, MenuType.MENU);
-
-        // Then
-        assertThat(menu.getType()).isEqualTo(MenuType.MENU);
-        assertThat(menu.getPath()).isEqualTo(path);
+    @ValueSource(strings = {"/", "/test", "/manage/user", "/path/with/many/segments"})
+    @DisplayName("menu 路由路径边界值：原样存储（无 path 不变量）")
+    void given_valid_routePath_for_menu_when_create_then_stored(String routePath) {
+        AdminMenu menu = create("测试菜单", routePath, "icon", null, 0);
+        assertThat(menu.getMenuType()).isEqualTo(MenuType.MENU);
+        assertThat(menu.getRoutePath()).isEqualTo(routePath);
     }
 
     @ParameterizedTest
     @NullAndEmptySource
-    @ValueSource(strings = {"", "  ", "\t"})
-    @DisplayName("MENU 空/null/空白 path 边界值：拒绝 ADMIN_014_3")
-    void given_blank_path_for_menu_when_create_then_throw_admin014_3(String path) {
-        // When & Then: MENU 必须有非空 path
-        assertThatThrownBy(() -> new AdminMenu("测试菜单", path, "icon", null, 0, MenuType.MENU))
-                .isInstanceOf(DomainException.class)
-                .extracting("codeMessage")
-                .isEqualTo(AdminMessage.MENU_TYPE_PATH_MISMATCH);
+    @ValueSource(strings = {"", "  "})
+    @DisplayName("directory 空 routePath 也原样存储（后端不强制，Soybean directory 可带 path）")
+    void given_blank_routePath_for_directory_when_create_then_stored(String routePath) {
+        AdminMenu menu = new AdminMenu("目录", "manage", routePath, null, null, null,
+                null, 0, MenuType.DIRECTORY, null, false, false, false, false,
+                null, null, null, null, null);
+        assertThat(menu.getMenuType()).isEqualTo(MenuType.DIRECTORY);
+        assertThat(menu.getRoutePath()).isEqualTo(routePath);
     }
 
     @ParameterizedTest
     @NullAndEmptySource
-    @ValueSource(strings = {
-        "",
-        "  ",
-        "icon",
-        "test-icon",
-        "icon_123"
-    })
-    @DisplayName("图标边界值测试")
-    void given_icon_boundary_when_create_menu_then_handle_appropriately(String icon) {
-        // Given
-        String name = "测试菜单";
-        String path = "/test";
-        Long parentId = null;
-        Integer sortOrder = 0;
-
-        // When
-        AdminMenu menu = new AdminMenu(name, path, icon, parentId, sortOrder);
-
-        // Then
-        // AdminMenu 没有对 icon 进行验证
+    @ValueSource(strings = {"", "  ", "mdi:account", "mdi:monitor-dashboard", "local-icon"})
+    @DisplayName("图标边界值：原样存储")
+    void given_icon_boundary_when_create_menu_then_stored(String icon) {
+        AdminMenu menu = create("测试菜单", "/test", icon, null, 0);
         assertThat(menu.getIcon()).isEqualTo(icon);
     }
 
@@ -154,115 +102,45 @@ class MenuBoundaryTest {
     @CsvSource({
         "1,              false",  // 有效父级ID
         "100,            false",  // 大父级ID
-        "0,              false",  // 零（虽然不合理，但domain不阻止）
-        "-1,             false"   // 负数（虽然不合理，但domain不阻止）
+        "0,              false",  // 零（domain 不阻止）
+        "-1,             false"   // 负数（domain 不阻止）
     })
-    @DisplayName("父级ID边界值测试")
+    @DisplayName("父级ID边界值")
     void given_parentId_boundary_when_create_menu_then_expected_result(
             Long parentId, boolean shouldBeRoot) {
-        // Given
-        String name = "测试菜单";
-        String path = "/test";
-        String icon = "test-icon";
-        Integer sortOrder = 0;
-
-        // When
-        AdminMenu menu = new AdminMenu(name, path, icon, parentId, sortOrder);
-
-        // Then
+        AdminMenu menu = create("测试菜单", "/test", "test-icon", parentId, 0);
         assertThat(menu.getParentId()).isEqualTo(parentId);
         assertThat(menu.isRoot()).isEqualTo(shouldBeRoot);
     }
 
     @ParameterizedTest
     @NullSource
-    @DisplayName("父级ID为null时为根菜单")
+    @DisplayName("父级ID为 null 时为根菜单")
     void given_null_parentId_when_create_menu_then_is_root(Long parentId) {
-        // Given
-        String name = "测试菜单";
-        String path = "/test";
-        String icon = "test-icon";
-        Integer sortOrder = 0;
-
-        // When
-        AdminMenu menu = new AdminMenu(name, path, icon, parentId, sortOrder);
-
-        // Then
+        AdminMenu menu = create("测试菜单", "/test", "test-icon", parentId, 0);
         assertThat(menu.getParentId()).isNull();
         assertThat(menu.isRoot()).isTrue();
     }
 
     @ParameterizedTest
     @CsvSource({
-        "MENU,           MENU",       // 菜单类型
-        "GROUP,          GROUP",      // 分组类型
-        "DIVIDER,        DIVIDER"     // 分隔线类型
+        "DIRECTORY,      DIRECTORY",  // 目录
+        "MENU,           MENU"        // 菜单
     })
-    @DisplayName("菜单类型边界值测试")
-    void given_type_boundary_when_setType_then_expected_result(
+    @DisplayName("菜单类型边界值：directory/menu")
+    void given_menuType_boundary_when_setMenuType_then_expected_result(
             MenuType inputType, MenuType expectedType) {
-        // Given
-        AdminMenu menu = new AdminMenu("测试菜单", "/test", "icon", null, 0);
-
-        // When
-        menu.setType(inputType);
-
-        // Then
-        assertThat(menu.getType()).isEqualTo(expectedType);
+        AdminMenu menu = create("测试菜单", "/test", "icon", null, 0);
+        menu.setMenuType(inputType);
+        assertThat(menu.getMenuType()).isEqualTo(expectedType);
     }
 
     @ParameterizedTest
     @NullSource
-    @DisplayName("菜单类型为null时默认为MENU")
-    void given_null_type_when_setType_then_default_to_MENU(MenuType inputType) {
-        // Given
-        AdminMenu menu = new AdminMenu("测试菜单", "/test", "icon", null, 0);
-
-        // When
-        menu.setType(inputType);
-
-        // Then
-        assertThat(menu.getType()).isEqualTo(MenuType.MENU);
-    }
-
-    // Note: Default sortOrder test already covered in the sortOrder boundary test above
-
-    @ParameterizedTest
-    @NullAndEmptySource
-    @ValueSource(strings = {"", "[]", "[menu1, menu2]"})
-    @DisplayName("子菜单边界值测试")
-    void given_children_boundary_when_setChildren_then_handle_appropriately(String childrenStr) {
-        // Given
-        AdminMenu menu = new AdminMenu("父菜单", "/parent", "icon", null, 0);
-
-        // When
-        if (childrenStr == null || childrenStr.isEmpty()) {
-            menu.setChildren(null);
-            assertThat(menu.getChildren()).isNotNull().isEmpty();
-        } else if (childrenStr.equals("[]")) {
-            menu.setChildren(java.util.List.of());
-            assertThat(menu.getChildren()).isNotNull().isEmpty();
-        } else {
-            // 创建子菜单
-            AdminMenu child1 = new AdminMenu("子菜单1", "/child1", null, menu.getId(), 1);
-            AdminMenu child2 = new AdminMenu("子菜单2", "/child2", null, menu.getId(), 2);
-            menu.setChildren(java.util.List.of(child1, child2));
-            assertThat(menu.getChildren()).hasSize(2);
-        }
-    }
-
-    @ParameterizedTest
-    @CsvSource({
-        "true,           false",   // 有父级ID - 非根菜单
-        "false,          true"     // 无父级ID - 根菜单
-    })
-    @DisplayName("根菜单判断测试")
-    void given_parentId_when_checkIsRoot_then_expected_result(Boolean hasParentId, boolean shouldBeRoot) {
-        // Given
-        Long parentId = (hasParentId != null && hasParentId) ? 1L : null;
-        AdminMenu menu = new AdminMenu("测试菜单", "/test", "icon", parentId, 0);
-
-        // When & Then
-        assertThat(menu.isRoot()).isEqualTo(shouldBeRoot);
+    @DisplayName("菜单类型为 null 时默认为 MENU")
+    void given_null_menuType_when_setMenuType_then_default_to_MENU(MenuType inputType) {
+        AdminMenu menu = create("测试菜单", "/test", "icon", null, 0);
+        menu.setMenuType(inputType);
+        assertThat(menu.getMenuType()).isEqualTo(MenuType.MENU);
     }
 }

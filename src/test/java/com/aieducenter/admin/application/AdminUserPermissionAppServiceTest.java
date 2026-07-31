@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.aieducenter.admin.application.dto.response.MenuResponse;
 import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.domain.aggregate.AdminUser;
+import com.aieducenter.admin.domain.enums.MenuType;
 import com.aieducenter.admin.domain.repository.AdminRoleRepository;
 import com.aieducenter.admin.domain.repository.AdminUserRepository;
 
@@ -183,8 +184,8 @@ class AdminUserPermissionAppServiceTest {
         // Given
         Long adminId = 1L;
         List<MenuResponse> allMenus = List.of(
-            new MenuResponse(1L, "用户管理", "/users", "user", null, 1, null),
-            new MenuResponse(2L, "角色管理", "/roles", "role", null, 2, null)
+            menuResp(1L, "用户管理", "/users", 1),
+            menuResp(2L, "角色管理", "/roles", 2)
         );
 
         when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(true);
@@ -211,8 +212,8 @@ class AdminUserPermissionAppServiceTest {
         role1.addMenu(2L);
 
         List<MenuResponse> filteredMenus = List.of(
-            new MenuResponse(1L, "用户管理", "/users", "user", null, 1, null),
-            new MenuResponse(2L, "角色管理", "/roles", "role", null, 2, null)
+            menuResp(1L, "用户管理", "/users", 1),
+            menuResp(2L, "角色管理", "/roles", 2)
         );
 
         when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
@@ -290,5 +291,12 @@ class AdminUserPermissionAppServiceTest {
 
         // Then
         assertThat(result).isFalse();
+    }
+
+    /** 精简 MenuResponse（Soybean 必备字段，其余缺省）。 */
+    private static MenuResponse menuResp(long id, String menuName, String routePath, int sortOrder) {
+        return new MenuResponse(id, menuName, menuName, routePath, null, null, null, null, sortOrder,
+                MenuType.MENU, null, false, false, false, false, null, null, null, null, null,
+                null, null, null);
     }
 }

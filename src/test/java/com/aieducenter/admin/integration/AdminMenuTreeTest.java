@@ -15,16 +15,15 @@ import org.springframework.transaction.annotation.Transactional;
 import com.aieducenter.admin.application.MenuManagementAppService;
 import com.aieducenter.admin.application.dto.command.CreateMenuCommand;
 import com.aieducenter.admin.application.dto.response.MenuResponse;
-import com.aieducenter.admin.domain.aggregate.AdminMenu;
 import com.aieducenter.admin.domain.enums.MenuType;
 import com.aieducenter.admin.domain.repository.AdminMenuRepository;
 import com.cartisan.core.exception.DomainException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * AdminMenu 树形结构集成测试。
+ * AdminMenu 树形结构集成测试（Soybean directory/menu 模型）。
  *
- * <p>使用真实数据库测试菜单树的层级关系、排序和删除规则。</p>
+ * <p>使用真实数据库测试菜单树的层级关系、排序、过滤与删除规则。</p>
  */
 @SpringBootTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -42,220 +41,143 @@ class AdminMenuTreeTest {
 
     @AfterEach
     void tearDown() {
-        // Clean up after each test - hard delete all menus
         menuRepository.deleteAllInBatch();
     }
 
     @Test
     void given_menu_hierarchy_when_query_tree_then_return_correct_structure() {
-        // Given: 创建 3 级菜单树
-        // Level 1: 系统管理 (depth=0)
-        Long level1Id = menuManagementAppService.create(
-            new CreateMenuCommand("系统管理", "/system", "system", null, 1)
-        );
+        // Given: directory(manage) → menu(manage_user)
+        Long dirId = menuManagementAppService.create(
+                dir("系统管理", "manage", "/manage", null, 1));
+        Long leafId = menuManagementAppService.create(
+                menu("用户管理", "manage_user", "/manage/user", dirId, 1));
 
-        // Level 2: 用户管理 (系统管理的子菜单, depth=1)
-        Long level2Id = menuManagementAppService.create(
-            new CreateMenuCommand("用户管理", "/system/users", "user", level1Id, 1)
-        );
-
-        // When: 查询菜单树
+        // When
         List<MenuResponse> menuTree = menuManagementAppService.findTree();
 
-        // Then: 验证树形结构
+        // Then
         assertThat(menuTree).hasSize(1);
+        MenuResponse directory = menuTree.get(0);
+        assertThat(directory.id()).isEqualTo(dirId);
+        assertThat(directory.menuName()).isEqualTo("系统管理");
+        assertThat(directory.menuType()).isEqualTo(MenuType.DIRECTORY);
+        assertThat(directory.parentId()).isNull();
+        assertThat(directory.children()).hasSize(1);
 
-        MenuResponse level1 = menuTree.get(0);
-        assertThat(level1.id()).isEqualTo(level1Id);
-        assertThat(level1.name()).isEqualTo("系统管理");
-        assertThat(level1.parentId()).isNull();
-        assertThat(level1.children()).hasSize(1);
-
-        MenuResponse level2 = level1.children().get(0);
-        assertThat(level2.id()).isEqualTo(level2Id);
-        assertThat(level2.name()).isEqualTo("用户管理");
-        assertThat(level2.parentId()).isEqualTo(level1Id);
-        assertThat(level2.children()).isEmpty();
-
-        // T1: type 字段透传到响应，且与节点语义一致（默认创建 = MENU）
-        assertThat(level1.type()).isEqualTo(MenuType.MENU);
-        assertThat(level2.type()).isEqualTo(MenuType.MENU);
+        MenuResponse leaf = directory.children().get(0);
+        assertThat(leaf.id()).isEqualTo(leafId);
+        assertThat(leaf.menuName()).isEqualTo("用户管理");
+        assertThat(leaf.menuType()).isEqualTo(MenuType.MENU);
+        assertThat(leaf.parentId()).isEqualTo(dirId);
+        assertThat(leaf.children()).isEmpty();
     }
 
     @Test
-    void given_menuResponse_when_serialize_then_type_is_integer_code() throws Exception {
-        // T1: type 经全局 BaseEnumSerializer 序列化为整数 code（1=MENU/2=GROUP/3=DIVIDER）
-        MenuResponse menu = new MenuResponse(1L, "用户管理", "/users", "user", null, 1, MenuType.MENU, null);
-        MenuResponse group = new MenuResponse(2L, "分组", null, null, null, 2, MenuType.GROUP, null);
-        MenuResponse divider = new MenuResponse(3L, "--", null, null, null, 3, MenuType.DIVIDER, null);
+    void given_menuResponse_when_serialize_then_menuType_is_integer_code() throws Exception {
+        // BaseEnumSerializer：directory=1 / menu=2
+        MenuResponse directory = resp(1L, "系统管理", MenuType.DIRECTORY);
+        MenuResponse leaf = resp(2L, "用户管理", MenuType.MENU);
 
-        assertThat(objectMapper.writeValueAsString(menu)).contains("\"type\":1");
-        assertThat(objectMapper.writeValueAsString(group)).contains("\"type\":2");
-        assertThat(objectMapper.writeValueAsString(divider)).contains("\"type\":3");
+        assertThat(objectMapper.writeValueAsString(directory)).contains("\"menuType\":1");
+        assertThat(objectMapper.writeValueAsString(leaf)).contains("\"menuType\":2");
     }
 
     @Test
-    void given_menus_with_sort_order_when_query_tree_then_children_can_be_sorted() {
-        // Given: 创建多个同级菜单，使用不同的 sortOrder
-        Long rootId = menuManagementAppService.create(
-            new CreateMenuCommand("系统管理", "/system", "system", null, 1)
-        );
+    void given_menus_with_sort_order_when_query_tree_then_children_sorted() {
+        Long rootId = menuManagementAppService.create(dir("系统管理", "manage", "/manage", null, 1));
 
-        // 创建子菜单，sortOrder 顺序为乱序
-        Long menuAId = menuManagementAppService.create(
-            new CreateMenuCommand("菜单A", "/a", "a", rootId, 1)
-        );
-        Long menuBId = menuManagementAppService.create(
-            new CreateMenuCommand("菜单B", "/b", "b", rootId, 2)
-        );
-        Long menuCId = menuManagementAppService.create(
-            new CreateMenuCommand("菜单C", "/c", "c", rootId, 3)
-        );
+        Long aId = menuManagementAppService.create(menu("菜单A", "a", "/a", rootId, 3));
+        Long bId = menuManagementAppService.create(menu("菜单B", "b", "/b", rootId, 1));
+        Long cId = menuManagementAppService.create(menu("菜单C", "c", "/c", rootId, 2));
 
-        // When: 查询菜单树
         List<MenuResponse> menuTree = menuManagementAppService.findTree();
 
-        // Then: 验证子菜单都有正确的 sortOrder
         assertThat(menuTree).hasSize(1);
         MenuResponse root = menuTree.get(0);
-        assertThat(root.children()).hasSize(3);
-
-        // 验证所有子菜单的 sortOrder 字段正确
-        assertThat(root.children()).anyMatch(menu -> menu.id().equals(menuAId) && menu.sortOrder() == 1);
-        assertThat(root.children()).anyMatch(menu -> menu.id().equals(menuBId) && menu.sortOrder() == 2);
-        assertThat(root.children()).anyMatch(menu -> menu.id().equals(menuCId) && menu.sortOrder() == 3);
+        assertThat(root.children()).extracting(MenuResponse::id).containsExactly(bId, cId, aId); // 1,2,3
     }
 
     @Test
     void given_parent_menu_with_children_when_delete_then_fail() {
-        // Given: 创建父菜单和子菜单
-        Long parentId = menuManagementAppService.create(
-            new CreateMenuCommand("系统管理", "/system", "system", null, 1)
-        );
+        Long parentId = menuManagementAppService.create(dir("系统管理", "manage", "/manage", null, 1));
+        menuManagementAppService.create(menu("用户管理", "manage_user", "/manage/user", parentId, 1));
 
-        menuManagementAppService.create(
-            new CreateMenuCommand("用户管理", "/users", "user", parentId, 1)
-        );
-
-        // When & Then: 尝试删除有子菜单的父菜单，应该抛出异常
         assertThatThrownBy(() -> menuManagementAppService.delete(parentId))
-            .isInstanceOf(DomainException.class);
+                .isInstanceOf(DomainException.class);
 
-        // 验证父菜单仍然存在
         assertThat(menuRepository.existsById(parentId)).isTrue();
     }
 
     @Test
     void given_menu_tree_when_filter_by_ids_then_return_filtered_tree() {
-        // Given: 创建菜单树
-        Long menu1Id = menuManagementAppService.create(
-            new CreateMenuCommand("系统管理", "/system", "system", null, 1)
-        );
-        Long menu2Id = menuManagementAppService.create(
-            new CreateMenuCommand("用户管理", "/users", "user", menu1Id, 1)
-        );
-        Long menu3Id = menuManagementAppService.create(
-            new CreateMenuCommand("角色管理", "/roles", "role", null, 2)
-        );
+        Long dir1Id = menuManagementAppService.create(dir("系统管理", "manage", "/manage", null, 1));
+        Long leafId = menuManagementAppService.create(menu("用户管理", "manage_user", "/manage/user", dir1Id, 1));
+        Long otherId = menuManagementAppService.create(menu("其它", "other", "/other", null, 2));
 
-        // When: 只获取系统管理相关的菜单（包含父子关系）
-        List<MenuResponse> filteredTree = menuManagementAppService.findTree(
-            java.util.Set.of(menu1Id, menu2Id)
-        );
+        List<MenuResponse> filteredTree = menuManagementAppService.findTree(java.util.Set.of(dir1Id, leafId));
 
-        // Then: 验证只返回指定的菜单，且保持父子关系
         assertThat(filteredTree).hasSize(1);
-        assertThat(filteredTree.get(0).id()).isEqualTo(menu1Id);
-        assertThat(filteredTree.get(0).name()).isEqualTo("系统管理");
+        assertThat(filteredTree.get(0).id()).isEqualTo(dir1Id);
         assertThat(filteredTree.get(0).children()).hasSize(1);
-        assertThat(filteredTree.get(0).children().get(0).id()).isEqualTo(menu2Id);
-        assertThat(filteredTree.get(0).children().get(0).name()).isEqualTo("用户管理");
-
-        // 验证角色管理不在结果中
-        assertThat(filteredTree).noneMatch(menu -> menu.id().equals(menu3Id));
+        assertThat(filteredTree.get(0).children().get(0).id()).isEqualTo(leafId);
+        assertThat(filteredTree).noneMatch(m -> m.id().equals(otherId));
     }
 
     @Test
     void given_child_assigned_but_parent_not_when_filter_then_ancestor_chain_completed() {
-        // Given: 父子菜单
-        Long menu1Id = menuManagementAppService.create(
-            new CreateMenuCommand("系统管理", "/system", "system", null, 1)
-        );
-        Long menu2Id = menuManagementAppService.create(
-            new CreateMenuCommand("用户管理", "/users", "user", menu1Id, 1)
-        );
+        Long dirId = menuManagementAppService.create(dir("系统管理", "manage", "/manage", null, 1));
+        Long leafId = menuManagementAppService.create(menu("用户管理", "manage_user", "/manage/user", dirId, 1));
 
-        // When: 只包含子菜单（父菜单未分配）
-        List<MenuResponse> filteredTree = menuManagementAppService.findTree(
-            java.util.Set.of(menu2Id)
-        );
+        // 只分配子（父未分配）→ 祖先链补全，父目录自动补回
+        List<MenuResponse> filteredTree = menuManagementAppService.findTree(java.util.Set.of(leafId));
 
-        // Then: 祖先链补全——父分组自动补回，子菜单不丢弃（修原"叶子静默丢弃"bug）
         assertThat(filteredTree).hasSize(1);
-        assertThat(filteredTree.get(0).id()).isEqualTo(menu1Id);
+        assertThat(filteredTree.get(0).id()).isEqualTo(dirId);
         assertThat(filteredTree.get(0).children()).hasSize(1);
-        assertThat(filteredTree.get(0).children().get(0).id()).isEqualTo(menu2Id);
+        assertThat(filteredTree.get(0).children().get(0).id()).isEqualTo(leafId);
     }
 
     @Test
-    void given_empty_group_assigned_when_filter_then_trimmed() {
-        // Given: 分组被分配但无可见子
-        Long groupId = menuManagementAppService.create(
-            new CreateMenuCommand("空分组", null, null, null, 1, MenuType.GROUP)
-        );
+    void given_empty_directory_assigned_when_filter_then_trimmed() {
+        // 空 directory（无可见子）在消费侧裁掉
+        Long dirId = menuManagementAppService.create(dir("空目录", "empty", "/empty", null, 1));
 
-        // When: 消费侧过滤
-        List<MenuResponse> tree = menuManagementAppService.findTree(java.util.Set.of(groupId));
+        List<MenuResponse> tree = menuManagementAppService.findTree(java.util.Set.of(dirId));
 
-        // Then: 空 GROUP 被裁掉
         assertThat(tree).isEmpty();
     }
 
     @Test
-    void given_dangling_divider_when_filter_then_trimmed() {
-        // Given: 分隔线无可见内容兄弟
-        Long dividerId = menuManagementAppService.create(
-            new CreateMenuCommand("--", null, null, null, 1, MenuType.DIVIDER)
-        );
+    void given_admin_view_when_findTree_then_empty_directory_kept() {
+        // 管理视图（menuIds=null）不裁剪，空 directory 保留
+        menuManagementAppService.create(dir("空目录", "empty", "/empty", null, 1));
 
-        // When
-        List<MenuResponse> tree = menuManagementAppService.findTree(java.util.Set.of(dividerId));
-
-        // Then: 悬空 DIVIDER 被裁掉
-        assertThat(tree).isEmpty();
-    }
-
-    @Test
-    void given_divider_between_menus_when_filter_then_auto_kept() {
-        // Given: MENU - DIVIDER - MENU（同级）
-        Long aId = menuManagementAppService.create(
-            new CreateMenuCommand("A", "/a", null, null, 1, MenuType.MENU));
-        menuManagementAppService.create(
-            new CreateMenuCommand("--", null, null, null, 2, MenuType.DIVIDER));
-        Long bId = menuManagementAppService.create(
-            new CreateMenuCommand("B", "/b", null, null, 3, MenuType.MENU));
-
-        // When: 只分配两个 MENU（分隔线未分配）
-        List<MenuResponse> tree = menuManagementAppService.findTree(java.util.Set.of(aId, bId));
-
-        // Then: 分隔线按结构自动出现在两个 MENU 之间（B：不分配），按 sortOrder 排序
-        assertThat(tree).extracting(MenuResponse::type)
-                .containsExactly(MenuType.MENU, MenuType.DIVIDER, MenuType.MENU);
-    }
-
-    @Test
-    void given_admin_view_when_findTree_then_emptyGroupAndDivider_kept() {
-        // Given: 空 GROUP + DIVIDER
-        menuManagementAppService.create(
-            new CreateMenuCommand("空分组", null, null, null, 1, MenuType.GROUP));
-        menuManagementAppService.create(
-            new CreateMenuCommand("--", null, null, null, 2, MenuType.DIVIDER));
-
-        // When: /menus 管理视图（menuIds=null，不裁剪）
         List<MenuResponse> tree = menuManagementAppService.findTree();
 
-        // Then: 空 GROUP 与 DIVIDER 均保留
-        assertThat(tree).extracting(MenuResponse::type)
-                .containsExactly(MenuType.GROUP, MenuType.DIVIDER);
+        assertThat(tree).hasSize(1);
+        assertThat(tree.get(0).menuType()).isEqualTo(MenuType.DIRECTORY);
+    }
+
+    // ========== helper ==========
+
+    private static CreateMenuCommand dir(String menuName, String routeName, String routePath,
+                                         Long parentId, int sortOrder) {
+        return new CreateMenuCommand(menuName, routeName, routePath, "layout.base", null, null,
+                parentId, sortOrder, MenuType.DIRECTORY, null, false, false, false, false,
+                null, null, null, null, null);
+    }
+
+    private static CreateMenuCommand menu(String menuName, String routeName, String routePath,
+                                          Long parentId, int sortOrder) {
+        return new CreateMenuCommand(menuName, routeName, routePath, "view.page", null, null,
+                parentId, sortOrder, MenuType.MENU, null, false, false, false, false,
+                null, null, null, null, null);
+    }
+
+    private static MenuResponse resp(Long id, String menuName, MenuType menuType) {
+        return new MenuResponse(
+                id, menuName, "route_name", "/route", null, null, null, null, null,
+                menuType, null, false, false, false, false, null, null, null,
+                null, null, null, null, null);
     }
 }

@@ -118,10 +118,15 @@ class AdminPerformanceTest {
             Long parentId = i < 10 ? null : (i < 50 ? (long) (i % 10) : (long) (i % 40 + 10));
             AdminMenu menu = new AdminMenu(
                 "菜单" + i,
+                "menu" + i,
                 "/menu" + i,
+                null,
                 "icon" + i,
+                null,
                 parentId,
-                i
+                i,
+                null,
+                null, false, false, false, false, null, null, null, null, null
             );
             menus.add(menu);
         }

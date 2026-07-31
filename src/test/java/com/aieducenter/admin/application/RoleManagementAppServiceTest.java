@@ -275,9 +275,9 @@ class RoleManagementAppServiceTest {
         AssignMenusCommand command = new AssignMenusCommand(List.of(1L, 2L, 3L));
         AdminRole role = new AdminRole("测试角色", "TEST", "测试", 1);
 
-        AdminMenu menu1 = new AdminMenu("菜单1", "/menu1", "icon1", null, 1);
-        AdminMenu menu2 = new AdminMenu("菜单2", "/menu2", "icon2", null, 1);
-        AdminMenu menu3 = new AdminMenu("菜单3", "/menu3", "icon3", null, 1);
+        AdminMenu menu1 = menu("菜单1");
+        AdminMenu menu2 = menu("菜单2");
+        AdminMenu menu3 = menu("菜单3");
 
         // Set IDs using reflection
         java.lang.reflect.Field idField = AdminMenu.class.getDeclaredField("id");
@@ -318,7 +318,7 @@ class RoleManagementAppServiceTest {
         AssignMenusCommand command = new AssignMenusCommand(List.of(1L, 999L));
         AdminRole role = new AdminRole("测试角色", "TEST", "测试", 1);
 
-        AdminMenu menu1 = new AdminMenu("菜单1", "/menu1", "icon1", null, 1);
+        AdminMenu menu1 = menu("菜单1");
 
         // Set ID using reflection
         java.lang.reflect.Field idField = AdminMenu.class.getDeclaredField("id");
@@ -444,5 +444,11 @@ class RoleManagementAppServiceTest {
         assertThatThrownBy(() -> roleManagementAppService.findById(roleId))
             .isInstanceOf(DomainException.class)
             .hasMessageContaining(AdminMessage.ROLE_NOT_FOUND.message());
+    }
+
+    /** 便捷构造菜单（Soybean 模型全字段，本测试只关心 id）。 */
+    private static AdminMenu menu(String menuName) {
+        return new AdminMenu(menuName, menuName, "/m", null, null, null, null, 1, null,
+                null, false, false, false, false, null, null, null, null, null);
     }
 }

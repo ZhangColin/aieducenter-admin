@@ -24,6 +24,7 @@ import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.domain.aggregate.AdminUser;
 import com.aieducenter.admin.domain.entity.AdminRoleMenu;
 import com.aieducenter.admin.domain.entity.AdminRolePermission;
+import com.aieducenter.admin.domain.enums.MenuType;
 import com.aieducenter.admin.domain.repository.AdminMenuRepository;
 import com.aieducenter.admin.domain.repository.AdminRoleRepository;
 import com.aieducenter.admin.domain.repository.AdminUserRepository;
@@ -88,7 +89,7 @@ class RoleAssignmentFlywaySchemaIntegrationTest {
     void given_roleAssignMenus_when_persistAgainstFlywaySchema_then_associationRowInserted() {
         // Given：先持久化菜单与角色（拿到真实 id）
         AdminMenu menu = menuRepository.save(
-                new AdminMenu("菜单_" + suffix(), "/m/" + suffix(), null, null, 1));
+                menu("菜单_" + suffix(), "/m/" + suffix()));
         AdminRole role = roleRepository.save(
                 new AdminRole("角色_" + suffix(), "ROLE_" + suffix(), "测试", 1));
         flushAndClear();
@@ -152,9 +153,9 @@ class RoleAssignmentFlywaySchemaIntegrationTest {
     @DisplayName("重新分配（再次 clear+add）走 orphanRemoval，移除旧关联不撞 NOT NULL（真 Flyway schema）")
     void given_reassignMenus_when_clearAndAddAgain_then_orphanRemovedWithoutNullViolation() {
         AdminMenu menuA = menuRepository.save(
-                new AdminMenu("菜单A_" + suffix(), "/a/" + suffix(), null, null, 1));
+                menu("菜单A_" + suffix(), "/a/" + suffix()));
         AdminMenu menuB = menuRepository.save(
-                new AdminMenu("菜单B_" + suffix(), "/b/" + suffix(), null, null, 1));
+                menu("菜单B_" + suffix(), "/b/" + suffix()));
         AdminRole role = roleRepository.save(
                 new AdminRole("角色_" + suffix(), "ROLE_" + suffix(), "测试", 1));
         flushAndClear();
@@ -189,5 +190,11 @@ class RoleAssignmentFlywaySchemaIntegrationTest {
 
     private String suffix() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    }
+
+    /** 便捷构造菜单（Soybean 模型全字段，本测试只关心关联落库，其余缺省）。 */
+    private static AdminMenu menu(String menuName, String routePath) {
+        return new AdminMenu(menuName, menuName, routePath, null, null, null, null, 1, MenuType.MENU,
+                null, false, false, false, false, null, null, null, null, null);
     }
 }

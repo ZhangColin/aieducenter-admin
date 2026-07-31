@@ -14,25 +14,24 @@ import com.aieducenter.admin.domain.aggregate.AdminMenu;
 import com.aieducenter.admin.domain.enums.MenuType;
 
 /**
- * 菜单树组装（纯函数）。
+ * 菜单树组装（纯函数，对齐 Soybean directory/menu 模型）。
  *
  * <p>两端点共用：</p>
  * <ul>
  *   <li>{@code menuIds == null}（{@code /menus} 管理视图 / 超管）：全量，仅按 sortOrder（再按 id）排序，<b>不裁剪</b>
- *       ——管理员要能编辑空分组与分隔线。</li>
+ *       ——管理员要能编辑空目录。</li>
  *   <li>{@code menuIds != null}（{@code /auth/current} 角色过滤消费侧）：
  *     <ol>
- *       <li><b>纳入</b>：被分配节点 + 其祖先分组（祖先链补全，消除孤儿叶子）；DIVIDER 不靠分配，
- *           父容器可见即纳入候选（按结构自动出现）；</li>
+ *       <li><b>纳入</b>：被分配节点 + 其祖先目录（祖先链补全，消除孤儿叶子）；</li>
  *       <li>排序；</li>
- *       <li><b>裁剪</b>：空 GROUP（无可见子）与悬空 DIVIDER（无可见内容兄弟）裁掉，级联收敛。</li>
+ *       <li><b>裁剪</b>：空 directory（无可见子）裁掉，级联收敛。</li>
  *     </ol>
  *   </li>
  * </ul>
  *
- * <p>可见性规则（消费侧）由 {@link #prune} 单遍自底向上完成：MENU 恒保留；GROUP 仅当 ≥1 存活子；
- * DIVIDER 仅当存在存活内容兄弟（MENU 或非空 GROUP）。裁子会使父 GROUP 变空→级联裁；内容兄弟消失会使
- * DIVIDER 悬空→级联裁。</p>
+ * <p>可见性规则（消费侧）由 {@link #prune} 单遍自底向上完成：{@code menu} 恒保留；
+ * {@code directory} 仅当 ≥1 存活子。裁子会使父 directory 变空→级联裁。Soybean 无 DIVIDER 概念
+ * （见 ADR-0004），故不再有分隔线裁剪分支。</p>
  */
 public final class MenuTreeAssembler {
 
@@ -54,7 +53,7 @@ public final class MenuTreeAssembler {
 
         Map<Long, AdminMenu> menuMap = new LinkedHashMap<>();
         for (AdminMenu m : allMenus) {
-            if (keptIds == null || isIncluded(m, keptIds)) {
+            if (keptIds == null || keptIds.contains(m.getId())) {
                 m.setChildren(CollUtil.newArrayList()); // 防御性重置，避免跨调用 children 累积
                 menuMap.put(m.getId(), m);
             }
@@ -72,25 +71,6 @@ public final class MenuTreeAssembler {
 
         sortTree(roots);
         return (menuIds == null) ? roots : prune(roots);
-    }
-
-    /**
-     * 过滤视图下的候选纳入规则：
-     * <ul>
-     *   <li>被分配节点，或其祖先补全（{@code keptIds}）—— MENU/GROUP 走此路；</li>
-     *   <li>DIVIDER 不靠分配：只要其父容器可见（根或父在 {@code keptIds}）就纳入候选，
-     *       是否真正可见交由 {@link #prune} 按"有无内容兄弟"裁决。</li>
-     * </ul>
-     */
-    private static boolean isIncluded(AdminMenu m, Set<Long> keptIds) {
-        if (keptIds.contains(m.getId())) {
-            return true;
-        }
-        if (m.getType() == MenuType.DIVIDER) {
-            Long pid = m.getParentId();
-            return pid == null || keptIds.contains(pid);
-        }
-        return false;
     }
 
     /** menuIds ∪ 各节点的全部祖先（沿 parentId 上溯）。 */
@@ -115,26 +95,21 @@ public final class MenuTreeAssembler {
         }
     }
 
+    /**
+     * 消费侧可见性裁剪（自底向上）：menu 恒保留；directory 仅当 ≥1 存活子。
+     * 子先裁，故空 directory 会级联裁掉。
+     */
     private static List<AdminMenu> prune(List<AdminMenu> nodes) {
         for (AdminMenu n : nodes) {
             n.setChildren(prune(n.getChildren()));
         }
-        boolean hasContentSibling = nodes.stream().anyMatch(
-                n -> n.getType() == MenuType.MENU
-                        || (n.getType() == MenuType.GROUP && !n.getChildren().isEmpty()));
         List<AdminMenu> surviving = CollUtil.newArrayList();
         for (AdminMenu n : nodes) {
-            switch (n.getType()) {
-                case MENU -> surviving.add(n);
-                case GROUP -> {
-                    if (!n.getChildren().isEmpty()) {
-                        surviving.add(n);
-                    }
-                }
-                case DIVIDER -> {
-                    if (hasContentSibling) {
-                        surviving.add(n);
-                    }
+            if (n.getMenuType() == MenuType.MENU) {
+                surviving.add(n);
+            } else { // directory
+                if (!n.getChildren().isEmpty()) {
+                    surviving.add(n);
                 }
             }
         }

@@ -2,17 +2,21 @@ package com.aieducenter.admin.endpoints.controller;
 
 import java.util.List;
 
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import com.aieducenter.admin.application.MenuManagementAppService;
 import com.aieducenter.admin.application.dto.command.CreateMenuCommand;
 import com.aieducenter.admin.application.dto.command.UpdateMenuCommand;
+import com.aieducenter.admin.application.dto.query.MenuQuery;
 import com.aieducenter.admin.application.dto.response.MenuResponse;
 import com.aieducenter.admin.constants.AdminScopes;
 import com.cartisan.security.annotation.RequireAuth;
 import com.cartisan.security.annotation.RequirePermission;
 import com.cartisan.web.response.ApiResponse;
+import com.cartisan.web.response.PageResponse;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -43,6 +47,20 @@ public class AdminMenuController {
     @Operation(summary = "查询菜单列表（树形）")
     public ApiResponse<List<MenuResponse>> findTree() {
         return ApiResponse.ok(menuManagementAppService.findTree());
+    }
+
+    @GetMapping("/page")
+    @RequireAuth
+    @RequirePermission(
+        value = "admin:menu:read",
+        name = "平台管理 / 菜单管理 / 查看",
+        scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "查询菜单列表（扁平分页，Soybean 菜单表格用）")
+    public ApiResponse<PageResponse<MenuResponse>> findAll(
+            MenuQuery query,
+            @PageableDefault(size = 20) Pageable pageable) {
+        return ApiResponse.ok(menuManagementAppService.findAll(query, pageable));
     }
 
     @GetMapping("/{id}")

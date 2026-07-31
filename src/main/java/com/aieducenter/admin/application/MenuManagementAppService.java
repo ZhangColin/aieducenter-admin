@@ -3,6 +3,9 @@ package com.aieducenter.admin.application;
 import java.util.List;
 import java.util.Set;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -11,11 +14,14 @@ import com.aieducenter.admin.domain.repository.AdminMenuRepository;
 import com.aieducenter.admin.domain.error.AdminMessage;
 import com.aieducenter.admin.application.dto.command.CreateMenuCommand;
 import com.aieducenter.admin.application.dto.command.UpdateMenuCommand;
+import com.aieducenter.admin.application.dto.query.MenuQuery;
 import com.aieducenter.admin.application.dto.response.MenuResponse;
 import com.aieducenter.admin.application.mapper.AdminMenuMapper;
 import static com.cartisan.core.util.Assertions.requirePresent;
 
 import com.cartisan.core.exception.DomainException;
+import com.cartisan.data.jpa.specification.ConditionSpecifications;
+import com.cartisan.web.response.PageResponse;
 
 /**
  * 菜单管理应用服务。
@@ -38,8 +44,8 @@ public class MenuManagementAppService {
      * <p>{@code /menus} 管理视图与 {@code /auth/current} 消费侧共用此入口，组装差异由
      * {@link MenuTreeAssembler} 按 {@code menuIds} 是否为 null 区分：</p>
      * <ul>
-     *   <li>{@code menuIds == null}：全量、排序、不裁剪（管理员可编辑空分组/分隔线）；</li>
-     *   <li>{@code menuIds != null}：角色过滤、祖先链补全、排序、裁空 GROUP/悬空 DIVIDER。</li>
+     *   <li>{@code menuIds == null}：全量、排序、不裁剪（管理员可编辑空目录）；</li>
+     *   <li>{@code menuIds != null}：角色过滤、祖先链补全、排序、裁空 directory。</li>
      * </ul>
      *
      * @param menuIds 菜单 ID 集合，null 表示全部菜单
@@ -48,6 +54,20 @@ public class MenuManagementAppService {
     public List<MenuResponse> findTree(Set<Long> menuIds) {
         List<AdminMenu> roots = MenuTreeAssembler.assemble(menuRepository.findAll(), menuIds);
         return adminMenuMapper.convertList(roots);
+    }
+
+    /**
+     * 扁平分页查询（{@code GET /menus/page}，Soybean 菜单表格用）。
+     */
+    public PageResponse<MenuResponse> findAll(MenuQuery query, Pageable pageable) {
+        Specification<AdminMenu> spec = ConditionSpecifications.fromAnnotation(query);
+        Page<AdminMenu> page = menuRepository.findAll(spec, pageable);
+        return new PageResponse<>(
+                adminMenuMapper.convertList(page.getContent()),
+                page.getTotalElements(),
+                pageable.getPageNumber() + 1,
+                pageable.getPageSize()
+        );
     }
 
     /**
@@ -69,7 +89,12 @@ public class MenuManagementAppService {
             }
         }
 
-        AdminMenu menu = new AdminMenu(command.name(), command.path(), command.icon(), command.parentId(), command.sortOrder(), command.type());
+        AdminMenu menu = new AdminMenu(
+                command.menuName(), command.routeName(), command.routePath(), command.component(),
+                command.icon(), command.iconType(), command.parentId(), command.sortOrder(), command.menuType(),
+                command.i18nKey(), command.keepAlive(), command.constant(), command.multiTab(), command.hideInMenu(),
+                command.activeMenu(), command.href(), command.fixedIndexInTab(),
+                command.query(), command.status());
         AdminMenu saved = menuRepository.save(menu);
         return saved.getId();
     }
@@ -108,7 +133,12 @@ public class MenuManagementAppService {
             }
         }
 
-        menu.updateDetails(command.name(), command.path(), command.icon(), command.parentId(), command.sortOrder(), command.type());
+        menu.updateDetails(
+                command.menuName(), command.routeName(), command.routePath(), command.component(),
+                command.icon(), command.iconType(), command.parentId(), command.sortOrder(), command.menuType(),
+                command.i18nKey(), command.keepAlive(), command.constant(), command.multiTab(), command.hideInMenu(),
+                command.activeMenu(), command.href(), command.fixedIndexInTab(),
+                command.query(), command.status());
         menuRepository.save(menu);
     }
 

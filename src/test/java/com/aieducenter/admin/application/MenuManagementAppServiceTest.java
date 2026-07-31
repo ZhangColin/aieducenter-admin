@@ -3,18 +3,16 @@ package com.aieducenter.admin.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Optional;
 
-import org.mockito.ArgumentCaptor;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -22,13 +20,12 @@ import com.aieducenter.admin.application.dto.command.CreateMenuCommand;
 import com.aieducenter.admin.application.dto.command.UpdateMenuCommand;
 import com.aieducenter.admin.application.mapper.AdminMenuMapper;
 import com.aieducenter.admin.domain.aggregate.AdminMenu;
-import com.aieducenter.admin.domain.error.AdminMessage;
 import com.aieducenter.admin.domain.enums.MenuType;
 import com.aieducenter.admin.domain.repository.AdminMenuRepository;
 import com.cartisan.core.exception.DomainException;
 
 /**
- * MenuManagementAppService 测试。
+ * MenuManagementAppService 测试（Soybean 路由生成器模型）。
  */
 @ExtendWith(MockitoExtension.class)
 class MenuManagementAppServiceTest {
@@ -48,308 +45,217 @@ class MenuManagementAppServiceTest {
 
     @Test
     void given_noParentId_when_createMenu_then_success() {
-        // Given
-        var command = new CreateMenuCommand("用户管理", "/users", "user", null, 1);
+        var command = cmd("用户管理", null);
 
-        // 使用 thenAnswer 返回带 ID 的菜单
         when(menuRepository.save(any(AdminMenu.class))).thenAnswer(invocation -> {
-            AdminMenu saved = new AdminMenu("用户管理", "/users", "user", null, 1);
-            saved.setChildren(List.of());
-            // 使用反射设置 ID（模拟 @PrePersist）
-            try {
-                java.lang.reflect.Field idField = AdminMenu.class.getDeclaredField("id");
-                idField.setAccessible(true);
-                idField.set(saved, 1L);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+            AdminMenu saved = invocation.getArgument(0);
+            setId(saved, 1L);
             return saved;
         });
 
-        // When
         Long menuId = menuManagementAppService.create(command);
 
-        // Then
-        assertThat(menuId).isNotNull();
         assertThat(menuId).isEqualTo(1L);
         verify(menuRepository).save(any(AdminMenu.class));
     }
 
     @Test
     void given_validParentId_when_createMenu_then_success() {
-        // Given
         Long parentId = 1L;
-        var command = new CreateMenuCommand("用户列表", "/users/list", "list", parentId, 1);
+        var command = cmd("用户列表", parentId);
 
-        AdminMenu parentMenu = new AdminMenu("用户管理", "/users", "user", null, 0);
-        parentMenu.setChildren(List.of());
-
+        AdminMenu parentMenu = menu("用户管理", null);
         when(menuRepository.findById(parentId)).thenReturn(Optional.of(parentMenu));
         when(menuRepository.save(any(AdminMenu.class))).thenAnswer(invocation -> {
-            AdminMenu saved = new AdminMenu("用户列表", "/users/list", "list", parentId, 1);
-            saved.setChildren(List.of());
-            // 使用反射设置 ID
-            try {
-                java.lang.reflect.Field idField = AdminMenu.class.getDeclaredField("id");
-                idField.setAccessible(true);
-                idField.set(saved, 2L);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+            AdminMenu saved = invocation.getArgument(0);
+            setId(saved, 2L);
             return saved;
         });
 
-        // When
         Long menuId = menuManagementAppService.create(command);
 
-        // Then
-        assertThat(menuId).isNotNull();
         assertThat(menuId).isEqualTo(2L);
-        verify(menuRepository).save(any(AdminMenu.class));
     }
 
     @Test
     void given_nonExistentParentId_when_createMenu_then_throwException() {
-        // Given
-        Long parentId = 999L;
-        var command = new CreateMenuCommand("用户列表", "/users/list", "list", parentId, 1);
+        var command = cmd("用户列表", 999L);
+        when(menuRepository.findById(999L)).thenReturn(Optional.empty());
 
-        when(menuRepository.findById(parentId)).thenReturn(Optional.empty());
-
-        // When & Then
         assertThatThrownBy(() -> menuManagementAppService.create(command))
                 .isInstanceOf(DomainException.class);
     }
 
     @Test
     void given_maxDepthParent_when_createMenu_then_throwException() {
-        // Given
-        // 创建 3 层菜单链：root -> level1 -> level2 (target)
-        // 添加 level3 会超过 MAX_DEPTH=3
-        Long level2Id = 3L;
-        var command = new CreateMenuCommand("子菜单", "/sub", "sub", level2Id, 1);
+        // root(1) → level1(2) → level2(3)：level2 深度 2，再加子超过 MAX_DEPTH=3
+        AdminMenu root = menu("根菜单", null);
+        setId(root, 1L);
+        AdminMenu level1 = menu("一级", 1L);
+        setId(level1, 2L);
+        AdminMenu level2 = menu("二级", 2L);
+        setId(level2, 3L);
 
-        // 设置菜单链：level2 (parentId=2) -> level1 (parentId=1) -> root (parentId=null)
-        AdminMenu rootMenu = new AdminMenu("根菜单", "/root", "root", null, 0);
-        AdminMenu level1Menu = new AdminMenu("一级菜单", "/level1", "l1", 1L, 1);
-        AdminMenu level2Menu = new AdminMenu("二级菜单", "/level2", "l2", 2L, 1);
+        when(menuRepository.findById(3L)).thenReturn(Optional.of(level2));
+        when(menuRepository.findById(2L)).thenReturn(Optional.of(level1));
+        when(menuRepository.findById(1L)).thenReturn(Optional.of(root));
 
-        // 设置 ID
-        try {
-            java.lang.reflect.Field idField = AdminMenu.class.getDeclaredField("id");
-            idField.setAccessible(true);
-            idField.set(rootMenu, 1L);
-            idField.set(level1Menu, 2L);
-            idField.set(level2Menu, 3L);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        var command = cmd("子菜单", 3L);
 
-        // 设置 findById 返回值
-        when(menuRepository.findById(level2Id)).thenReturn(Optional.of(level2Menu));
-        when(menuRepository.findById(2L)).thenReturn(Optional.of(level1Menu));
-        when(menuRepository.findById(1L)).thenReturn(Optional.of(rootMenu));
-
-        // When & Then - level2 的深度是 2，添加子菜单会达到深度 3，正好是 MAX_DEPTH
-        // 所以这个测试需要调整：让 level2 的深度已经是 MAX_DEPTH - 1 = 2
-        // 实际上 calculateDepth(level2Id) = 2 (level2->level1->root)
-        // 所以添加 level3 会超过限制
         assertThatThrownBy(() -> menuManagementAppService.create(command))
                 .isInstanceOf(DomainException.class);
     }
 
     @Test
-    void given_validData_when_updateMenu_then_success() {
-        // Given
-        Long menuId = 1L;
-        var command = new UpdateMenuCommand("新名称", "/new/path", "newIcon", null, 2);
-
-        AdminMenu existingMenu = new AdminMenu("旧名称", "/old/path", "oldIcon", null, 1);
-        when(menuRepository.findById(menuId)).thenReturn(Optional.of(existingMenu));
-        when(menuRepository.save(any(AdminMenu.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        // When
-        menuManagementAppService.update(menuId, command);
-
-        // Then
-        assertThat(existingMenu.getName()).isEqualTo("新名称");
-        assertThat(existingMenu.getPath()).isEqualTo("/new/path");
-        assertThat(existingMenu.getIcon()).isEqualTo("newIcon");
-        assertThat(existingMenu.getSortOrder()).isEqualTo(2);
-        verify(menuRepository).save(existingMenu);
-    }
-
-    @Test
-    void given_nonExistentMenu_when_update_then_throwException() {
-        // Given
-        Long menuId = 999L;
-        var command = new UpdateMenuCommand("新名称", "/new/path", "newIcon", null, 1);
-
-        when(menuRepository.findById(menuId)).thenReturn(Optional.empty());
-
-        // When & Then
-        assertThatThrownBy(() -> menuManagementAppService.update(menuId, command))
-                .isInstanceOf(DomainException.class);
-    }
-
-    @Test
-    void given_menuAsOwnParent_when_update_then_throwException() {
-        // Given
-        Long menuId = 1L;
-        var command = new UpdateMenuCommand("名称", "/path", "icon", menuId, 1); // 设置自己为父级
-
-        AdminMenu existingMenu = new AdminMenu("名称", "/path", "icon", null, 1);
-        when(menuRepository.findById(menuId)).thenReturn(Optional.of(existingMenu));
-
-        // When & Then
-        assertThatThrownBy(() -> menuManagementAppService.update(menuId, command))
-                .isInstanceOf(DomainException.class);
-    }
-
-    @Test
-    void given_menuWithChildren_when_delete_then_throwException() {
-        // Given
-        Long menuId = 1L;
-        AdminMenu existingMenu = new AdminMenu("父菜单", "/parent", "parent", null, 1);
-
-        when(menuRepository.findById(menuId)).thenReturn(Optional.of(existingMenu));
-        when(menuRepository.existsByParentId(menuId)).thenReturn(true);
-
-        // When & Then
-        assertThatThrownBy(() -> menuManagementAppService.delete(menuId))
-                .isInstanceOf(DomainException.class);
-    }
-
-    @Test
-    void given_menuWithoutChildren_when_delete_then_success() {
-        // Given
-        Long menuId = 1L;
-        AdminMenu existingMenu = new AdminMenu("菜单", "/menu", "menu", null, 1);
-
-        when(menuRepository.findById(menuId)).thenReturn(Optional.of(existingMenu));
-        when(menuRepository.existsByParentId(menuId)).thenReturn(false);
-
-        // When
-        menuManagementAppService.delete(menuId);
-
-        // Then
-        verify(menuRepository).delete(existingMenu);
-    }
-
-    @Test
-    void given_menuId_when_findById_then_returnMenu() {
-        // Given
-        Long menuId = 1L;
-        AdminMenu menu = new AdminMenu("用户管理", "/users", "user", null, 1);
-        when(menuRepository.findById(menuId)).thenReturn(Optional.of(menu));
-        when(adminMenuMapper.convert(menu)).thenReturn(null);
-
-        // When
-        menuManagementAppService.findById(menuId);
-
-        // Then
-        verify(menuRepository).findById(menuId);
-        verify(adminMenuMapper).convert(menu);
-    }
-
-    @Test
-    void given_nonExistentMenuId_when_findById_then_throwException() {
-        // Given
-        Long menuId = 999L;
-        when(menuRepository.findById(menuId)).thenReturn(Optional.empty());
-
-        // When & Then
-        assertThatThrownBy(() -> menuManagementAppService.findById(menuId))
-                .isInstanceOf(DomainException.class);
-    }
-
-    @Test
-    void given_noMenuFilter_when_findTree_then_returnAllMenus() {
-        // Given
-        List<AdminMenu> allMenus = List.of(
-                new AdminMenu("用户管理", "/users", "user", null, 1),
-                new AdminMenu("用户列表", "/users/list", "list", 1L, 1)
-        );
-
-        when(menuRepository.findAll()).thenReturn(allMenus);
-        when(adminMenuMapper.convertList(any())).thenReturn(List.of());
-
-        // When
-        menuManagementAppService.findTree();
-
-        // Then
-        verify(menuRepository).findAll();
-        verify(adminMenuMapper).convertList(any());
-    }
-
-    @Test
-    void given_menuFilter_when_findTree_then_returnFilteredMenus() {
-        // Given
-        AdminMenu menu1 = new AdminMenu("用户管理", "/users", "user", null, 1);
-        AdminMenu menu2 = new AdminMenu("用户列表", "/users/list", "list", 1L, 1);
-        AdminMenu menu3 = new AdminMenu("角色管理", "/roles", "role", null, 2);
-
-        // 使用反射设置 ID
-        try {
-            java.lang.reflect.Field idField = AdminMenu.class.getDeclaredField("id");
-            idField.setAccessible(true);
-            idField.set(menu1, 1L);
-            idField.set(menu2, 2L);
-            idField.set(menu3, 3L);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-
-        List<AdminMenu> allMenus = List.of(menu1, menu2, menu3);
-
-        when(menuRepository.findAll()).thenReturn(allMenus);
-        when(adminMenuMapper.convertList(any())).thenReturn(List.of());
-
-        // When - 只获取用户管理相关的菜单
-        menuManagementAppService.findTree(java.util.Set.of(1L, 2L));
-
-        // Then
-        verify(menuRepository).findAll();
-        verify(adminMenuMapper).convertList(any());
-    }
-
-    // ========== T2: type 透传 + type↔path 不变量经服务层 ==========
-
-    @Test
-    void given_menuTypeGroup_when_create_then_saved_menu_is_group_with_null_path() {
-        var command = new CreateMenuCommand("分组", null, null, null, 1, MenuType.GROUP);
+    void given_menuTypeDirectory_when_create_then_saved_menu_is_directory() {
+        var command = new CreateMenuCommand("系统管理", "manage", "/manage", "layout.base", null, null,
+                null, 2, MenuType.DIRECTORY, null, false, false, false, false, null, null, null, null, null);
         when(menuRepository.save(any(AdminMenu.class))).thenAnswer(inv -> inv.getArgument(0));
 
         menuManagementAppService.create(command);
 
         ArgumentCaptor<AdminMenu> captor = ArgumentCaptor.forClass(AdminMenu.class);
         verify(menuRepository).save(captor.capture());
-        assertThat(captor.getValue().getType()).isEqualTo(MenuType.GROUP);
-        assertThat(captor.getValue().getPath()).isNull();
+        assertThat(captor.getValue().getMenuType()).isEqualTo(MenuType.DIRECTORY);
+        assertThat(captor.getValue().getRoutePath()).isEqualTo("/manage"); // directory 可带 path，不强制
     }
 
     @Test
-    void given_menuTypeMenuWithoutPath_when_create_then_throw_admin014_3() {
-        var command = new CreateMenuCommand("用户管理", null, null, null, 1, MenuType.MENU);
-
-        assertThatThrownBy(() -> menuManagementAppService.create(command))
-                .isInstanceOf(DomainException.class)
-                .extracting("codeMessage")
-                .isEqualTo(AdminMessage.MENU_TYPE_PATH_MISMATCH);
-        verify(menuRepository, never()).save(any(AdminMenu.class));
-    }
-
-    @Test
-    void given_updateToGroup_when_update_then_path_normalized_to_null() {
+    void given_validData_when_updateMenu_then_success() {
         Long menuId = 1L;
-        var command = new UpdateMenuCommand("分组", "/ignored", "icon", null, 1, MenuType.GROUP);
-        AdminMenu existing = new AdminMenu("用户管理", "/users", "user", null, 1);
+        var command = new UpdateMenuCommand("新名称", "manage_user", "/new", null, null, null, null, 2,
+                MenuType.MENU, null, false, false, false, false, null, null, null, null, null);
+        AdminMenu existing = menu("旧名称", null);
         when(menuRepository.findById(menuId)).thenReturn(Optional.of(existing));
         when(menuRepository.save(any(AdminMenu.class))).thenAnswer(inv -> inv.getArgument(0));
 
         menuManagementAppService.update(menuId, command);
 
-        assertThat(existing.getType()).isEqualTo(MenuType.GROUP);
-        assertThat(existing.getPath()).isNull();
+        assertThat(existing.getMenuName()).isEqualTo("新名称");
+        assertThat(existing.getRoutePath()).isEqualTo("/new");
+        assertThat(existing.getSortOrder()).isEqualTo(2);
+        verify(menuRepository).save(existing);
+    }
+
+    @Test
+    void given_nonExistentMenu_when_update_then_throwException() {
+        var command = updateCmd("新名称", null);
+        when(menuRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> menuManagementAppService.update(999L, command))
+                .isInstanceOf(DomainException.class);
+    }
+
+    @Test
+    void given_menuAsOwnParent_when_update_then_throwException() {
+        Long menuId = 1L;
+        var command = new UpdateMenuCommand("名称", "route", "/path", null, null, null, menuId, 1,
+                MenuType.MENU, null, false, false, false, false, null, null, null, null, null);
+        AdminMenu existing = menu("名称", null);
+        when(menuRepository.findById(menuId)).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> menuManagementAppService.update(menuId, command))
+                .isInstanceOf(DomainException.class);
+    }
+
+    @Test
+    void given_menuWithChildren_when_delete_then_throwException() {
+        AdminMenu existing = menu("父菜单", null);
+        when(menuRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(menuRepository.existsByParentId(1L)).thenReturn(true);
+
+        assertThatThrownBy(() -> menuManagementAppService.delete(1L))
+                .isInstanceOf(DomainException.class);
+    }
+
+    @Test
+    void given_menuWithoutChildren_when_delete_then_success() {
+        AdminMenu existing = menu("菜单", null);
+        when(menuRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(menuRepository.existsByParentId(1L)).thenReturn(false);
+
+        menuManagementAppService.delete(1L);
+
+        verify(menuRepository).delete(existing);
+    }
+
+    @Test
+    void given_menuId_when_findById_then_returnMenu() {
+        AdminMenu m = menu("用户管理", null);
+        when(menuRepository.findById(1L)).thenReturn(Optional.of(m));
+        when(adminMenuMapper.convert(m)).thenReturn(null);
+
+        menuManagementAppService.findById(1L);
+
+        verify(menuRepository).findById(1L);
+        verify(adminMenuMapper).convert(m);
+    }
+
+    @Test
+    void given_nonExistentMenuId_when_findById_then_throwException() {
+        when(menuRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> menuManagementAppService.findById(999L))
+                .isInstanceOf(DomainException.class);
+    }
+
+    @Test
+    void given_noMenuFilter_when_findTree_then_returnAllMenus() {
+        List<AdminMenu> allMenus = List.of(menu("用户管理", null), menu("用户列表", 1L));
+        when(menuRepository.findAll()).thenReturn(allMenus);
+        when(adminMenuMapper.convertList(any())).thenReturn(List.of());
+
+        menuManagementAppService.findTree();
+
+        verify(menuRepository).findAll();
+        verify(adminMenuMapper).convertList(any());
+    }
+
+    @Test
+    void given_menuFilter_when_findTree_then_returnFilteredMenus() {
+        AdminMenu m1 = menu("用户管理", null);
+        setId(m1, 1L);
+        AdminMenu m2 = menu("用户列表", 1L);
+        setId(m2, 2L);
+        AdminMenu m3 = menu("角色管理", null);
+        setId(m3, 3L);
+
+        when(menuRepository.findAll()).thenReturn(List.of(m1, m2, m3));
+        when(adminMenuMapper.convertList(any())).thenReturn(List.of());
+
+        menuManagementAppService.findTree(java.util.Set.of(1L, 2L));
+
+        verify(menuRepository).findAll();
+        verify(adminMenuMapper).convertList(any());
+    }
+
+    // ========== helper ==========
+
+    private static CreateMenuCommand cmd(String menuName, Long parentId) {
+        return new CreateMenuCommand(menuName, "route_name", "/route", null, null, null,
+                parentId, 1, MenuType.MENU, null, false, false, false, false,
+                null, null, null, null, null);
+    }
+
+    private static UpdateMenuCommand updateCmd(String menuName, Long parentId) {
+        return new UpdateMenuCommand(menuName, "route_name", "/route", null, null, null,
+                parentId, 1, MenuType.MENU, null, false, false, false, false,
+                null, null, null, null, null);
+    }
+
+    private static AdminMenu menu(String menuName, Long parentId) {
+        return new AdminMenu(menuName, "route_name", "/route", null, null, null,
+                parentId, 0, MenuType.MENU, null, false, false, false, false,
+                null, null, null, null, null);
+    }
+
+    private static void setId(AdminMenu menu, Long id) {
+        try {
+            java.lang.reflect.Field idField = AdminMenu.class.getDeclaredField("id");
+            idField.setAccessible(true);
+            idField.set(menu, id);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }
