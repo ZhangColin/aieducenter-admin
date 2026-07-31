@@ -6,7 +6,7 @@ import com.cartisan.data.jpa.specification.Condition;
 import com.cartisan.data.jpa.specification.ConditionType;
 
 /**
- * 菜单查询条件（扁平分页 {@code GET /menus/page} 用）。
+ * 菜单查询条件（扁平分页 {@code GET /menus} 用）。
  *
  * @since 0.1.0
  */

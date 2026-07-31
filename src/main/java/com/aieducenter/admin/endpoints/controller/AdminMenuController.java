@@ -44,23 +44,23 @@ public class AdminMenuController {
         name = "平台管理 / 菜单管理 / 查看",
         scope = AdminScopes.ADMIN
     )
-    @Operation(summary = "查询菜单列表（树形）")
-    public ApiResponse<List<MenuResponse>> findTree() {
-        return ApiResponse.ok(menuManagementAppService.findTree());
+    @Operation(summary = "查询菜单列表（扁平分页，Soybean 菜单表格用）")
+    public ApiResponse<PageResponse<MenuResponse>> findAll(
+            MenuQuery query,
+            @PageableDefault(size = 20) Pageable pageable) {
+        return ApiResponse.ok(menuManagementAppService.findAll(query, pageable));
     }
 
-    @GetMapping("/page")
+    @GetMapping("/tree")
     @RequireAuth
     @RequirePermission(
         value = "admin:menu:read",
         name = "平台管理 / 菜单管理 / 查看",
         scope = AdminScopes.ADMIN
     )
-    @Operation(summary = "查询菜单列表（扁平分页，Soybean 菜单表格用）")
-    public ApiResponse<PageResponse<MenuResponse>> findAll(
-            MenuQuery query,
-            @PageableDefault(size = 20) Pageable pageable) {
-        return ApiResponse.ok(menuManagementAppService.findAll(query, pageable));
+    @Operation(summary = "查询菜单树（父级选择器 / 角色分配用）")
+    public ApiResponse<List<MenuResponse>> findTree() {
+        return ApiResponse.ok(menuManagementAppService.findTree());
     }
 
     @GetMapping("/{id}")

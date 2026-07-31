@@ -57,7 +57,7 @@ public class MenuManagementAppService {
     }
 
     /**
-     * 扁平分页查询（{@code GET /menus/page}，Soybean 菜单表格用）。
+     * 扁平分页查询（{@code GET /menus}，Soybean 菜单表格用）。
      */
     public PageResponse<MenuResponse> findAll(MenuQuery query, Pageable pageable) {
         Specification<AdminMenu> spec = ConditionSpecifications.fromAnnotation(query);

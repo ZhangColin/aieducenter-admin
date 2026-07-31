@@ -19,7 +19,7 @@ REQ-1（几天前刚交付）把菜单类型定为 **`MENU`(1)/`GROUP`(2)/`DIVID
 1. `AdminMenu` 扩成 Soybean 路由生成器全字段：`menuType`(directory/menu)、`routeName`、`component`、`i18nKey`、`icon`+`iconType`、`order`、`keepAlive`/`constant`/`multiTab`/`hideInMenu`、`activeMenu`、`href`、`fixedIndexInTab`、`query`、`buttons`(REQ-9)、`status`。
 2. **type / path / icon 的一切语义以 Soybean 源码为准**，后端不再自创不变量。旧 `applyTypeAndPath` / `ADMIN_014_3` path 规则、`MenuTreeAssembler` 的 DIVIDER 裁剪分支、REQ-6 的 Material Symbols 约定——**全部作废**。
 3. **V6 迁移重建种子菜单**（V5 的 GROUP 结构作废），icon 改 iconify id（如 `mdi:xxx`）。
-4. 端点：树 `GET /menus`（父级选择器/角色分配，保留）+ 新增扁平分页 `GET /menus/page`（Soybean 菜单表格）。页名选择器由前端构建期派生，不向后端要。
+4. 端点：扁平分页 `GET /menus`（Soybean 菜单表格，集合根分页、对齐 `/users`/`/roles`）+ 树 `GET /menus/tree`（父级选择器/角色分配）。页名选择器由前端构建期派生，不向后端要。
 
 ## 否决
 

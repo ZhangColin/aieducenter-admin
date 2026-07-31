@@ -47,7 +47,10 @@ class AdminMenuControllerTest {
     @BeforeEach
     void setUp() {
         controller = new AdminMenuController(menuManagementAppService);
-        mvc = MockMvcBuilders.standaloneSetup(controller).build();
+        // standalone 默认不注册 Spring Data 的 Pageable 解析器，手动补上以测分页根端点
+        mvc = MockMvcBuilders.standaloneSetup(controller)
+                .setCustomArgumentResolvers(new org.springframework.data.web.PageableHandlerMethodArgumentResolver())
+                .build();
     }
 
     @Test
@@ -57,7 +60,7 @@ class AdminMenuControllerTest {
                 menuResp(2L, "角色管理", "manage_role", "/manage/role")
         ));
 
-        mvc.perform(get("/api/admin/menus"))
+        mvc.perform(get("/api/admin/menus/tree"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].id").value(1))
                 .andExpect(jsonPath("$.data[0].menuName").value("用户管理"))
@@ -65,6 +68,19 @@ class AdminMenuControllerTest {
                 .andExpect(jsonPath("$.data[1].menuName").value("角色管理"));
 
         verify(menuManagementAppService).findTree();
+    }
+
+    @Test
+    void given_query_when_findAll_then_returnPage() throws Exception {
+        com.cartisan.web.response.PageResponse<MenuResponse> page =
+                new com.cartisan.web.response.PageResponse<>(List.of(), 0L, 1, 20);
+        when(menuManagementAppService.findAll(any(), any())).thenReturn(page);
+
+        mvc.perform(get("/api/admin/menus")
+                        .param("page", "0").param("size", "20"))
+                .andExpect(status().isOk());
+
+        verify(menuManagementAppService).findAll(any(), any());
     }
 
     @Test

@@ -24,7 +24,7 @@ _Avoid_: 给 `system` 列塞"系统管理员"的授权含义；把破窗号设�
 
 **菜单 = Soybean 路由生成器数据源 (Menu = Soybean route-generator source)**:
 菜单的**唯一事实源是前端 Soybean Admin 的路由生成器**（`@elegant-router`）——后端菜单模型**完全照 Soybean**，本项目原 `MENU/GROUP/DIVIDER` 三值模型**作废、当不存在**（2026-07-31 拍板："选了 Soybean 做后台就是完全配套"）。这推翻的正是几天前 REQ-1 刚交付的三值模型——见 [ADR-0004](docs/adr/0004-menu-model-follows-soybean.md)。`AdminMenu` 承载 Soybean 路由生成所需全部元数据：`menuType` 两值 `directory(1)`（容器/路由前缀）/ `menu(2)`（叶子页）；外加 `routeName`、`component`（`layout.<L>$view.<P>` 编码）、`i18nKey`、`icon`+`iconType`（`1`=iconify / `2`=local svg）、`sortOrder`（Soybean 叫 `order`，后端保留 `sortOrder` 不改——避 PG 保留字、前端适配）、`keepAlive`/`constant`/`multiTab`/`hideInMenu`、`activeMenu`、`href`、`fixedIndexInTab`、`query`、`buttons`（见 REQ-9）、`status`。**type/path/icon 等一切语义以 Soybean 源码为准，后端不再自创不变量**——旧 `applyTypeAndPath`/`ADMIN_014_3` path 规则、`MenuTreeAssembler` 的 DIVIDER 裁剪逻辑、REQ-6 的 Material Symbols 图标约定**全部作废**；V6 迁移重建种子菜单（V5 的 GROUP 结构作废）。
-端点：树 `GET /menus`（父级选择器/角色分配用，保留）+ 扁平分页 `GET /menus/page`（Soybean 菜单表格用，新增）；页名选择器（`fetchGetAllPages`）由前端构建期派生，不向后端要。
+端点：扁平分页 `GET /menus`（Soybean 菜单表格用，集合根分页、对齐 `/users`/`/roles`）+ 树 `GET /menus/tree`（父级选择器/角色分配用）；页名选择器（`fetchGetAllPages`）由前端构建期派生，不向后端要。
 _Avoid_: 在菜单模型上保留任何"Soybean 没有"的遗物（DIVIDER、旧 path 不变量、Material Symbols）；把 Soybean 既定的 type/icon 语义当开放项重新讨论。
 
 **财务上下文 (Finance Context)**:
