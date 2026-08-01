@@ -57,19 +57,23 @@ class AdminUserControllerTest {
     void given_authenticatedUser_when_findAll_then_returnUsers() throws Exception {
         // Given
         List<AdminUserResponse> users = List.of(
-                new AdminUserResponse(1L, "admin", "管理员", null, null, null, AdminUserStatus.ACTIVE, null, true, null, null, null),
-                new AdminUserResponse(2L, "user", "普通用户", null, null, null, AdminUserStatus.ACTIVE, null, false, null, null, null)
+                new AdminUserResponse(1L, "admin", "管理员", null, null, null, null, null,
+                        AdminUserStatus.ACTIVE, null, true, null, null,
+                        List.of(new AssignedRoleResponse(10L, "运营", "OPERATOR"))),
+                new AdminUserResponse(2L, "user", "普通用户", null, null, null, null, null,
+                        AdminUserStatus.ACTIVE, null, false, null, null, null)
         );
 
         when(adminManagementAppService.findAll(any(AdminUserQuery.class), any()))
                 .thenReturn(new com.cartisan.web.response.PageResponse<>(users, 2, 1, 20));
 
-        // When & Then
+        // When & Then —— 列表项内联角色摘要（issue #17）：有角色则回显，无角色则省略（NON_NULL）
         mvc.perform(get("/api/admin/users"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items.length()").value(2))
                 .andExpect(jsonPath("$.data.items[0].username").value("admin"))
-                .andExpect(jsonPath("$.data.items[0].roles").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].roles[0].code").value("OPERATOR"))
+                .andExpect(jsonPath("$.data.items[1].roles").doesNotExist())
                 .andExpect(jsonPath("$.data.total").value(2));
 
         verify(adminManagementAppService).findAll(any(AdminUserQuery.class), any());
@@ -79,7 +83,7 @@ class AdminUserControllerTest {
     void given_authenticatedUser_when_findById_then_returnUserWithRoles() throws Exception {
         // Given —— 详情响应携带已分配角色摘要（REQ-4）
         when(adminManagementAppService.findById(1L))
-                .thenReturn(new AdminUserResponse(1L, "admin", "管理员", null, null, null,
+                .thenReturn(new AdminUserResponse(1L, "admin", "管理员", null, null, null, null, null,
                         AdminUserStatus.ACTIVE, null, true, null, null,
                         List.of(new AssignedRoleResponse(1L, "超级管理员", "SUPER_ADMIN"))));
 

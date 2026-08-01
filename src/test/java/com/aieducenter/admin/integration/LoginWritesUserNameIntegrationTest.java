@@ -70,7 +70,7 @@ class LoginWritesUserNameIntegrationTest {
         String username = "loginop" + suffix;
         String nickname = "登录运营_" + suffix;
         Long userId = userAppService.create(
-                new CreateAdminUserCommand(username, PASSWORD, nickname, null, null));
+                new CreateAdminUserCommand(username, PASSWORD, nickname, null, null, null));
 
         ResponseEntity<String> response = login(username);
 

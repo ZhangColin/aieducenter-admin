@@ -99,11 +99,11 @@ class RbacEnforcementIntegrationTest {
         roleAppService.assignPermissions(roleId, new AssignPermissionsCommand(List.of(PERMISSION_CODE)));
 
         Long userWithPermissionId = userAppService.create(
-                new CreateAdminUserCommand(usernameWithPermission, PASSWORD, "有权限运营", null, null));
+                new CreateAdminUserCommand(usernameWithPermission, PASSWORD, "有权限运营", null, null, null));
         userAppService.assignRoles(userWithPermissionId, new AssignRolesCommand(List.of(roleId)));
 
         userAppService.create(
-                new CreateAdminUserCommand(usernameWithoutPermission, PASSWORD, "无权限运营", null, null));
+                new CreateAdminUserCommand(usernameWithoutPermission, PASSWORD, "无权限运营", null, null, null));
     }
 
     @Test
@@ -126,7 +126,7 @@ class RbacEnforcementIntegrationTest {
         Long superAdminRoleId = roleAppService.create(
                 new CreateRoleCommand("超管_" + suffix, AdminRole.SUPER_ADMIN_CODE, "超级管理员", 0, null));
         Long superAdminUserId = userAppService.create(
-                new CreateAdminUserCommand(superAdminUsername, PASSWORD, "超管", null, null));
+                new CreateAdminUserCommand(superAdminUsername, PASSWORD, "超管", null, null, null));
         userAppService.assignRoles(superAdminUserId, new AssignRolesCommand(List.of(superAdminRoleId)));
 
         String token = login(superAdminUsername);

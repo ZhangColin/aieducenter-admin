@@ -3,7 +3,9 @@ package com.aieducenter.admin.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -14,16 +16,23 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 
 import com.aieducenter.admin.application.dto.command.AssignRolesCommand;
 import com.aieducenter.admin.application.dto.command.CreateAdminUserCommand;
 import com.aieducenter.admin.application.dto.command.UpdateAdminUserCommand;
+import com.aieducenter.admin.application.dto.query.AdminUserQuery;
 import com.aieducenter.admin.application.dto.response.AdminUserResponse;
 import com.aieducenter.admin.application.dto.response.AssignedRoleResponse;
 import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.domain.aggregate.AdminUser;
+import com.aieducenter.admin.domain.enums.AdminUserGender;
 import com.aieducenter.admin.domain.enums.AdminUserStatus;
 import com.aieducenter.admin.domain.error.AdminMessage;
 import com.aieducenter.admin.domain.repository.AdminRoleRepository;
@@ -33,6 +42,7 @@ import com.aieducenter.admin.application.mapper.AdminUserMapperImpl;
 import com.aieducenter.admin.domain.service.PasswordEncoderService;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.DomainException;
+import com.cartisan.web.response.PageResponse;
 
 @ExtendWith(MockitoExtension.class)
 class AdminUserManagementAppServiceTest {
@@ -69,7 +79,7 @@ class AdminUserManagementAppServiceTest {
     void given_valid_input_when_createAdminUser_then_success() {
         // Given
         CreateAdminUserCommand command = new CreateAdminUserCommand(
-            "testuser", "Test1234", "测试用户", "test@example.com", null
+            "testuser", "Test1234", "测试用户", "test@example.com", null, null
         );
         when(adminUserRepository.existsByUsername("testuser")).thenReturn(false);
         when(passwordEncoderService.encodePassword("Test1234")).thenReturn("$2a$10$encodedPassword");
@@ -95,7 +105,7 @@ class AdminUserManagementAppServiceTest {
     void given_duplicate_username_when_createAdminUser_then_throw_exception() {
         // Given
         CreateAdminUserCommand command = new CreateAdminUserCommand(
-            "testuser", "Test1234", "测试用户", null, null
+            "testuser", "Test1234", "测试用户", null, null, null
         );
         when(adminUserRepository.existsByUsername("testuser")).thenReturn(true);
 
@@ -124,7 +134,7 @@ class AdminUserManagementAppServiceTest {
     void given_valid_input_when_update_then_success() {
         // Given
         Long userId = 1L;
-        UpdateAdminUserCommand command = new UpdateAdminUserCommand("新昵称", "new@example.com", "13900139000", "http://example.com/avatar.jpg");
+        UpdateAdminUserCommand command = new UpdateAdminUserCommand("新昵称", "new@example.com", "13900139000", "http://example.com/avatar.jpg", null);
         AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
 
         when(adminUserRepository.findById(userId)).thenReturn(Optional.of(adminUser));
@@ -144,7 +154,7 @@ class AdminUserManagementAppServiceTest {
     void given_nonexistent_user_when_update_then_throw_exception() {
         // Given
         Long userId = 999L;
-        UpdateAdminUserCommand command = new UpdateAdminUserCommand("新昵称", null, null, null);
+        UpdateAdminUserCommand command = new UpdateAdminUserCommand("新昵称", null, null, null, null);
 
         when(adminUserRepository.findById(userId)).thenReturn(Optional.empty());
 
@@ -158,7 +168,7 @@ class AdminUserManagementAppServiceTest {
     void given_partial_update_when_update_then_only_update_non_null_fields() {
         // Given
         Long userId = 1L;
-        UpdateAdminUserCommand command = new UpdateAdminUserCommand("新昵称", null, null, null);
+        UpdateAdminUserCommand command = new UpdateAdminUserCommand("新昵称", null, null, null, null);
         AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
         adminUser.setEmail("old@example.com");
 
@@ -450,11 +460,131 @@ class AdminUserManagementAppServiceTest {
     @Test
     void given_weak_password_when_create_then_throw_application_exception() {
         // Given
-        CreateAdminUserCommand command = new CreateAdminUserCommand("testuser", "weak", "测试用户", null, null);
+        CreateAdminUserCommand command = new CreateAdminUserCommand("testuser", "weak", "测试用户", null, null, null);
 
         // When & Then
         assertThatThrownBy(() -> adminUserManagementAppService.create(command))
             .isInstanceOf(ApplicationException.class)
             .hasMessageContaining(AdminMessage.PASSWORD_WEAK.message());
+    }
+
+    // ========== findAll：列表内联角色摘要（issue #17，批量取角色、无 N+1）==========
+
+    @Test
+    void given_usersWithRoles_when_findAll_then_rolesInlinedBatchSingleQuery() throws Exception {
+        // Given —— 两用户共挂 3 个角色；gender 顺带验证透传
+        AdminUser user1 = new AdminUser("listu1", "Test1234", "用户一");
+        user1.setGender(AdminUserGender.MALE);
+        AdminUser user2 = new AdminUser("listu2", "Test1234", "用户二");
+        user1.addRole(1L);
+        user1.addRole(2L);
+        user2.addRole(3L);
+
+        AdminRole role1 = new AdminRole("管理员", "ADMIN", "管理员", 1);
+        AdminRole role2 = new AdminRole("操作员", "OPERATOR", "操作员", 2);
+        AdminRole role3 = new AdminRole("客服", "SUPPORT", "客服", 3);
+        setRoleId(role1, 1L);
+        setRoleId(role2, 2L);
+        setRoleId(role3, 3L);
+
+        Pageable pageable = PageRequest.of(0, 20);
+        when(adminUserRepository.findAll(any(Specification.class), eq(pageable)))
+            .thenReturn(new PageImpl<>(List.of(user1, user2), pageable, 2));
+        when(adminRoleRepository.findByIdInAndDeletedFalse(Set.of(1L, 2L, 3L)))
+            .thenReturn(List.of(role1, role2, role3));
+
+        // When
+        PageResponse<AdminUserResponse> page =
+            serviceWithRealMapper().findAll(new AdminUserQuery(null, null, null, null, null), pageable);
+
+        // Then —— 每行内联角色摘要裁剪投影 {id,name,code}；gender 透传；批量只查一次（无 N+1）
+        AdminUserResponse r1 = page.items().stream()
+            .filter(r -> "listu1".equals(r.username())).findFirst().orElseThrow();
+        AdminUserResponse r2 = page.items().stream()
+            .filter(r -> "listu2".equals(r.username())).findFirst().orElseThrow();
+        assertThat(r1.roles()).extracting(AssignedRoleResponse::code)
+            .containsExactlyInAnyOrder("ADMIN", "OPERATOR");
+        assertThat(r2.roles()).extracting(AssignedRoleResponse::code).containsExactly("SUPPORT");
+        assertThat(r1.gender()).isEqualTo(AdminUserGender.MALE);
+        assertThat(r1.genderName()).isEqualTo("男");
+        assertThat(r2.gender()).isNull();
+        assertThat(r2.genderName()).isNull();
+        verify(adminRoleRepository, times(1)).findByIdInAndDeletedFalse(any());
+    }
+
+    @Test
+    void given_softDeletedRoleStaleLink_when_findAll_then_roleExcludedFromList() throws Exception {
+        // Given —— 角色 2 已软删但关联残留（findByIdInAndDeletedFalse 不返回它）
+        AdminUser user = new AdminUser("listu1", "Test1234", "用户一");
+        user.addRole(1L);
+        user.addRole(2L);
+        AdminRole alive = new AdminRole("管理员", "ADMIN", "管理员", 1);
+        setRoleId(alive, 1L);
+
+        Pageable pageable = PageRequest.of(0, 20);
+        when(adminUserRepository.findAll(any(Specification.class), eq(pageable)))
+            .thenReturn(new PageImpl<>(List.of(user), pageable, 1));
+        when(adminRoleRepository.findByIdInAndDeletedFalse(Set.of(1L, 2L)))
+            .thenReturn(List.of(alive)); // 仅存活角色
+
+        // When
+        PageResponse<AdminUserResponse> page =
+            serviceWithRealMapper().findAll(new AdminUserQuery(null, null, null, null, null), pageable);
+
+        // Then —— 软删角色不回显（与 findById 同语义）
+        assertThat(page.items().get(0).roles()).extracting(AssignedRoleResponse::code)
+            .containsExactly("ADMIN");
+    }
+
+    @Test
+    void given_noRolesAcrossPage_when_findAll_then_rolesEmptyAndNoRoleQuery() {
+        // Given —— 本页用户均无角色
+        AdminUser user = new AdminUser("listu1", "Test1234", "用户一");
+        Pageable pageable = PageRequest.of(0, 20);
+        when(adminUserRepository.findAll(any(Specification.class), eq(pageable)))
+            .thenReturn(new PageImpl<>(List.of(user), pageable, 1));
+
+        // When
+        PageResponse<AdminUserResponse> page =
+            serviceWithRealMapper().findAll(new AdminUserQuery(null, null, null, null, null), pageable);
+
+        // Then —— 无角色时返回 []，且不发起无谓的角色批量查询
+        assertThat(page.items().get(0).roles()).isNotNull().isEmpty();
+        verify(adminRoleRepository, never()).findByIdInAndDeletedFalse(any());
+    }
+
+    // ========== gender CRUD 透传（issue #17）==========
+
+    @Test
+    void given_genderInCommand_when_create_then_genderSetOnSavedEntity() {
+        // Given
+        CreateAdminUserCommand command = new CreateAdminUserCommand(
+            "gendertest", "Test1234", "性别用户", null, null, AdminUserGender.FEMALE);
+        when(adminUserRepository.existsByUsername("gendertest")).thenReturn(false);
+        when(passwordEncoderService.encodePassword("Test1234")).thenReturn("$2a$10$encoded");
+        ArgumentCaptor<AdminUser> captor = ArgumentCaptor.forClass(AdminUser.class);
+        when(adminUserRepository.save(captor.capture())).thenAnswer(inv -> inv.getArgument(0));
+
+        // When
+        adminUserManagementAppService.create(command);
+
+        // Then —— gender 透传到落库实体
+        assertThat(captor.getValue().getGender()).isEqualTo(AdminUserGender.FEMALE);
+    }
+
+    @Test
+    void given_genderInUpdateCommand_when_update_then_genderSet() {
+        // Given
+        Long userId = 1L;
+        UpdateAdminUserCommand command = new UpdateAdminUserCommand(null, null, null, null, AdminUserGender.MALE);
+        AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
+        when(adminUserRepository.findById(userId)).thenReturn(Optional.of(adminUser));
+
+        // When
+        adminUserManagementAppService.update(userId, command);
+
+        // Then
+        assertThat(adminUser.getGender()).isEqualTo(AdminUserGender.MALE);
+        verify(adminUserRepository).save(adminUser);
     }
 }

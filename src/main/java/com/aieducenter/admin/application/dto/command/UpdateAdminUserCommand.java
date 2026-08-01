@@ -1,5 +1,7 @@
 package com.aieducenter.admin.application.dto.command;
 
+import com.aieducenter.admin.domain.enums.AdminUserGender;
+
 import jakarta.validation.constraints.Size;
 
 /**
@@ -19,7 +21,9 @@ public record UpdateAdminUserCommand(
         String phone,
 
         @Size(max = 512, message = "头像URL长度不能超过512")
-        String avatar
+        String avatar,
+
+        AdminUserGender gender
 
 ) {
 }

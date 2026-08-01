@@ -57,7 +57,7 @@ class RoleAssignmentConcurrencyIntegrationTest {
     void setUp() {
         // Create test user
         CreateAdminUserCommand userCmd = new CreateAdminUserCommand(
-            "testuser_concurrent", "Test1234", "测试用户", null, null
+            "testuser_concurrent", "Test1234", "测试用户", null, null, null
         );
         userId = adminUserManagementAppService.create(userCmd);
 

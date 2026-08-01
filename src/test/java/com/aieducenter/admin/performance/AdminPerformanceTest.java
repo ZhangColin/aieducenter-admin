@@ -152,7 +152,7 @@ class AdminPerformanceTest {
     void given_1000_users_when_query_pagination_then_should_complete_within_500ms() {
         // Given
         Pageable pageable = PageRequest.of(0, 20);
-        AdminUserQuery query = new AdminUserQuery(null, null, null);
+        AdminUserQuery query = new AdminUserQuery(null, null, null, null, null);
 
         // When
         long startTime = System.currentTimeMillis();
@@ -245,7 +245,7 @@ class AdminPerformanceTest {
     void given_1000_users_when_query_pagination_10_times_then_average_should_be_within_300ms() {
         // Given
         Pageable pageable = PageRequest.of(0, 20);
-        AdminUserQuery query = new AdminUserQuery(null, null, null);
+        AdminUserQuery query = new AdminUserQuery(null, null, null, null, null);
         int iterations = 10;
         long totalDuration = 0;
 
@@ -284,6 +284,7 @@ class AdminPerformanceTest {
                 "bulk_user_" + i,
                 "Test1234",
                 "批量用户 " + i,
+                null,
                 null,
                 null
             ));

@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
+import com.aieducenter.admin.domain.enums.AdminUserGender;
 import com.aieducenter.admin.domain.enums.AdminUserStatus;
 import com.aieducenter.admin.domain.error.AdminMessage;
 import com.cartisan.core.exception.DomainException;
@@ -92,6 +93,38 @@ class AdminUserTest {
 
         // Then
         assertThat(adminUser.getStatus()).isEqualTo(AdminUserStatus.ACTIVE);
+    }
+
+    // ========== 性别（对齐 Soybean 用户档案）==========
+
+    @Test
+    void given_newAdmin_when_created_then_gender_null() {
+        // 性别为可选档案字段，创建时默认 null（未填）
+        AdminUser adminUser = new AdminUser("testuser", encodePassword("Test1234"), "测试用户");
+
+        assertThat(adminUser.getGender()).isNull();
+    }
+
+    @Test
+    void given_admin_when_setGender_then_roundTrip() {
+        AdminUser adminUser = new AdminUser("testuser", encodePassword("Test1234"), "测试用户");
+
+        adminUser.setGender(AdminUserGender.MALE);
+
+        assertThat(adminUser.getGender()).isEqualTo(AdminUserGender.MALE);
+        assertThat(adminUser.getGender().getCode()).isEqualTo(1);
+        assertThat(adminUser.getGender().getName()).isEqualTo("男");
+    }
+
+    @Test
+    void given_maleAdmin_when_setGenderFemale_then_changed() {
+        AdminUser adminUser = new AdminUser("testuser", encodePassword("Test1234"), "测试用户");
+        adminUser.setGender(AdminUserGender.MALE);
+
+        adminUser.setGender(AdminUserGender.FEMALE);
+
+        assertThat(adminUser.getGender()).isEqualTo(AdminUserGender.FEMALE);
+        assertThat(adminUser.getGender().getCode()).isEqualTo(2);
     }
 
     // ========== 破窗账号（运维韧性）守卫 ==========

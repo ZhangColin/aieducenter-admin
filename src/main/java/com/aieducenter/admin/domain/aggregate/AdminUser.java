@@ -15,6 +15,7 @@ import com.cartisan.data.jpa.domain.AuditableSoftDeletable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 import com.aieducenter.admin.domain.entity.AdminUserRole;
 import com.aieducenter.admin.domain.error.AdminMessage;
+import com.aieducenter.admin.domain.enums.AdminUserGender;
 import com.aieducenter.admin.domain.enums.AdminUserStatus;
 
 import jakarta.persistence.*;
@@ -28,7 +29,7 @@ import lombok.Setter;
  * <ul>
  *   <li>封装管理员状态和行为</li>
  *   <li>管理登录凭证（用户名、密码）</li>
- *   <li>管理个人信息（昵称、邮箱、手机号、头像）</li>
+ *   <li>管理个人信息（昵称、邮箱、手机号、头像、性别）</li>
  * </ul>
  *
  * <h3>不变量</h3>
@@ -84,6 +85,16 @@ public class AdminUser extends AuditableSoftDeletable implements AggregateRoot<A
     @Setter
     @Column(name = "avatar", length = 512)
     private String avatar;
+
+    /**
+     * 性别（对齐 Soybean 用户档案，{@code 1}=男 / {@code 2}=女，整数枚举）。可空——可不填。
+     *
+     * <p>同 {@link #email}/{@link #phone}/{@link #avatar}：纯档案属性，无领域不变量，经 setter 直写。</p>
+     */
+    @Getter
+    @Setter
+    @Column(name = "gender")
+    private AdminUserGender gender;
 
     @Getter
     @Column(name = "status", nullable = false)

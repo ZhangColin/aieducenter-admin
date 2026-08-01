@@ -142,7 +142,7 @@ class AdminStressTest {
                     startLatch.await(); // Wait for all threads to be ready
 
                     long startTime = System.currentTimeMillis();
-                    adminUserManagementAppService.findAll(new AdminUserQuery(null, null, null), pageable);
+                    adminUserManagementAppService.findAll(new AdminUserQuery(null, null, null, null, null), pageable);
                     long endTime = System.currentTimeMillis();
 
                     synchronized (responseTimes) {
@@ -279,7 +279,7 @@ class AdminStressTest {
                     // Perform multiple DB operations in each thread
                     for (int j = 0; j < 5; j++) {
                         Pageable pageable = PageRequest.of(0, 10);
-                        adminUserManagementAppService.findAll(new AdminUserQuery(null, null, null), pageable);
+                        adminUserManagementAppService.findAll(new AdminUserQuery(null, null, null, null, null), pageable);
                     }
 
                     successCount.incrementAndGet();
@@ -339,6 +339,7 @@ class AdminStressTest {
                         "cuser_" + threadIndex,
                         "Test1234",
                         "并发用户 " + threadIndex,
+                        null,
                         null,
                         null
                     );

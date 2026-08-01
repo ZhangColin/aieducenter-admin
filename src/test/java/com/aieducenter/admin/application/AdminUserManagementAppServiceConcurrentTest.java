@@ -66,7 +66,7 @@ class AdminUserManagementAppServiceConcurrentTest {
         // Given
         String username = "concurrentuser";
         CreateAdminUserCommand command = new CreateAdminUserCommand(
-            username, "Test1234", "测试用户", "test@example.com", null
+            username, "Test1234", "测试用户", "test@example.com", null, null
         );
 
         AtomicInteger callCount = new AtomicInteger(0);

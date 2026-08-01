@@ -1,6 +1,8 @@
 package com.aieducenter.admin.application;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -66,18 +68,46 @@ public class AdminUserManagementAppService {
 
     /**
      * 查询管理员列表（分页）。
+     *
+     * <p>每行内联已分配角色摘要（裁剪投影 {@code {id, name, code}}）。角色按本页全部用户的角色 ID
+     * <b>批量查一次</b>（{@link AdminRoleRepository#findByIdInAndDeletedFalse(Collection)}），再在内存按用户分组——
+     * 无 N+1。显式排除软删角色（关联行无软删标志，残留关联对应的角色不回显），与 {@link #findById} 同语义。</p>
      */
     @Transactional(readOnly = true)
     public PageResponse<AdminUserResponse> findAll(AdminUserQuery query, Pageable pageable) {
         Specification<AdminUser> spec = ConditionSpecifications.fromAnnotation(query);
         Page<AdminUser> page = adminUserRepository.findAll(spec, pageable);
+        List<AdminUser> users = page.getContent();
+
+        // 批量取本页全部用户所挂角色（一次查询，无 N+1）
+        Set<Long> roleIds = users.stream()
+                .flatMap(u -> u.getRoleIds().stream())
+                .collect(Collectors.toSet());
+        Map<Long, AdminRole> roleById = roleIds.isEmpty()
+                ? Map.of()
+                : adminRoleRepository.findByIdInAndDeletedFalse(roleIds).stream()
+                        .collect(Collectors.toMap(AdminRole::getId, role -> role));
+
+        List<AdminUserResponse> responses = users.stream()
+                .map(u -> adminUserMapper.convertWithRoles(u, rolesFor(u, roleById)))
+                .collect(Collectors.toList());
 
         return new PageResponse<>(
-                adminUserMapper.convertList(page.getContent()),
+                responses,
                 page.getTotalElements(),
                 pageable.getPageNumber() + 1,
                 pageable.getPageSize()
         );
+    }
+
+    /**
+     * 从批量加载的角色字典中取出该用户的存活角色（显式过滤软删角色的残留关联）。
+     */
+    private static List<AdminRole> rolesFor(AdminUser user, Map<Long, AdminRole> roleById) {
+        return user.getRoleIds().stream()
+                .map(roleById::get)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
     }
 
     /**
@@ -126,6 +156,9 @@ public class AdminUserManagementAppService {
         if (command.phone() != null) {
             adminUser.setPhone(command.phone());
         }
+        if (command.gender() != null) {
+            adminUser.setGender(command.gender());
+        }
 
         AdminUser saved = adminUserRepository.save(adminUser);
         return saved.getId();
@@ -152,6 +185,9 @@ public class AdminUserManagementAppService {
         }
         if (command.avatar() != null) {
             adminUser.setAvatar(command.avatar());
+        }
+        if (command.gender() != null) {
+            adminUser.setGender(command.gender());
         }
 
         adminUserRepository.save(adminUser);

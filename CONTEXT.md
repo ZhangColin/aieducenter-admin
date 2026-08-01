@@ -64,6 +64,7 @@ _Avoid_: 在菜单模型上保留任何"Soybean 没有"的遗物（DIVIDER、旧
 **搁置**——REQ-12 `AuditorAware<Long>`（视为前端过度设计，等其余功能就绪再单独过审计字段；此前 createdBy/updatedBy 出站暂缓，`createdAt/updatedAt` 可先出）。
 **已定(REQ-8 命名)**——DB 列 + Java 字段 + JSON 契约**对齐 Soybean 命名**（`menu_name/route_path/menu_type/i18n_key/...`，V6 重建菜单表反正要动）；**唯一例外 `sortOrder` 保留、不改为 Soybean 的 `order`**（避 PostgreSQL 保留字）——前端 `order` 适配回 `sortOrder`；索引名按 Soybean 名称。
 **待核实已清**——issue #11 的"用户列表 total=2 但无行"+ 三聚合（User/Role/Menu）软删读过滤一致性，此前已解决（commit `3bc447a`/`b5c0d0b`，REQ-5 软删读过滤），无需再查。
+**已定(REQ-11 用户档案)**——用户档案对齐 Soybean（[issue #17](https://github.com/ZhangColin/aieducenter-admin/issues/17)）：`AdminUser` 加 `gender`（`AdminUserGender` 1 男 / 2 女，整数枚举，V8 迁移加可空 `gender` 列），透传 `Create/UpdateAdminUserCommand` + `AdminUserQuery` + `AdminUserResponse`（+`genderName` 镜像既有 `statusName`）；`AdminUserQuery` 加独立 `phone` 模糊搜索（keyword 仍覆盖 username/nickname/email，phone 独立字段）；**用户列表项内联角色摘要**（裁剪投影 `{id,name,code}`，按本页全部用户角色 ID 批量 `findByIdInAndDeletedFalse` 一次取齐、内存分组，无 N+1；显式过滤软删角色的残留关联，与详情同语义）；`AdminUserResponse` 出 `createdAt/updatedAt`（REQ-12 审计字段先出此二者、`createdBy/updatedBy` 暂缓，见上 REQ-12 搁置条）。
 
 ## ADR
 

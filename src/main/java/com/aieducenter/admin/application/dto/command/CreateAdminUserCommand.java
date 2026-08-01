@@ -1,5 +1,7 @@
 package com.aieducenter.admin.application.dto.command;
 
+import com.aieducenter.admin.domain.enums.AdminUserGender;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -27,7 +29,9 @@ public record CreateAdminUserCommand(
         String email,
 
         @Size(max = 20, message = "手机号长度不能超过20")
-        String phone
+        String phone,
+
+        AdminUserGender gender
 
 ) {
 }

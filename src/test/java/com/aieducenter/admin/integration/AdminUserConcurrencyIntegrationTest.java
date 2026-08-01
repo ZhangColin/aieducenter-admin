@@ -57,7 +57,7 @@ class AdminUserConcurrencyIntegrationTest {
                 try {
                     startLatch.await();
                     CreateAdminUserCommand command = new CreateAdminUserCommand(
-                        username, password, "测试用户", null, null
+                        username, password, "测试用户", null, null, null
                     );
                     adminUserManagementAppService.create(command);
                     successCount.incrementAndGet();

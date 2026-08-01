@@ -99,7 +99,7 @@ class RoleManagementSoybeanAlignmentIntegrationTest {
         callerUsername = "rolecaller";
         if (!adminUserRepository.existsByUsername(callerUsername)) {
             Long callerId = userAppService.create(
-                    new CreateAdminUserCommand(callerUsername, PASSWORD, "调用者", null, null));
+                    new CreateAdminUserCommand(callerUsername, PASSWORD, "调用者", null, null, null));
             userAppService.assignRoles(callerId, new AssignRolesCommand(List.of(superAdminRoleId)));
         }
     }

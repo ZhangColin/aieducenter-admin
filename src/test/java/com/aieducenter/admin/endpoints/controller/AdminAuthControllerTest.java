@@ -95,7 +95,7 @@ class AdminAuthControllerTest {
     @Test
     void given_authenticatedUser_when_getCurrentAdmin_then_returnUserInfo() throws Exception {
         // Given
-        AdminUserResponse user = new AdminUserResponse(1L, "admin", "管理员", null, null, null,
+        AdminUserResponse user = new AdminUserResponse(1L, "admin", "管理员", null, null, null, null, null,
                 AdminUserStatus.ACTIVE, null, true, null, null, null);
         List<String> roleCodes = List.of("SUPER_ADMIN");
         List<String> permissions = List.of("admin:user:read", "admin:user:write");

@@ -111,7 +111,7 @@ class BreakGlassAccountProtectionIntegrationTest {
         callerUsername = "bgcaller";
         if (!adminUserRepository.existsByUsername(callerUsername)) {
             Long callerId = userAppService.create(
-                    new CreateAdminUserCommand(callerUsername, PASSWORD, "调用者", null, null));
+                    new CreateAdminUserCommand(callerUsername, PASSWORD, "调用者", null, null, null));
             userAppService.assignRoles(callerId, new AssignRolesCommand(List.of(superAdminRoleId)));
         }
     }
@@ -183,7 +183,7 @@ class BreakGlassAccountProtectionIntegrationTest {
 
         String username = "flagcheck" + uuidSuffix();
         Long normalId = userAppService.create(
-                new CreateAdminUserCommand(username, PASSWORD, "普通运营", null, null));
+                new CreateAdminUserCommand(username, PASSWORD, "普通运营", null, null, null));
         ResponseEntity<String> normalResp = withToken(HttpMethod.GET, "/api/admin/users/" + normalId, token, null);
         assertThat(normalResp.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(breakGlassFlag(normalResp)).isFalse();
