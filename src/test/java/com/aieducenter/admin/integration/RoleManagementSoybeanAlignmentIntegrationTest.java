@@ -46,6 +46,8 @@ import cn.dev33.satoken.config.SaTokenConfig;
  *   <li>{@code GET /roles/all}：仅启用、不分页、精简 {id,name,code}</li>
  *   <li>{@code home} CRUD round-trip + {@code RoleResponse} 出 status/createdAt/updatedAt</li>
  *   <li>分配接口接受空集 = 清空（去掉 {@code @NotEmpty}）</li>
+ *   <li>列表排序（issue #19）：{@code GET /roles} 默认 sortOrder 升序 + id 升序兜底（SQL 层、先于分页，
+ *       客户端 {@code ?sort=} 可覆盖）；{@code GET /roles/all} 同序且形状不变</li>
  * </ul>
  *
  * <p>仿 {@link BreakGlassAccountProtectionIntegrationTest}：真库（{@code ddl-auto=create}、Flyway 关闭）
@@ -229,18 +231,100 @@ class RoleManagementSoybeanAlignmentIntegrationTest {
         assertThat(getRole(token, roleId).path("permissionCodes").size()).isZero();
     }
 
+    // ========== 列表排序（issue #19：sortOrder 升序 + id 升序兜底）==========
+
+    @Test
+    @DisplayName("GET /roles 不带 sort：按 sortOrder 升序、id 升序兜底")
+    void given_rolesInsertedOutOfOrder_when_listWithoutSort_then_sortOrderAscIdAsc() throws Exception {
+        String token = login(callerUsername);
+        String prefix = "SORT" + uuidSuffix();
+        // 插入顺序与期望顺序相反：A(30) 先插、B/C(20) 后插；B/C 同值 → id 升序兜底（B 先插 id 小，在前）
+        Long a = createRole(token, "排序A_" + prefix, prefix + "_A", null, 30);
+        Long b = createRole(token, "排序B_" + prefix, prefix + "_B", null, 20);
+        Long c = createRole(token, "排序C_" + prefix, prefix + "_C", null, 20);
+
+        List<Long> ordered = filteredIds(listRoleItems(token, "?size=100"), prefix);
+
+        assertThat(ordered).containsExactly(b, c, a);
+    }
+
+    @Test
+    @DisplayName("GET /roles 排序先于分页：最小 sortOrder 的角色最后插入，仍在第一页首位")
+    void given_minSortOrderRoleInsertedLast_when_firstPageSizeOne_then_itIsFirst() throws Exception {
+        String token = login(callerUsername);
+        String prefix = "SORTP" + uuidSuffix();
+        // sortOrder=-1 全局最小、物理最后插入——若未排序或仅内存排当前页，它都不会出现在 page0 size1
+        Long z = createRole(token, "排序Z_" + prefix, prefix + "_Z", null, -1);
+
+        JsonNode items = listRoleItems(token, "?page=0&size=1");
+
+        assertThat(items.size()).isEqualTo(1);
+        assertThat(items.get(0).path("id").asLong()).isEqualTo(z);
+    }
+
+    @Test
+    @DisplayName("GET /roles 带 ?sort=sortOrder,desc：客户端排序覆盖默认兜底")
+    void given_roles_when_listWithExplicitDescSort_then_clientSortWins() throws Exception {
+        String token = login(callerUsername);
+        String prefix = "SORTD" + uuidSuffix();
+        Long a = createRole(token, "排序甲_" + prefix, prefix + "_A", null, 30);
+        Long b = createRole(token, "排序乙_" + prefix, prefix + "_B", null, 20);
+
+        List<Long> ordered = filteredIds(listRoleItems(token, "?size=100&sort=sortOrder,desc"), prefix);
+
+        assertThat(ordered).containsExactly(a, b);
+    }
+
+    @Test
+    @DisplayName("GET /roles/all：按 sortOrder 升序、id 升序兜底（响应仍为精简 {id,name,code}）")
+    void given_enabledRoles_when_getAll_then_sortOrderAscIdAsc() throws Exception {
+        String token = login(callerUsername);
+        String prefix = "SORTA" + uuidSuffix();
+        Long d = createRole(token, "字典D_" + prefix, prefix + "_D", null, 60);
+        Long e = createRole(token, "字典E_" + prefix, prefix + "_E", null, 50);
+        Long f = createRole(token, "字典F_" + prefix, prefix + "_F", null, 50);
+
+        ResponseEntity<String> response = withToken(HttpMethod.GET, "/api/admin/roles/all", token, null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode data = objectMapper.readTree(response.getBody()).path("data");
+        List<Long> ordered = filteredIds(data, prefix);
+
+        assertThat(ordered).containsExactly(e, f, d);
+    }
+
     // ========== helpers ==========
 
     private Long createRole(String token, String name, String code, String home) {
+        return createRole(token, name, code, home, 10);
+    }
+
+    private Long createRole(String token, String name, String code, String home, int sortOrder) {
         ResponseEntity<String> response = withToken(HttpMethod.POST, "/api/admin/roles", token,
                 "{\"name\":\"" + name + "\",\"code\":\"" + code + "\",\"description\":null,"
-                        + "\"sortOrder\":10,\"home\":" + (home == null ? "null" : "\"" + home + "\"") + "}");
+                        + "\"sortOrder\":" + sortOrder + ",\"home\":" + (home == null ? "null" : "\"" + home + "\"") + "}");
         assertThat(response.getStatusCode()).as("创建角色应 200：%s", response.getBody()).isEqualTo(HttpStatus.OK);
         try {
             return objectMapper.readTree(response.getBody()).path("data").asLong();
         } catch (Exception e) {
             throw new AssertionError("解析角色 id 失败：" + response.getBody(), e);
         }
+    }
+
+    private JsonNode listRoleItems(String token, String query) throws Exception {
+        ResponseEntity<String> response = withToken(HttpMethod.GET, "/api/admin/roles" + query, token, null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return objectMapper.readTree(response.getBody()).path("data").path("items");
+    }
+
+    /** 在 items 数组中按 code 前缀过滤，保留响应顺序返回 id 列表。 */
+    private List<Long> filteredIds(JsonNode items, String codePrefix) {
+        List<Long> ids = new ArrayList<>();
+        for (JsonNode item : items) {
+            if (item.path("code").asText().startsWith(codePrefix)) {
+                ids.add(item.path("id").asLong());
+            }
+        }
+        return ids;
     }
 
     private JsonNode getRole(String token, Long roleId) throws Exception {

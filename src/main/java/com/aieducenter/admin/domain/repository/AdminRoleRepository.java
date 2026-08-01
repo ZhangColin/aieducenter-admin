@@ -21,10 +21,11 @@ public interface AdminRoleRepository extends BaseRepository<AdminRole, Long> {
     Optional<AdminRole> findByCode(String code);
 
     /**
-     * 按状态查询未软删角色（{@code GET /roles/all} 字典：仅启用）。显式 {@code DeletedFalse}
+     * 按状态查询未软删角色（{@code GET /roles/all} 字典：仅启用），按 sortOrder 升序、id 升序兜底
+     * （对齐菜单侧排序先例，issue #19）。显式 {@code DeletedFalse}
      * （框架级软删读过滤当前不生效，见 cartisan-boot#2）。
      */
-    List<AdminRole> findByStatusAndDeletedFalse(AdminRoleStatus status);
+    List<AdminRole> findByStatusAndDeletedFalseOrderBySortOrderAscIdAsc(AdminRoleStatus status);
 
     /**
      * 批量按 id 查询未软删角色。

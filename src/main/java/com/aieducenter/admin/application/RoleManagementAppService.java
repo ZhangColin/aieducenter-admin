@@ -246,7 +246,7 @@ public class RoleManagementAppService {
      */
     @Transactional(readOnly = true)
     public List<RoleOptionResponse> listEnabledOptions() {
-        return roleRepository.findByStatusAndDeletedFalse(AdminRoleStatus.ENABLED).stream()
+        return roleRepository.findByStatusAndDeletedFalseOrderBySortOrderAscIdAsc(AdminRoleStatus.ENABLED).stream()
                 .map(r -> new RoleOptionResponse(r.getId(), r.getName(), r.getCode()))
                 .toList();
     }

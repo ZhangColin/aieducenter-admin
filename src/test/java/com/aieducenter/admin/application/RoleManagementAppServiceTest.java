@@ -496,9 +496,9 @@ class RoleManagementAppServiceTest {
 
     @Test
     void given_enabledRoles_when_listEnabledOptions_then_mappedToOptions() {
-        // 仓储已按 status=ENABLED + 未软删 过滤，服务层只做 {id,name,code} 映射
+        // 仓储已按 status=ENABLED + 未软删 过滤并按 sortOrder 升序排序，服务层只做 {id,name,code} 映射
         AdminRole enabled = new AdminRole("运营", "OPERATOR", "运营", 1);
-        when(roleRepository.findByStatusAndDeletedFalse(AdminRoleStatus.ENABLED))
+        when(roleRepository.findByStatusAndDeletedFalseOrderBySortOrderAscIdAsc(AdminRoleStatus.ENABLED))
             .thenReturn(List.of(enabled));
 
         var options = roleManagementAppService.listEnabledOptions();
