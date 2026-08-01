@@ -163,7 +163,7 @@ Single-context — root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 - Operator 不做 SSO（唯一内部应用，本地登录即可）。
 - 财务上下文在本应用（非独立域）：只读各能力域（支付/钱包/Token计量）做收入确认（履约时点）+ append-only 冲销；不收款、不持余额、不计量 token。
 - 经 cartisan-openapi 签名调用各能力域；前端不直连各域（经本 BFF 聚合）。
-- 现有 RBAC（AdminUser/Role/Menu + sys_admin_*）已建、继续用。动手前先修已知 bug：① Sa-Token loginType 对不上（StpInterface 等 "admin" 但默认 "login"）→ @RequirePermission 可能全员失效；② 超管无 bypass；③ AdminUser 未映射 system 列、内置 admin 可被删。
+- 现有 RBAC（AdminUser/Role/Menu + sys_admin_*）已建、继续用。架构仓原列的三个已知 bug **均已修**（行为由 `RbacEnforcementIntegrationTest` / `BreakGlassAccountProtectionIntegrationTest` 钉住）：① Sa-Token 统一用默认 loginType `"login"`、`StpInterface` 无条件返回 admin 权限（[ADR-0001](docs/adr/0001-admin-uses-default-sa-token-login-type.md)）；② 超管 bypass 走框架 `AuthorizationBypassResolver` SPI（app 注入 `isSuperAdmin`，[ADR-0002](docs/adr/0002-super-admin-bypass-is-framework-gap.md)）；③ 内置 admin 按保留 ID=1 不可删/不可禁（破窗守卫，V4 已 drop `system` 列，[ADR-0003](docs/adr/0003-break-glass-reserved-id.md)）。
 
 深度（财务上下文、各域聚合流转）：读架构仓库 architecture.md §5.3、§6.15、CONTEXT.md、integration-flows.md、map.md。
 本项目自己的设计演进 → 本项目的 CONTEXT.md + docs/adr/。
