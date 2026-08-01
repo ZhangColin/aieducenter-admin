@@ -7,12 +7,15 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import com.aieducenter.admin.application.AdminUserPermissionAppService;
 import com.aieducenter.admin.application.MenuManagementAppService;
 import com.aieducenter.admin.application.dto.command.CreateMenuCommand;
 import com.aieducenter.admin.application.dto.command.UpdateMenuCommand;
 import com.aieducenter.admin.application.dto.query.MenuQuery;
 import com.aieducenter.admin.application.dto.response.MenuResponse;
+import com.aieducenter.admin.application.dto.response.MyMenusResponse;
 import com.aieducenter.admin.constants.AdminScopes;
+import com.cartisan.core.context.RequestContext;
 import com.cartisan.security.annotation.RequireAuth;
 import com.cartisan.security.annotation.RequirePermission;
 import com.cartisan.web.response.ApiResponse;
@@ -32,9 +35,23 @@ import jakarta.validation.Valid;
 public class AdminMenuController {
 
     private final MenuManagementAppService menuManagementAppService;
+    private final AdminUserPermissionAppService adminUserPermissionAppService;
 
-    public AdminMenuController(MenuManagementAppService menuManagementAppService) {
+    public AdminMenuController(MenuManagementAppService menuManagementAppService,
+                               AdminUserPermissionAppService adminUserPermissionAppService) {
         this.menuManagementAppService = menuManagementAppService;
+        this.adminUserPermissionAppService = adminUserPermissionAppService;
+    }
+
+    /**
+     * 「我的导航」——消费面端点（REQ-13-T2）：登录即可访问，<b>不挂管理权限</b>
+     * （普通用户也要拉自己的导航；与管理面 {@code GET /menus}/{@code /menus/tree} 权限语义不同）。
+     */
+    @GetMapping("/my")
+    @RequireAuth
+    @Operation(summary = "查询当前用户可见导航（home + 启用菜单树，登录即可）")
+    public ApiResponse<MyMenusResponse> my() {
+        return ApiResponse.ok(adminUserPermissionAppService.getMyMenus(RequestContext.getUserId()));
     }
 
     @GetMapping

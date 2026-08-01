@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Set;
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.map.MapUtil;
 
 import com.aieducenter.admin.domain.aggregate.AdminMenu;
 import com.aieducenter.admin.domain.enums.MenuType;
@@ -36,6 +37,61 @@ import com.aieducenter.admin.domain.enums.MenuType;
 public final class MenuTreeAssembler {
 
     private MenuTreeAssembler() {
+    }
+
+    /**
+     * 消费面可见菜单树（{@code /menus/my}，REQ-13-T2）：在 {@link #assemble} 的角色裁剪语义之上
+     * 叠加 <b>status 过滤</b>——只下发启用（{@code status=1}）菜单：
+     * <ul>
+     *   <li>禁用叶子不下发（即使已分配）；</li>
+     *   <li>禁用 directory 的<b>整棵子树</b>不下发（含已分配且启用的后代）——幸存子节点不得提升到根，
+     *       故过滤发生在 id 集合层面（可见 = 自身启用 ∧ 祖先链全启用），而非组装后摘节点；</li>
+     *   <li>剔除后变空的 directory 由 {@link #assemble} 的 prune 级联裁掉。</li>
+     * </ul>
+     *
+     * <p>{@code menuIds == null}（超管）：不受角色裁剪的全量<b>启用</b>菜单——status 过滤与裁空
+     * directory 对超管同样生效，「全量」仅指不做角色∩。与管理面 {@code assemble(all, null)} 的
+     * 不裁剪全量（含禁用、含空目录）语义自此分叉，不可复用。</p>
+     *
+     * @param allMenus 全部菜单（含禁用项，尚未组装父子关系）
+     * @param menuIds  {@code null}=超管（不角色裁剪）；非 null=启用角色并集出的菜单 id 集合
+     * @return 组装后的根节点列表（已排序、已裁空 directory）
+     */
+    public static List<AdminMenu> assembleVisible(List<AdminMenu> allMenus, Set<Long> menuIds) {
+        Map<Long, AdminMenu> byId = MapUtil.newHashMap();
+        for (AdminMenu m : allMenus) {
+            byId.put(m.getId(), m);
+        }
+
+        Set<Long> visibleIds = CollUtil.newHashSet();
+        for (AdminMenu m : allMenus) {
+            if (isEnabledChain(m, byId)) {
+                visibleIds.add(m.getId());
+            }
+        }
+
+        Set<Long> kept = (menuIds == null) ? visibleIds : intersect(visibleIds, menuIds);
+        return assemble(allMenus, kept);
+    }
+
+    /** 自身启用且祖先链上每个节点都存在且启用（孤儿按根处理，与 assemble 的父缺失语义一致）。 */
+    private static boolean isEnabledChain(AdminMenu menu, Map<Long, AdminMenu> byId) {
+        AdminMenu current = menu;
+        while (current != null) {
+            if (!current.isEnabled()) {
+                return false;
+            }
+            Long pid = current.getParentId();
+            current = (pid == null) ? null : byId.get(pid);
+        }
+        return true;
+    }
+
+    private static Set<Long> intersect(Set<Long> a, Set<Long> b) {
+        Set<Long> out = CollUtil.newHashSet();
+        out.addAll(a);
+        out.retainAll(b);
+        return out;
     }
 
     /**

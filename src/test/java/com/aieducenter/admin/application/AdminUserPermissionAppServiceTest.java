@@ -5,6 +5,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -16,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.aieducenter.admin.application.dto.response.MenuResponse;
+import com.aieducenter.admin.application.dto.response.MyMenusResponse;
 import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.domain.aggregate.AdminUser;
 import com.aieducenter.admin.domain.enums.AdminRoleStatus;
@@ -326,6 +328,168 @@ class AdminUserPermissionAppServiceTest {
         verifyNoInteractions(menuManagementAppService);
     }
 
+    // ========== getMyMenus tests（REQ-13-T2 /menus/my） ==========
+
+    @Test
+    void given_superAdmin_when_getMyMenus_then_fullVisibleTree_and_homeFromRoles() throws Exception {
+        // 超管不受角色裁剪（findVisibleTree(null)），status 过滤下沉到组装层；home 同规则取自启用角色
+        // Given
+        Long adminId = 1L;
+        AdminUser adminUser = new AdminUser("superadmin", "Test1234", "超管");
+        adminUser.addRole(1L);
+
+        AdminRole superAdminRole = new AdminRole("超级管理员", AdminRole.SUPER_ADMIN_CODE, "超管", 0);
+        setRoleId(superAdminRole, 1L);
+        superAdminRole.setHome("super_home");
+
+        List<MenuResponse> allVisible = List.of(menuResp(1L, "用户管理", "/users", 1));
+
+        when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED))
+                .thenReturn(List.of(superAdminRole));
+        when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(true);
+        when(menuManagementAppService.findVisibleTree(null)).thenReturn(allVisible);
+
+        // When
+        MyMenusResponse response = adminUserPermissionAppService.getMyMenus(adminId);
+
+        // Then
+        assertThat(response.home()).isEqualTo("super_home");
+        assertThat(response.menus()).isEqualTo(allVisible);
+        verify(menuManagementAppService).findVisibleTree(null);
+    }
+
+    @Test
+    void given_user_when_getMyMenus_then_homeIsFirstNonBlank_bySortOrderThenId() throws Exception {
+        // home：全部启用角色按 (sortOrder 升, id 升) 取第一个非空白——仓储返回无序，排序语义由应用层保证
+        // Given
+        Long adminId = 1L;
+        AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
+        adminUser.addRole(1L);
+        adminUser.addRole(2L);
+        adminUser.addRole(3L);
+
+        AdminRole roleA = new AdminRole("角色A", "ROLEA", null, 1); // home null
+        setRoleId(roleA, 1L);
+        AdminRole roleB = new AdminRole("角色B", "ROLEB", null, 2); // home 空白
+        setRoleId(roleB, 2L);
+        roleB.setHome("   ");
+        AdminRole roleC = new AdminRole("角色C", "ROLEC", null, 3);
+        setRoleId(roleC, 3L);
+        roleC.setHome("home_c");
+        roleC.addMenu(9L);
+
+        List<MenuResponse> menus = List.of(menuResp(9L, "菜单", "/m", 1));
+
+        when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L, 2L, 3L), AdminRoleStatus.ENABLED))
+                .thenReturn(List.of(roleC, roleA, roleB)); // 无序返回
+        when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
+        when(menuManagementAppService.findVisibleTree(Set.of(9L))).thenReturn(menus);
+
+        // When
+        MyMenusResponse response = adminUserPermissionAppService.getMyMenus(adminId);
+
+        // Then
+        assertThat(response.home()).isEqualTo("home_c");
+        assertThat(response.menus()).isEqualTo(menus);
+    }
+
+    @Test
+    void given_sameSortOrder_when_getMyMenus_then_homeIdTiebreak() throws Exception {
+        // Given
+        Long adminId = 1L;
+        AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
+        adminUser.addRole(9L);
+        adminUser.addRole(3L);
+
+        AdminRole roleX = new AdminRole("角色X", "ROLEX", null, 1);
+        setRoleId(roleX, 9L);
+        roleX.setHome("home_x");
+        AdminRole roleY = new AdminRole("角色Y", "ROLEY", null, 1);
+        setRoleId(roleY, 3L);
+        roleY.setHome("home_y");
+
+        when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(9L, 3L), AdminRoleStatus.ENABLED))
+                .thenReturn(List.of(roleX, roleY));
+        when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
+
+        // When
+        MyMenusResponse response = adminUserPermissionAppService.getMyMenus(adminId);
+
+        // Then
+        assertThat(response.home()).isEqualTo("home_y"); // 同 sortOrder，id 小者先
+        assertThat(response.menus()).isEmpty();
+    }
+
+    @Test
+    void given_allBlankHomes_when_getMyMenus_then_homeNull() throws Exception {
+        // Given
+        Long adminId = 1L;
+        AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
+        adminUser.addRole(1L);
+        adminUser.addRole(2L);
+
+        AdminRole roleA = new AdminRole("角色A", "ROLEA", null, 1); // home null
+        setRoleId(roleA, 1L);
+        AdminRole roleB = new AdminRole("角色B", "ROLEB", null, 2);
+        setRoleId(roleB, 2L);
+        roleB.setHome("  ");
+
+        when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L, 2L), AdminRoleStatus.ENABLED))
+                .thenReturn(List.of(roleA, roleB));
+        when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
+
+        // When
+        MyMenusResponse response = adminUserPermissionAppService.getMyMenus(adminId);
+
+        // Then
+        assertThat(response.home()).isNull();
+        assertThat(response.menus()).isEmpty();
+    }
+
+    @Test
+    void given_onlyDisabledRoles_when_getMyMenus_then_empty_and_noMenuQuery() {
+        // 禁用角色在汇总聚合中视为不存在（issue #21）：menus/home 均剔除其贡献
+        // Given
+        Long adminId = 1L;
+        AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
+        adminUser.addRole(1L);
+
+        when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED))
+                .thenReturn(List.of());
+        when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
+
+        // When
+        MyMenusResponse response = adminUserPermissionAppService.getMyMenus(adminId);
+
+        // Then
+        assertThat(response.home()).isNull();
+        assertThat(response.menus()).isEmpty();
+        verifyNoInteractions(menuManagementAppService);
+    }
+
+    @Test
+    void given_noRoles_when_getMyMenus_then_empty() {
+        // Given
+        Long adminId = 1L;
+        AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
+
+        when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
+        when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
+
+        // When
+        MyMenusResponse response = adminUserPermissionAppService.getMyMenus(adminId);
+
+        // Then
+        assertThat(response.home()).isNull();
+        assertThat(response.menus()).isEmpty();
+        verifyNoInteractions(menuManagementAppService);
+    }
+
     // ========== isSuperAdmin tests ==========
 
     @Test
@@ -359,5 +523,12 @@ class AdminUserPermissionAppServiceTest {
         return new MenuResponse(id, menuName, menuName, routePath, null, null, null, null, sortOrder,
                 MenuType.MENU, null, false, false, false, false, null, null, null, null, null,
                 null, null, null);
+    }
+
+    /** 反射回填角色 id（聚合 id 仅 JPA 生成，单测手动注入）。 */
+    private static void setRoleId(AdminRole role, Long id) throws Exception {
+        Field idField = AdminRole.class.getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(role, id);
     }
 }

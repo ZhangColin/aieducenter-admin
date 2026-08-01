@@ -20,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import com.aieducenter.admin.application.AdminUserPermissionAppService;
 import com.aieducenter.admin.application.MenuManagementAppService;
 import com.aieducenter.admin.application.dto.command.CreateMenuCommand;
 import com.aieducenter.admin.application.dto.command.UpdateMenuCommand;
@@ -41,12 +42,15 @@ class AdminMenuControllerTest {
     @Mock
     private MenuManagementAppService menuManagementAppService;
 
+    @Mock
+    private AdminUserPermissionAppService adminUserPermissionAppService;
+
     private AdminMenuController controller;
     private org.springframework.test.web.servlet.MockMvc mvc;
 
     @BeforeEach
     void setUp() {
-        controller = new AdminMenuController(menuManagementAppService);
+        controller = new AdminMenuController(menuManagementAppService, adminUserPermissionAppService);
         // standalone 默认不注册 Spring Data 的 Pageable 解析器，手动补上以测分页根端点
         mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setCustomArgumentResolvers(new org.springframework.data.web.PageableHandlerMethodArgumentResolver())

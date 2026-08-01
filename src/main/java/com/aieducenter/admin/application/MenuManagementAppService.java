@@ -57,6 +57,20 @@ public class MenuManagementAppService {
     }
 
     /**
+     * 构建消费面可见菜单树（{@code /menus/my}，REQ-13-T2）。
+     *
+     * <p>与 {@link #findTree(Set)} 的差异：叠加 status 过滤——只下发启用菜单，禁用 directory
+     * 整棵子树不下发（语义见 {@link MenuTreeAssembler#assembleVisible}）。</p>
+     *
+     * @param menuIds 启用角色并集出的菜单 id 集合，null 表示超管（不角色裁剪的全量启用菜单）
+     * @return 菜单 DTO 列表
+     */
+    public List<MenuResponse> findVisibleTree(Set<Long> menuIds) {
+        List<AdminMenu> roots = MenuTreeAssembler.assembleVisible(menuRepository.findAll(), menuIds);
+        return adminMenuMapper.convertList(roots);
+    }
+
+    /**
      * 扁平分页查询（{@code GET /menus}，Soybean 菜单表格用）。
      */
     public PageResponse<MenuResponse> findAll(MenuQuery query, Pageable pageable) {

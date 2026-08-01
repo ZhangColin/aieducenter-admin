@@ -3,6 +3,8 @@ package com.aieducenter.admin.application;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import cn.hutool.core.collection.CollUtil;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,6 +14,7 @@ import com.aieducenter.admin.domain.enums.AdminRoleStatus;
 import com.aieducenter.admin.domain.repository.AdminRoleRepository;
 import com.aieducenter.admin.domain.repository.AdminUserRepository;
 import com.aieducenter.admin.application.dto.response.MenuResponse;
+import com.aieducenter.admin.application.dto.response.MyMenusResponse;
 
 import static com.cartisan.core.util.Assertions.requirePresent;
 
@@ -123,10 +126,7 @@ public class AdminUserPermissionAppService {
             return List.of();
         }
 
-        Set<Long> menuIds = new HashSet<>();
-        for (AdminRole role : enabledRoles(roleIds)) {
-            menuIds.addAll(role.getMenuIds());
-        }
+        Set<Long> menuIds = unionMenuIds(enabledRoles(roleIds));
 
         if (menuIds.isEmpty()) {
             return List.of();
@@ -140,6 +140,66 @@ public class AdminUserPermissionAppService {
      */
     public boolean isSuperAdmin(Long adminId) {
         return adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE);
+    }
+
+    /**
+     * 获取「我的导航」（{@code GET /menus/my}，REQ-13-T2）：{@code {home, menus}}。
+     *
+     * <ul>
+     *   <li>{@code menus}：全部<b>启用</b>角色并集裁剪的可见菜单树，且只含启用菜单
+     *     （禁用叶子不下发、禁用 directory 整棵子树不下发——status 过滤下沉在组装层，
+     *     见 {@link MenuTreeAssembler#assembleVisible}）。超管不受角色裁剪、看到全量启用菜单
+     *     （status 过滤对超管同样生效）。</li>
+     *   <li>{@code home}：全部启用角色按 {@code (sortOrder 升, id 升)} 取第一个非空白
+     *     （非 null 且 trim 后非空）的 home；全空 → null。超管同规则。</li>
+     * </ul>
+     *
+     * @param adminId 管理员 ID
+     * @return 我的导航（home + 菜单树）
+     */
+    @Transactional(readOnly = true)
+    public MyMenusResponse getMyMenus(Long adminId) {
+        AdminUser adminUser = requirePresent(
+                adminUserRepository.findById(adminId)
+        );
+
+        Set<Long> roleIds = adminUser.getRoleIds();
+        List<AdminRole> roles = roleIds.isEmpty() ? List.of() : enabledRoles(roleIds);
+
+        String home = firstNonBlankHome(roles);
+
+        List<MenuResponse> menus;
+        if (isSuperAdmin(adminId)) {
+            // 超管：不角色裁剪的全量启用菜单（与管理面 findTree(null) 语义分叉，见 assembleVisible）
+            menus = menuManagementAppService.findVisibleTree(null);
+        } else {
+            Set<Long> menuIds = unionMenuIds(roles);
+            menus = menuIds.isEmpty() ? List.of() : menuManagementAppService.findVisibleTree(menuIds);
+        }
+
+        return new MyMenusResponse(home, menus);
+    }
+
+    /** 角色列表的菜单 id 并集（{@link #getMenus} 与 {@link #getMyMenus} 共用）。 */
+    private static Set<Long> unionMenuIds(List<AdminRole> roles) {
+        Set<Long> menuIds = CollUtil.newHashSet();
+        for (AdminRole role : roles) {
+            menuIds.addAll(role.getMenuIds());
+        }
+        return menuIds;
+    }
+
+    /**
+     * 取第一个非空白 home：启用角色按 {@code (sortOrder 升, id 升)} 排序，第一个
+     * 非 null 且 trim 后非空的 home 原样返回（trim 仅作空白判定）；全空 → null（REQ-13-T2 已定②）。
+     */
+    private static String firstNonBlankHome(List<AdminRole> enabledRoles) {
+        return enabledRoles.stream()
+                .sorted(Comparator.comparing(AdminRole::getSortOrder).thenComparing(AdminRole::getId))
+                .map(AdminRole::getHome)
+                .filter(home -> home != null && !home.trim().isEmpty())
+                .findFirst()
+                .orElse(null);
     }
 
     /**
