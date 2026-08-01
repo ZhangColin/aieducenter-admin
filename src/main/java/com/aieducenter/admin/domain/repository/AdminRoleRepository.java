@@ -37,6 +37,15 @@ public interface AdminRoleRepository extends BaseRepository<AdminRole, Long> {
     List<AdminRole> findByIdInAndDeletedFalse(Collection<Long> ids);
 
     /**
+     * 批量按 id + 状态查询未软删角色。
+     *
+     * <p>汇总聚合（roleCodes/permissions/menus）专用：禁用角色视为不存在（CONTEXT.md「RBAC」
+     * 条目决策①，issue #21），调用方传 {@code AdminRoleStatus.ENABLED}。软删过滤显式进行，
+     * 同 {@link #findByIdInAndDeletedFalse}（cartisan-boot#2 修复前后行为一致）。</p>
+     */
+    List<AdminRole> findByIdInAndStatusAndDeletedFalse(Collection<Long> ids, AdminRoleStatus status);
+
+    /**
      * 检查角色是否被管理员使用。
      */
     @Query("SELECT COUNT(ur) > 0 FROM AdminUserRole ur WHERE ur.roleId = :roleId")

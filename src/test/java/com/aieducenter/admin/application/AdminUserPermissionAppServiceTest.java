@@ -2,6 +2,7 @@ package com.aieducenter.admin.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -17,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.aieducenter.admin.application.dto.response.MenuResponse;
 import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.domain.aggregate.AdminUser;
+import com.aieducenter.admin.domain.enums.AdminRoleStatus;
 import com.aieducenter.admin.domain.enums.MenuType;
 import com.aieducenter.admin.domain.repository.AdminRoleRepository;
 import com.aieducenter.admin.domain.repository.AdminUserRepository;
@@ -61,7 +63,7 @@ class AdminUserPermissionAppServiceTest {
         superAdminRole.addPermission("admin:user:read", "用户管理-查看");
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findAllById(Set.of(1L))).thenReturn(List.of(superAdminRole));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of(superAdminRole));
 
         // When
         List<String> permissions = adminUserPermissionAppService.getPermissions(adminId);
@@ -86,13 +88,32 @@ class AdminUserPermissionAppServiceTest {
         role2.addPermission("admin:role:read", "角色管理-查看");
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findAllById(Set.of(1L, 2L))).thenReturn(List.of(role1, role2));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L, 2L), AdminRoleStatus.ENABLED)).thenReturn(List.of(role1, role2));
 
         // When
         List<String> permissions = adminUserPermissionAppService.getPermissions(adminId);
 
         // Then
         assertThat(permissions).containsExactlyInAnyOrder("admin:user:read", "admin:user:write", "admin:role:read");
+    }
+
+    @Test
+    void given_onlyDisabledRoles_when_getPermissions_then_return_empty_list() {
+        // 禁用角色在汇总聚合中视为不存在（issue #21）：启用查询返回空 → 权限聚合为空
+        // Given
+        Long adminId = 1L;
+        AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
+        adminUser.addRole(1L);
+
+        when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of());
+
+        // When
+        List<String> permissions = adminUserPermissionAppService.getPermissions(adminId);
+
+        // Then
+        assertThat(permissions).isEmpty();
+        verify(adminRoleRepository).findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED);
     }
 
     @Test
@@ -126,7 +147,7 @@ class AdminUserPermissionAppServiceTest {
         idField.set(superAdminRole, 1L);
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findAllById(Set.of(1L))).thenReturn(List.of(superAdminRole));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of(superAdminRole));
 
         // When
         List<String> roleCodes = adminUserPermissionAppService.getRoleCodes(adminId);
@@ -153,13 +174,32 @@ class AdminUserPermissionAppServiceTest {
         idField.set(role2, 2L);
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findAllById(Set.of(1L, 2L))).thenReturn(List.of(role1, role2));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L, 2L), AdminRoleStatus.ENABLED)).thenReturn(List.of(role1, role2));
 
         // When
         List<String> roleCodes = adminUserPermissionAppService.getRoleCodes(adminId);
 
         // Then
         assertThat(roleCodes).containsExactlyInAnyOrder("ADMIN", "OPERATOR");
+    }
+
+    @Test
+    void given_onlyDisabledRoles_when_getRoleCodes_then_return_empty_list() {
+        // 禁用角色在汇总聚合中视为不存在（issue #21）：启用查询返回空 → 角色码聚合为空
+        // Given
+        Long adminId = 1L;
+        AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
+        adminUser.addRole(1L);
+
+        when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of());
+
+        // When
+        List<String> roleCodes = adminUserPermissionAppService.getRoleCodes(adminId);
+
+        // Then
+        assertThat(roleCodes).isEmpty();
+        verify(adminRoleRepository).findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED);
     }
 
     @Test
@@ -218,7 +258,7 @@ class AdminUserPermissionAppServiceTest {
 
         when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findAllById(Set.of(1L))).thenReturn(List.of(role1));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of(role1));
         when(menuManagementAppService.findTree(Set.of(1L, 2L))).thenReturn(filteredMenus);
 
         // When
@@ -256,13 +296,34 @@ class AdminUserPermissionAppServiceTest {
 
         when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findAllById(Set.of(1L))).thenReturn(List.of(role1));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of(role1));
 
         // When
         List<MenuResponse> menus = adminUserPermissionAppService.getMenus(adminId);
 
         // Then
         assertThat(menus).isEmpty();
+    }
+
+    @Test
+    void given_onlyDisabledRoles_when_getMenus_then_return_empty_list() {
+        // 禁用角色在汇总聚合中视为不存在（issue #21）：启用查询返回空 → 菜单聚合为空（不走 findTree）
+        // Given
+        Long adminId = 1L;
+        AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
+        adminUser.addRole(1L);
+
+        when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
+        when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
+        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of());
+
+        // When
+        List<MenuResponse> menus = adminUserPermissionAppService.getMenus(adminId);
+
+        // Then
+        assertThat(menus).isEmpty();
+        verify(adminRoleRepository).findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED);
+        verifyNoInteractions(menuManagementAppService);
     }
 
     // ========== isSuperAdmin tests ==========

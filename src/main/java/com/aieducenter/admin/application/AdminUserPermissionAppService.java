@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.domain.aggregate.AdminUser;
+import com.aieducenter.admin.domain.enums.AdminRoleStatus;
 import com.aieducenter.admin.domain.repository.AdminRoleRepository;
 import com.aieducenter.admin.domain.repository.AdminUserRepository;
 import com.aieducenter.admin.application.dto.response.MenuResponse;
@@ -22,6 +23,11 @@ import static com.cartisan.core.util.Assertions.requirePresent;
  *   <li>供 SaToken 接口调用，返回管理员的权限、角色、菜单</li>
  *   <li>通过领域模型聚合数据，避免跨表 SQL 查询</li>
  * </ul>
+ *
+ * <p>汇总聚合语义：用户菜单/权限/角色码 = 其全部<b>启用</b>角色的并集——禁用角色
+ * （{@code AdminRoleStatus.DISABLED}）在任何汇总聚合中视为不存在（CONTEXT.md「RBAC」条目
+ * 决策①，issue #21；{@code getRoleCodes}/{@code getPermissions}/{@code getMenus} 三方法
+ * 同路径一次修齐）。超管不受影响：{@code SUPER_ADMIN} 角色自身不可禁用（REQ-10 聚合守卫）。</p>
  *
  * @since 0.1.0
  */
@@ -63,7 +69,7 @@ public class AdminUserPermissionAppService {
             return List.of();
         }
 
-        return adminRoleRepository.findAllById(roleIds).stream()
+        return enabledRoles(roleIds).stream()
                 .flatMap(role -> role.getPermissionCodes().stream())
                 .distinct()
                 .collect(Collectors.toList());
@@ -89,7 +95,7 @@ public class AdminUserPermissionAppService {
             return List.of();
         }
 
-        return adminRoleRepository.findAllById(roleIds).stream()
+        return enabledRoles(roleIds).stream()
                 .map(AdminRole::getCode)
                 .collect(Collectors.toList());
     }
@@ -118,7 +124,7 @@ public class AdminUserPermissionAppService {
         }
 
         Set<Long> menuIds = new HashSet<>();
-        for (AdminRole role : adminRoleRepository.findAllById(roleIds)) {
+        for (AdminRole role : enabledRoles(roleIds)) {
             menuIds.addAll(role.getMenuIds());
         }
 
@@ -134,5 +140,13 @@ public class AdminUserPermissionAppService {
      */
     public boolean isSuperAdmin(Long adminId) {
         return adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE);
+    }
+
+    /**
+     * 批量取用户的<b>启用</b>角色——禁用角色在汇总聚合中视为不存在（issue #21）。
+     * 三个聚合方法（角色码/权限码/菜单）经此单一入口取数，保证语义一致。
+     */
+    private List<AdminRole> enabledRoles(Set<Long> roleIds) {
+        return adminRoleRepository.findByIdInAndStatusAndDeletedFalse(roleIds, AdminRoleStatus.ENABLED);
     }
 }
