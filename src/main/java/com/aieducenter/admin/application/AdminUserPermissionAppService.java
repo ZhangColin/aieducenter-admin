@@ -175,6 +175,6 @@ public class AdminUserPermissionAppService {
      * 三个聚合方法（角色码/权限码/菜单）经此单一入口取数，保证语义一致。
      */
     private List<AdminRole> enabledRoles(Set<Long> roleIds) {
-        return adminRoleRepository.findByIdInAndStatusAndDeletedFalse(roleIds, AdminRoleStatus.ENABLED);
+        return adminRoleRepository.findByIdInAndStatus(roleIds, AdminRoleStatus.ENABLED);
     }
 }

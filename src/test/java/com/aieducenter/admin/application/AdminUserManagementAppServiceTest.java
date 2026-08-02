@@ -117,7 +117,8 @@ class AdminUserManagementAppServiceTest {
 
     @Test
     void given_existingAdmin_when_delete_then_delegatesToRepository() {
-        // Given — 破窗号不可删守卫由聚合 markAsDeleted() 承担，应用服务只负责加载并委托仓储
+        // Given — 破窗号不可删守卫由聚合 requireDeletable() 承担、应用服务删除前显式调用（ADR-0005）；
+        // 普通管理员直接放行并委托仓储（物理删除）
         AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
         when(adminUserRepository.findById(1L)).thenReturn(Optional.of(adminUser));
 
@@ -126,6 +127,23 @@ class AdminUserManagementAppServiceTest {
 
         // Then
         verify(adminUserRepository).delete(adminUser);
+    }
+
+    @Test
+    void given_breakGlassAdmin_when_delete_then_throwAndRepositoryDeleteNeverCalled() throws Exception {
+        // Given — 破窗号（保留 ID = 1）：应用服务在 repository.delete() 之前调聚合守卫 requireDeletable()，
+        // 命中即抛领域错误，删除不会发生（守卫行为钉住，ADR-0005 迁移后执行点）
+        AdminUser breakGlass = new AdminUser("admin", "Test1234", "破窗号");
+        java.lang.reflect.Field idField = AdminUser.class.getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(breakGlass, AdminUser.BREAK_GLASS_ADMIN_ID);
+        when(adminUserRepository.findById(AdminUser.BREAK_GLASS_ADMIN_ID)).thenReturn(Optional.of(breakGlass));
+
+        // When & Then
+        assertThatThrownBy(() -> adminUserManagementAppService.delete(AdminUser.BREAK_GLASS_ADMIN_ID))
+            .isInstanceOf(DomainException.class)
+            .hasMessageContaining(AdminMessage.BREAK_GLASS_CANNOT_DELETE.message());
+        verify(adminUserRepository, never()).delete(any(AdminUser.class));
     }
 
     // ========== update tests ==========
@@ -408,7 +426,7 @@ class AdminUserManagementAppServiceTest {
         setRoleId(role2, 2L);
 
         when(adminUserRepository.findById(userId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findByIdInAndDeletedFalse(adminUser.getRoleIds()))
+        when(adminRoleRepository.findByIdIn(adminUser.getRoleIds()))
             .thenReturn(List.of(role1, role2));
 
         // When
@@ -424,21 +442,21 @@ class AdminUserManagementAppServiceTest {
     }
 
     @Test
-    void given_staleLinkToSoftDeletedRole_when_findById_then_rolesEmpty() {
-        // Given —— 关联行无软删标志：角色已软删但 admin_user_role 关联仍在（残留关联）
+    void given_staleLinkToMissingRole_when_findById_then_rolesEmpty() {
+        // Given —— 关联行指向的角色已不存在（物理删除后批量查询自然不返回，ADR-0005）
         Long userId = 7L;
         AdminUser adminUser = new AdminUser("testuser", "Test1234", "测试用户");
         adminUser.addRole(9L);
 
         when(adminUserRepository.findById(userId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findByIdInAndDeletedFalse(Set.of(9L))).thenReturn(List.of());
+        when(adminRoleRepository.findByIdIn(Set.of(9L))).thenReturn(List.of());
 
         // When
         AdminUserResponse response = serviceWithRealMapper().findById(userId);
 
-        // Then —— 已删角色不回显；且必须走显式过滤查询（findAllById 会把软删角色泄出来）
+        // Then —— 已删角色不回显
         assertThat(response.roles()).isEmpty();
-        verify(adminRoleRepository).findByIdInAndDeletedFalse(Set.of(9L));
+        verify(adminRoleRepository).findByIdIn(Set.of(9L));
     }
 
     @Test
@@ -454,7 +472,7 @@ class AdminUserManagementAppServiceTest {
 
         // Then —— 返回空数组而非 null（契约：未分配 → []）；无角色时不发起无谓查询
         assertThat(response.roles()).isNotNull().isEmpty();
-        verify(adminRoleRepository, never()).findByIdInAndDeletedFalse(any());
+        verify(adminRoleRepository, never()).findByIdIn(any());
     }
 
     @Test
@@ -490,7 +508,7 @@ class AdminUserManagementAppServiceTest {
         Pageable pageable = PageRequest.of(0, 20);
         when(adminUserRepository.findAll(any(Specification.class), eq(pageable)))
             .thenReturn(new PageImpl<>(List.of(user1, user2), pageable, 2));
-        when(adminRoleRepository.findByIdInAndDeletedFalse(Set.of(1L, 2L, 3L)))
+        when(adminRoleRepository.findByIdIn(Set.of(1L, 2L, 3L)))
             .thenReturn(List.of(role1, role2, role3));
 
         // When
@@ -509,12 +527,12 @@ class AdminUserManagementAppServiceTest {
         assertThat(r1.genderName()).isEqualTo("男");
         assertThat(r2.gender()).isNull();
         assertThat(r2.genderName()).isNull();
-        verify(adminRoleRepository, times(1)).findByIdInAndDeletedFalse(any());
+        verify(adminRoleRepository, times(1)).findByIdIn(any());
     }
 
     @Test
-    void given_softDeletedRoleStaleLink_when_findAll_then_roleExcludedFromList() throws Exception {
-        // Given —— 角色 2 已软删但关联残留（findByIdInAndDeletedFalse 不返回它）
+    void given_missingRoleStaleLink_when_findAll_then_roleExcludedFromList() throws Exception {
+        // Given —— 角色 2 已不存在（物理删除，ADR-0005），findByIdIn 只返回存活角色
         AdminUser user = new AdminUser("listu1", "Test1234", "用户一");
         user.addRole(1L);
         user.addRole(2L);
@@ -524,14 +542,14 @@ class AdminUserManagementAppServiceTest {
         Pageable pageable = PageRequest.of(0, 20);
         when(adminUserRepository.findAll(any(Specification.class), eq(pageable)))
             .thenReturn(new PageImpl<>(List.of(user), pageable, 1));
-        when(adminRoleRepository.findByIdInAndDeletedFalse(Set.of(1L, 2L)))
+        when(adminRoleRepository.findByIdIn(Set.of(1L, 2L)))
             .thenReturn(List.of(alive)); // 仅存活角色
 
         // When
         PageResponse<AdminUserResponse> page =
             serviceWithRealMapper().findAll(new AdminUserQuery(null, null, null, null, null), pageable);
 
-        // Then —— 软删角色不回显（与 findById 同语义）
+        // Then —— 已删角色不回显（与 findById 同语义）
         assertThat(page.items().get(0).roles()).extracting(AssignedRoleResponse::code)
             .containsExactly("ADMIN");
     }
@@ -550,7 +568,7 @@ class AdminUserManagementAppServiceTest {
 
         // Then —— 无角色时返回 []，且不发起无谓的角色批量查询
         assertThat(page.items().get(0).roles()).isNotNull().isEmpty();
-        verify(adminRoleRepository, never()).findByIdInAndDeletedFalse(any());
+        verify(adminRoleRepository, never()).findByIdIn(any());
     }
 
     // ========== gender CRUD 透传（issue #17）==========

@@ -11,7 +11,7 @@ import com.cartisan.core.stereotype.Aggregate;
 
 import static com.cartisan.core.util.Assertions.require;
 
-import com.cartisan.data.jpa.domain.AuditableSoftDeletable;
+import com.cartisan.data.jpa.domain.Auditable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 import com.aieducenter.admin.domain.entity.AdminUserRole;
 import com.aieducenter.admin.domain.error.AdminMessage;
@@ -43,7 +43,7 @@ import lombok.Setter;
 @Entity
 @Table(name = "sys_admin_users")
 @Aggregate
-public class AdminUser extends AuditableSoftDeletable implements AggregateRoot<AdminUser, Long> {
+public class AdminUser extends Auditable implements AggregateRoot<AdminUser, Long> {
     private static final String USERNAME_PATTERN = "^[a-zA-Z][a-zA-Z0-9_]{2,19}$";
 
     /**
@@ -162,14 +162,15 @@ public class AdminUser extends AuditableSoftDeletable implements AggregateRoot<A
 
 
     /**
-     * 软删入口（框架 {@code BaseRepositoryImpl.delete} 经此方法执行软删）。
+     * 删除前守卫（应用服务在 {@code repository.delete()} 之前显式调用）。
      *
-     * <p>破窗账号不可删——保证救援入口永远存在。授权（谁是超管）走角色，与此韧性守卫解耦。</p>
+     * <p>破窗账号不可删——保证救援入口永远存在。授权（谁是超管）走角色，与此韧性守卫解耦。
+     * 本应用删除为物理删除（ADR-0005），守卫不再挂框架软删入口（{@code markAsDeleted} 已随
+     * 软删基类一并移除——框架对「有 markAsDeleted 方法但非 SoftDeletable」的实体走反射软存，
+     * 残留该方法会使物理删除失效）。</p>
      */
-    @Override
-    public void markAsDeleted() {
+    public void requireDeletable() {
         require(!isBreakGlass(), AdminMessage.BREAK_GLASS_CANNOT_DELETE);
-        super.markAsDeleted();
     }
 
     /**

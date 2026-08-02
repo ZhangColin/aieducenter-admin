@@ -240,22 +240,22 @@ class RoleManagementAppServiceTest {
     }
 
     @Test
-    void given_super_admin_role_when_delete_then_delegatesToAggregateGuard() {
-        // SUPER_ADMIN 不可删守卫在聚合 markAsDeleted（单一执行点，仿 AdminUser）。服务层只确保：
-        // 超管角色跳过 in-use 检查（否则恒命中 ROLE_IN_USE，遮蔽 SUPER_ADMIN_CANNOT_DELETE），
-        // 放行至 repository.delete → 聚合守卫在真库抛正确错误码（聚合单测 + 集成测试覆盖）。
+    void given_super_admin_role_when_delete_then_throwAndRepositoryDeleteNeverCalled() {
+        // SUPER_ADMIN 不可删守卫在聚合 requireDeletable()，应用服务删除前显式调用（ADR-0005）：
+        // 命中即抛 SUPER_ADMIN_CANNOT_DELETE——先于 in-use 检查（不再被 ROLE_IN_USE 遮蔽），
+        // 删除不会发生。
         // Given
         Long roleId = 1L;
         AdminRole superAdminRole = new AdminRole("超级管理员", "SUPER_ADMIN", "超级管理员", 0);
 
         when(roleRepository.findById(roleId)).thenReturn(Optional.of(superAdminRole));
 
-        // When
-        roleManagementAppService.delete(roleId);
-
-        // Then：未查 in-use、直接委托仓储
+        // When & Then
+        assertThatThrownBy(() -> roleManagementAppService.delete(roleId))
+            .isInstanceOf(DomainException.class)
+            .hasMessageContaining(AdminMessage.SUPER_ADMIN_CANNOT_DELETE.message());
         verify(roleRepository, org.mockito.Mockito.never()).isUsedByAnyAdmin(roleId);
-        verify(roleRepository).delete(superAdminRole);
+        verify(roleRepository, org.mockito.Mockito.never()).delete(superAdminRole);
     }
 
     @Test
@@ -496,9 +496,9 @@ class RoleManagementAppServiceTest {
 
     @Test
     void given_enabledRoles_when_listEnabledOptions_then_mappedToOptions() {
-        // 仓储已按 status=ENABLED + 未软删 过滤并按 sortOrder 升序排序，服务层只做 {id,name,code} 映射
+        // 仓储已按 status=ENABLED 过滤并按 sortOrder 升序排序（ADR-0005 后删除即物理删，无需软删条件），服务层只做 {id,name,code} 映射
         AdminRole enabled = new AdminRole("运营", "OPERATOR", "运营", 1);
-        when(roleRepository.findByStatusAndDeletedFalseOrderBySortOrderAscIdAsc(AdminRoleStatus.ENABLED))
+        when(roleRepository.findByStatusOrderBySortOrderAscIdAsc(AdminRoleStatus.ENABLED))
             .thenReturn(List.of(enabled));
 
         var options = roleManagementAppService.listEnabledOptions();

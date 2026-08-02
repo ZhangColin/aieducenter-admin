@@ -7,7 +7,7 @@ import java.util.stream.Collectors;
 import com.cartisan.core.domain.AggregateRoot;
 import com.cartisan.core.stereotype.Aggregate;
 import static com.cartisan.core.util.Assertions.require;
-import com.cartisan.data.jpa.domain.AuditableSoftDeletable;
+import com.cartisan.data.jpa.domain.Auditable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 import com.aieducenter.admin.domain.entity.AdminRoleMenu;
 import com.aieducenter.admin.domain.entity.AdminRolePermission;
@@ -32,7 +32,7 @@ import lombok.Setter;
 @Entity
 @Table(name = "sys_admin_roles")
 @Aggregate
-public class AdminRole extends AuditableSoftDeletable implements AggregateRoot<AdminRole, Long> {
+public class AdminRole extends Auditable implements AggregateRoot<AdminRole, Long> {
 
     /**
      * 超级管理员角色码。
@@ -157,16 +157,17 @@ public class AdminRole extends AuditableSoftDeletable implements AggregateRoot<A
     }
 
     /**
-     * 软删入口（框架 {@code BaseRepositoryImpl.delete} 经此方法执行软删）。
+     * 删除前守卫（应用服务在 {@code repository.delete()} 之前显式调用）。
      *
      * <p>SUPER_ADMIN 角色不可删——它是破窗号（内置 {@code admin}）的全权救援角色；
      * 删了则破窗号虽在、救援能力失效，仍会锁死（ADR-0003 修订）。守卫在聚合内单一执行点，
-     * 仿 {@link AdminUser#markAsDeleted()} 破窗号 guard。</p>
+     * 仿 {@link AdminUser#requireDeletable()} 破窗号 guard。
+     * 本应用删除为物理删除（ADR-0005），守卫不再挂框架软删入口（{@code markAsDeleted} 已随
+     * 软删基类一并移除——框架对「有 markAsDeleted 方法但非 SoftDeletable」的实体走反射软存，
+     * 残留该方法会使物理删除失效）。</p>
      */
-    @Override
-    public void markAsDeleted() {
+    public void requireDeletable() {
         require(!isSuperAdmin(), AdminMessage.SUPER_ADMIN_CANNOT_DELETE);
-        super.markAsDeleted();
     }
 
     /**

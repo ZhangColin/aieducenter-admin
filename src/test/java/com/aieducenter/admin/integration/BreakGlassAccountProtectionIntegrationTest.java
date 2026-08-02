@@ -48,8 +48,9 @@ import cn.dev33.satoken.config.SaTokenConfig;
  *   <li>{@code AdminUserResponse.breakGlass} 派生字段：破窗号=true、普通账号=false</li>
  * </ul>
  *
- * <p>守卫点在 {@link AdminUser#markAsDeleted()} / {@link AdminUser#disable()}（聚合内，单一执行点），
- * 应用服务仅加载并委托；本类走真库 + 真 Spring + SecurityFilter + 全局异常处理，验证端到端外部行为。</p>
+ * <p>守卫点在 {@link AdminUser#requireDeletable()} / {@link AdminUser#disable()}（聚合内，单一执行点），
+ * 删除守卫由应用服务在 {@code repository.delete()} 之前显式调用（ADR-0005 物理删除迁移）；
+ * 本类走真库 + 真 Spring + SecurityFilter + 全局异常处理，验证端到端外部行为。</p>
  *
  * <p>破窗号用保留 ID = 1（与 V2 种子一致）；测试库 {@code ddl-auto=create-drop}、Flyway 关闭，
  * 故 id=1 由 {@code @BeforeEach} 直接以反射设 id 后经仓储落库（模拟种子保留段）。所有破窗号操作均被拒

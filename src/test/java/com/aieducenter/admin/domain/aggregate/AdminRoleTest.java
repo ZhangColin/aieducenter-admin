@@ -1,6 +1,7 @@
 package com.aieducenter.admin.domain.aggregate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
@@ -144,22 +145,18 @@ class AdminRoleTest {
     }
 
     @Test
-    void given_super_admin_role_when_markAsDeleted_then_throwAndNotDeleted() {
+    void given_super_admin_role_when_requireDeletable_then_throw() {
         AdminRole superAdmin = new AdminRole("超级管理员", "SUPER_ADMIN", "超级管理员", 0);
 
-        assertThatThrownBy(superAdmin::markAsDeleted)
+        assertThatThrownBy(superAdmin::requireDeletable)
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining(AdminMessage.SUPER_ADMIN_CANNOT_DELETE.message());
-        // 不可删 → 软删标记不应置位
-        assertThat(superAdmin.isDeleted()).isFalse();
     }
 
     @Test
-    void given_normal_role_when_markAsDeleted_then_markedDeleted() {
+    void given_normal_role_when_requireDeletable_then_pass() {
         AdminRole role = new AdminRole("管理员", "ADMIN", "系统管理员", 1);
 
-        role.markAsDeleted();
-
-        assertThat(role.isDeleted()).isTrue();
+        assertThatCode(role::requireDeletable).doesNotThrowAnyException();
     }
 }

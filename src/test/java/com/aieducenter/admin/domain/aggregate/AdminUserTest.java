@@ -1,6 +1,7 @@
 package com.aieducenter.admin.domain.aggregate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
@@ -144,23 +145,19 @@ class AdminUserTest {
     }
 
     @Test
-    void given_breakGlassId_when_markAsDeleted_then_throwDomainException() throws Exception {
+    void given_breakGlassId_when_requireDeletable_then_throwDomainException() throws Exception {
         AdminUser breakGlass = adminUserWithId("admin", AdminUser.BREAK_GLASS_ADMIN_ID);
 
-        assertThatThrownBy(breakGlass::markAsDeleted)
+        assertThatThrownBy(breakGlass::requireDeletable)
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining(AdminMessage.BREAK_GLASS_CANNOT_DELETE.message());
-        // 不可删 → 软删标记不应被置位
-        assertThat(breakGlass.isDeleted()).isFalse();
     }
 
     @Test
-    void given_normalId_when_markAsDeleted_then_markedDeleted() throws Exception {
+    void given_normalId_when_requireDeletable_then_pass() throws Exception {
         AdminUser normal = adminUserWithId("operator", AdminUser.BREAK_GLASS_ADMIN_ID + 1);
 
-        normal.markAsDeleted();
-
-        assertThat(normal.isDeleted()).isTrue();
+        assertThatCode(normal::requireDeletable).doesNotThrowAnyException();
     }
 
     @Test

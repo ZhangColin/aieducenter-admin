@@ -25,6 +25,6 @@ public interface AdminUserRepository extends BaseRepository<AdminUser, Long> {
      */
     @Query("SELECT COUNT(ur) > 0 FROM AdminUserRole ur " +
            "WHERE ur.adminId = :adminId " +
-           "AND EXISTS (SELECT 1 FROM AdminRole r WHERE r.id = ur.roleId AND r.code = :roleCode AND r.deleted = false)")
+           "AND EXISTS (SELECT 1 FROM AdminRole r WHERE r.id = ur.roleId AND r.code = :roleCode)")
     boolean hasRole(@Param("adminId") Long adminId, @Param("roleCode") String roleCode);
 }

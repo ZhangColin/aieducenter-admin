@@ -21,29 +21,23 @@ public interface AdminRoleRepository extends BaseRepository<AdminRole, Long> {
     Optional<AdminRole> findByCode(String code);
 
     /**
-     * 按状态查询未软删角色（{@code GET /roles/all} 字典：仅启用），按 sortOrder 升序、id 升序兜底
-     * （对齐菜单侧排序先例，issue #19）。显式 {@code DeletedFalse}
-     * （框架级软删读过滤当前不生效，见 cartisan-boot#2）。
+     * 按状态查询角色（{@code GET /roles/all} 字典：仅启用），按 sortOrder 升序、id 升序兜底
+     * （对齐菜单侧排序先例，issue #19）。
      */
-    List<AdminRole> findByStatusAndDeletedFalseOrderBySortOrderAscIdAsc(AdminRoleStatus status);
+    List<AdminRole> findByStatusOrderBySortOrderAscIdAsc(AdminRoleStatus status);
 
     /**
-     * 批量按 id 查询未软删角色。
-     *
-     * <p>显式排除软删：{@code admin_user_role} 关联行无软删标志，角色被软删后关联仍在，
-     * 此类残留关联对应的角色不得回显。过滤显式进行，不依赖框架级 {@code @SQLRestriction}
-     * （其当前不生效，见 cartisan-boot#2）——显式过滤在框架修复落地前后行为一致。</p>
+     * 批量按 id 查询角色（用户列表/详情的角色摘要回显：本页角色 ID 一次取齐，无 N+1）。
      */
-    List<AdminRole> findByIdInAndDeletedFalse(Collection<Long> ids);
+    List<AdminRole> findByIdIn(Collection<Long> ids);
 
     /**
-     * 批量按 id + 状态查询未软删角色。
+     * 批量按 id + 状态查询角色。
      *
      * <p>汇总聚合（roleCodes/permissions/menus）专用：禁用角色视为不存在（CONTEXT.md「RBAC」
-     * 条目决策①，issue #21），调用方传 {@code AdminRoleStatus.ENABLED}。软删过滤显式进行，
-     * 同 {@link #findByIdInAndDeletedFalse}（cartisan-boot#2 修复前后行为一致）。</p>
+     * 条目决策①，issue #21），调用方传 {@code AdminRoleStatus.ENABLED}。</p>
      */
-    List<AdminRole> findByIdInAndStatusAndDeletedFalse(Collection<Long> ids, AdminRoleStatus status);
+    List<AdminRole> findByIdInAndStatus(Collection<Long> ids, AdminRoleStatus status);
 
     /**
      * 检查角色是否被管理员使用。

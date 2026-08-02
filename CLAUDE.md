@@ -92,7 +92,7 @@ com.aieducenter.{context}
 
 ### 代码规范
 - **DTO**：使用 Java Record，构造函数校验不变量
-- **聚合根**：继承 `AuditableSoftDeletable`（推荐），使用 `@Getter`/`@Setter` 注解
+- **聚合根**：继承 `Auditable`（本应用三聚合均为物理删除，见 [ADR-0005](docs/adr/0005-soft-delete-to-physical-delete.md)；框架默认推荐 `AuditableSoftDeletable` 不适用于本项目），使用 `@Getter`/`@Setter` 注解
 - **实体**：不继承 `AuditableSoftDeletable`（避免唯一索引冲突），单一代理主键
 - **枚举**：实现 `BaseEnum<T>` 接口，Integer code 存储，框架自动转换
 - **测试命名**：`given_{条件}_when_{操作}_then_{预期结果}`

@@ -70,8 +70,8 @@ public class AdminUserManagementAppService {
      * 查询管理员列表（分页）。
      *
      * <p>每行内联已分配角色摘要（裁剪投影 {@code {id, name, code}}）。角色按本页全部用户的角色 ID
-     * <b>批量查一次</b>（{@link AdminRoleRepository#findByIdInAndDeletedFalse(Collection)}），再在内存按用户分组——
-     * 无 N+1。显式排除软删角色（关联行无软删标志，残留关联对应的角色不回显），与 {@link #findById} 同语义。</p>
+     * <b>批量查一次</b>（{@link AdminRoleRepository#findByIdIn(Collection)}），再在内存按用户分组——
+     * 无 N+1。关联指向的角色若已物理删除（ADR-0005）则不回显，与 {@link #findById} 同语义。</p>
      */
     @Transactional(readOnly = true)
     public PageResponse<AdminUserResponse> findAll(AdminUserQuery query, Pageable pageable) {
@@ -85,7 +85,7 @@ public class AdminUserManagementAppService {
                 .collect(Collectors.toSet());
         Map<Long, AdminRole> roleById = roleIds.isEmpty()
                 ? Map.of()
-                : adminRoleRepository.findByIdInAndDeletedFalse(roleIds).stream()
+                : adminRoleRepository.findByIdIn(roleIds).stream()
                         .collect(Collectors.toMap(AdminRole::getId, role -> role));
 
         List<AdminUserResponse> responses = users.stream()
@@ -101,7 +101,7 @@ public class AdminUserManagementAppService {
     }
 
     /**
-     * 从批量加载的角色字典中取出该用户的存活角色（显式过滤软删角色的残留关联）。
+     * 从批量加载的角色字典中取出该用户的存活角色（关联指向的角色已物理删除则跳过）。
      */
     private static List<AdminRole> rolesFor(AdminUser user, Map<Long, AdminRole> roleById) {
         return user.getRoleIds().stream()
@@ -113,8 +113,8 @@ public class AdminUserManagementAppService {
     /**
      * 查询管理员详情。
      *
-     * <p>携带当前已分配角色摘要（{@code roles}）供「分配角色」回显：显式排除软删角色
-     * （关联行无软删标志，角色软删后残留关联不得回显），批量查询一次完成，无 N+1。</p>
+     * <p>携带当前已分配角色摘要（{@code roles}）供「分配角色」回显：关联指向的角色若已物理删除
+     * （ADR-0005）则不回显，批量查询一次完成，无 N+1。</p>
      */
     @Transactional(readOnly = true)
     public AdminUserResponse findById(Long id) {
@@ -126,7 +126,7 @@ public class AdminUserManagementAppService {
         Set<Long> roleIds = adminUser.getRoleIds();
         List<AdminRole> roles = roleIds.isEmpty()
                 ? List.of()
-                : adminRoleRepository.findByIdInAndDeletedFalse(roleIds);
+                : adminRoleRepository.findByIdIn(roleIds);
 
         return adminUserMapper.convertWithRoles(adminUser, roles);
     }
@@ -194,11 +194,11 @@ public class AdminUserManagementAppService {
     }
 
     /**
-     * 删除管理员。
+     * 删除管理员（物理删除，ADR-0005）。
      *
-     * <p>破窗账号（保留 ID = 1）的不可删守卫由聚合 {@link AdminUser#markAsDeleted()} 承担——
-     * {@code adminUserRepository.delete(entity)} 经框架 {@code BaseRepositoryImpl} 调用
-     * {@code entity.markAsDeleted()}，命中即抛领域错误。</p>
+     * <p>破窗账号（保留 ID = 1）的不可删守卫由聚合 {@link AdminUser#requireDeletable()} 承担，
+     * 删除前显式调用——命中即抛领域错误，删除不会发生。删除用户时其 {@code sys_admin_user_roles}
+     * 关联行由 {@code cascade = ALL + orphanRemoval} 同事务级联清除（生产库另有 FK ON DELETE CASCADE 兜底）。</p>
      */
     @Transactional
     public void delete(Long id) {
@@ -207,6 +207,7 @@ public class AdminUserManagementAppService {
                 AdminMessage.ADMIN_NOT_FOUND
         );
 
+        adminUser.requireDeletable();
         adminUserRepository.delete(adminUser);
     }
 

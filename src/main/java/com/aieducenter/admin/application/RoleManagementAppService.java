@@ -117,12 +117,13 @@ public class RoleManagementAppService {
     }
 
     /**
-     * 删除角色。
+     * 删除角色（物理删除，ADR-0005）。
      *
-     * <p>SUPER_ADMIN 不可删守卫在聚合 {@link AdminRole#markAsDeleted()}（单一执行点，仿
-     * {@code AdminUser} 破窗号 guard）。但 SUPER_ADMIN 角色恒被破窗号使用，{@code ROLE_IN_USE}
-     * 会先命中而遮蔽 {@code SUPER_ADMIN_CANNOT_DELETE}，故此处仅对非超管角色查 in-use；
-     * 超管角色放行至 {@code repository.delete} → 聚合守卫抛正确错误码。</p>
+     * <p>SUPER_ADMIN 不可删守卫在聚合 {@link AdminRole#requireDeletable()}（单一执行点，仿
+     * {@code AdminUser} 破窗号 guard），删除前显式调用——先于 in-use 检查，保证超管角色命中
+     * {@code SUPER_ADMIN_CANNOT_DELETE} 而非被 {@code ROLE_IN_USE} 遮蔽。删除角色时其
+     * {@code sys_admin_role_menus} / {@code sys_admin_role_permissions} 关联行由
+     * {@code cascade = ALL + orphanRemoval} 同事务级联清除（生产库另有 FK ON DELETE CASCADE 兜底）。</p>
      */
     @Transactional
     public void delete(Long id) {
@@ -131,7 +132,9 @@ public class RoleManagementAppService {
                 AdminMessage.ROLE_NOT_FOUND
         );
 
-        if (!role.isSuperAdmin() && roleRepository.isUsedByAnyAdmin(id)) {
+        role.requireDeletable();
+
+        if (roleRepository.isUsedByAnyAdmin(id)) {
             throw new DomainException(AdminMessage.ROLE_IN_USE);
         }
 
@@ -246,7 +249,7 @@ public class RoleManagementAppService {
      */
     @Transactional(readOnly = true)
     public List<RoleOptionResponse> listEnabledOptions() {
-        return roleRepository.findByStatusAndDeletedFalseOrderBySortOrderAscIdAsc(AdminRoleStatus.ENABLED).stream()
+        return roleRepository.findByStatusOrderBySortOrderAscIdAsc(AdminRoleStatus.ENABLED).stream()
                 .map(r -> new RoleOptionResponse(r.getId(), r.getName(), r.getCode()))
                 .toList();
     }

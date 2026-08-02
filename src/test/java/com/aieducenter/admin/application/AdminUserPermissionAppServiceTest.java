@@ -65,7 +65,7 @@ class AdminUserPermissionAppServiceTest {
         superAdminRole.addPermission("admin:user:read", "用户管理-查看");
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of(superAdminRole));
+        when(adminRoleRepository.findByIdInAndStatus(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of(superAdminRole));
 
         // When
         List<String> permissions = adminUserPermissionAppService.getPermissions(adminId);
@@ -90,7 +90,7 @@ class AdminUserPermissionAppServiceTest {
         role2.addPermission("admin:role:read", "角色管理-查看");
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L, 2L), AdminRoleStatus.ENABLED)).thenReturn(List.of(role1, role2));
+        when(adminRoleRepository.findByIdInAndStatus(Set.of(1L, 2L), AdminRoleStatus.ENABLED)).thenReturn(List.of(role1, role2));
 
         // When
         List<String> permissions = adminUserPermissionAppService.getPermissions(adminId);
@@ -108,14 +108,14 @@ class AdminUserPermissionAppServiceTest {
         adminUser.addRole(1L);
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of());
+        when(adminRoleRepository.findByIdInAndStatus(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of());
 
         // When
         List<String> permissions = adminUserPermissionAppService.getPermissions(adminId);
 
         // Then
         assertThat(permissions).isEmpty();
-        verify(adminRoleRepository).findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED);
+        verify(adminRoleRepository).findByIdInAndStatus(Set.of(1L), AdminRoleStatus.ENABLED);
     }
 
     @Test
@@ -149,7 +149,7 @@ class AdminUserPermissionAppServiceTest {
         idField.set(superAdminRole, 1L);
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of(superAdminRole));
+        when(adminRoleRepository.findByIdInAndStatus(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of(superAdminRole));
 
         // When
         List<String> roleCodes = adminUserPermissionAppService.getRoleCodes(adminId);
@@ -176,7 +176,7 @@ class AdminUserPermissionAppServiceTest {
         idField.set(role2, 2L);
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L, 2L), AdminRoleStatus.ENABLED)).thenReturn(List.of(role1, role2));
+        when(adminRoleRepository.findByIdInAndStatus(Set.of(1L, 2L), AdminRoleStatus.ENABLED)).thenReturn(List.of(role1, role2));
 
         // When
         List<String> roleCodes = adminUserPermissionAppService.getRoleCodes(adminId);
@@ -194,14 +194,14 @@ class AdminUserPermissionAppServiceTest {
         adminUser.addRole(1L);
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of());
+        when(adminRoleRepository.findByIdInAndStatus(Set.of(1L), AdminRoleStatus.ENABLED)).thenReturn(List.of());
 
         // When
         List<String> roleCodes = adminUserPermissionAppService.getRoleCodes(adminId);
 
         // Then
         assertThat(roleCodes).isEmpty();
-        verify(adminRoleRepository).findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED);
+        verify(adminRoleRepository).findByIdInAndStatus(Set.of(1L), AdminRoleStatus.ENABLED);
     }
 
     @Test
@@ -236,7 +236,7 @@ class AdminUserPermissionAppServiceTest {
         List<MenuResponse> allVisible = List.of(menuResp(1L, "用户管理", "/users", 1));
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED))
+        when(adminRoleRepository.findByIdInAndStatus(Set.of(1L), AdminRoleStatus.ENABLED))
                 .thenReturn(List.of(superAdminRole));
         when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(true);
         when(menuManagementAppService.findVisibleTree(null)).thenReturn(allVisible);
@@ -273,7 +273,7 @@ class AdminUserPermissionAppServiceTest {
         List<MenuResponse> menus = List.of(menuResp(9L, "菜单", "/m", 1));
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L, 2L, 3L), AdminRoleStatus.ENABLED))
+        when(adminRoleRepository.findByIdInAndStatus(Set.of(1L, 2L, 3L), AdminRoleStatus.ENABLED))
                 .thenReturn(List.of(roleC, roleA, roleB)); // 无序返回
         when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
         when(menuManagementAppService.findVisibleTree(Set.of(9L))).thenReturn(menus);
@@ -302,7 +302,7 @@ class AdminUserPermissionAppServiceTest {
         roleY.setHome("home_y");
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(9L, 3L), AdminRoleStatus.ENABLED))
+        when(adminRoleRepository.findByIdInAndStatus(Set.of(9L, 3L), AdminRoleStatus.ENABLED))
                 .thenReturn(List.of(roleX, roleY));
         when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
 
@@ -329,7 +329,7 @@ class AdminUserPermissionAppServiceTest {
         roleB.setHome("  ");
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L, 2L), AdminRoleStatus.ENABLED))
+        when(adminRoleRepository.findByIdInAndStatus(Set.of(1L, 2L), AdminRoleStatus.ENABLED))
                 .thenReturn(List.of(roleA, roleB));
         when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
 
@@ -350,7 +350,7 @@ class AdminUserPermissionAppServiceTest {
         adminUser.addRole(1L);
 
         when(adminUserRepository.findById(adminId)).thenReturn(Optional.of(adminUser));
-        when(adminRoleRepository.findByIdInAndStatusAndDeletedFalse(Set.of(1L), AdminRoleStatus.ENABLED))
+        when(adminRoleRepository.findByIdInAndStatus(Set.of(1L), AdminRoleStatus.ENABLED))
                 .thenReturn(List.of());
         when(adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)).thenReturn(false);
 

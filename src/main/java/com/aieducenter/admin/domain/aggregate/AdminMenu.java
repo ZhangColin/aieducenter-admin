@@ -7,7 +7,7 @@ import cn.hutool.core.collection.CollUtil;
 import com.cartisan.core.domain.AggregateRoot;
 import com.cartisan.core.stereotype.Aggregate;
 
-import com.cartisan.data.jpa.domain.AuditableSoftDeletable;
+import com.cartisan.data.jpa.domain.Auditable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 import com.aieducenter.admin.domain.entity.MenuQueryParam;
 import com.aieducenter.admin.domain.enums.AdminUserStatus;
@@ -36,7 +36,7 @@ import lombok.Setter;
 @Entity
 @Table(name = "sys_admin_menus")
 @Aggregate
-public class AdminMenu extends AuditableSoftDeletable implements AggregateRoot<AdminMenu, Long> {
+public class AdminMenu extends Auditable implements AggregateRoot<AdminMenu, Long> {
 
     public static final int MAX_DEPTH = 3;
 

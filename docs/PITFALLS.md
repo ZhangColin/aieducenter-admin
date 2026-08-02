@@ -296,6 +296,8 @@ List<Conversation> findActiveByTenantId(@Param("tenantId") Long tenantId);
 
 **记忆口诀**：JPQL 查询手动加条件，@SQLRestriction 只管自动生成的 SQL。
 
+> **例外（本项目三聚合）**：`AdminUser`/`AdminRole`/`AdminMenu` 已迁物理删除（ADR-0005），无 `deleted` 字段——这三者的 JPQL/派生查询**不要**再加软删条件。
+
 ---
 
 ## Spring Boot / Web
@@ -1132,6 +1134,8 @@ Optional<User> findByUsername(@Param("username") String username);
 ```
 
 **记忆口诀**：JPQL 查询手动加条件，@SQLRestriction 只管自动 SQL。
+
+> **例外（本项目三聚合）**：`AdminUser`/`AdminRole`/`AdminMenu` 已迁物理删除（ADR-0005），无 `deleted` 字段——这三者的 JPQL/派生查询**不要**再加软删条件。
 
 **相关 Feature**：F02-01
 

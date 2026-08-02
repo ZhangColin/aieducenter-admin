@@ -51,6 +51,10 @@
 
 补全破窗韧性的最后一环：**`SUPER_ADMIN` 角色自身不可禁用、不可删除**。原 ADR 守住了"破窗号用户不可删/不可禁"与"不许从破窗号移除 SUPER_ADMIN 绑定"，但未守"SUPER_ADMIN 角色被禁/被删"这条路径——禁用/删除该角色会使破窗号虽在、救援角色失效，同样锁死。故 `AdminRole` 加 guard（错误码 `SUPER_ADMIN_CANNOT_DISABLE` / `SUPER_ADMIN_CANNOT_DELETE`，仿 `AdminUser` 破窗号 guard）。普通角色启停不受影响（语义跟 Soybean）。详见 [CONTEXT.md「破窗账号」](../../CONTEXT.md)。
 
+## 修订（2026-08-03，REQ-14 / ADR-0005）
+
+三聚合从软删迁移为物理删除（[ADR-0005](0005-soft-delete-to-physical-delete.md)）：破窗号/超管角色的不可删守卫从 `markAsDeleted()` override 迁为显式领域方法 `requireDeletable()`，由 AppService 在 `repository.delete()` 之前调用（框架 `BaseRepositoryImpl.delete` 对非 `SoftDeletable` 实体不再经 `markAsDeleted` 回调；残留该方法会触发反射软存）。守卫规则本身（保留 ID=1 不可删、`SUPER_ADMIN` 角色不可删/不可禁、不可去权）不变。
+
 ## 参见
 
 - 工作原则 memory：`framework-gaps-raise-requirement`。

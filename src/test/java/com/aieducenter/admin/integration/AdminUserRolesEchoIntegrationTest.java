@@ -42,14 +42,15 @@ import cn.dev33.satoken.config.SaTokenConfig;
  * <ul>
  *   <li>{@code GET /users/{id}} 返回 {@code roles: [{id, name, code}]}，id 按字符串序列化（Long 精度约定）；</li>
  *   <li>分配（PUT roles）后再查详情，roles 反映最新分配；</li>
- *   <li>角色被软删但关联行仍在（残留关联）→ roles 不含该角色（显式过滤的真实库行为）；</li>
+ *   <li>角色已物理删除但关联行仍在（残留关联）→ roles 不含该角色（真实库行为）；</li>
  *   <li>未分配角色 → {@code roles: []}（非 null、不省略）；</li>
  *   <li>{@code GET /users} 列表 items 无 roles 键（响应形状与现状逐字段一致）。</li>
  * </ul>
  *
- * <p>残留关联状态由 {@code adminRoleRepository.delete(role)} 直接构造（绕过应用层
- * 「角色使用中不可删」守卫——生产上该状态经直接 DB 操作或守卫落地前的历史数据产生，
- * 清理残留关联不在本 issue 范围）。</p>
+ * <p>残留关联状态由 {@code adminRoleRepository.delete(role)} 直接构造（ADR-0005 后为物理删除；
+ * 测试库 {@code ddl-auto=create} 不对 {@code user_roles.role_id} 建 FK——AdminRole 侧无该关联映射，
+ * 故关联行残留。生产库经 V3 FK ON DELETE CASCADE 不会残留，本用例钉的是应用层对残留关联的
+ * 防御性容错——绕过应用层「角色使用中不可删」守卫的直接 DB 操作场景）。</p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -131,8 +132,8 @@ class AdminUserRolesEchoIntegrationTest {
     }
 
     @Test
-    @DisplayName("角色被软删但关联行仍在 → 详情 roles 不含该角色（显式过滤真实行为）")
-    void given_softDeletedRoleStillLinked_when_getUserDetail_then_roleExcluded() throws Exception {
+    @DisplayName("角色已物理删除但关联行仍在 → 详情 roles 不含该角色（真实库行为）")
+    void given_deletedRoleStillLinked_when_getUserDetail_then_roleExcluded() throws Exception {
         Long aliveRoleId = roleAppService.create(
                 new CreateRoleCommand("存活_" + uuidSuffix(), "ALIVE_" + uuidSuffix(), "存活角色", 10, null));
         Long doomedRoleId = roleAppService.create(
@@ -141,7 +142,7 @@ class AdminUserRolesEchoIntegrationTest {
                 new CreateAdminUserCommand("stale_" + uuidSuffix(), PASSWORD, "残留关联用户", null, null, null));
         userAppService.assignRoles(userId, new AssignRolesCommand(List.of(aliveRoleId, doomedRoleId)));
 
-        // 直接经仓储软删角色（绕过应用层「使用中不可删」守卫）→ 关联行残留
+        // 直接经仓储物理删除角色（绕过应用层「使用中不可删」守卫）→ 测试库无 role_id FK，关联行残留
         AdminRole doomed = adminRoleRepository.findById(doomedRoleId).orElseThrow();
         adminRoleRepository.delete(doomed);
 

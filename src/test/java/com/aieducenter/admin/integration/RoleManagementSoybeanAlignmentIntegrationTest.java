@@ -52,7 +52,8 @@ import cn.dev33.satoken.config.SaTokenConfig;
  *
  * <p>仿 {@link BreakGlassAccountProtectionIntegrationTest}：真库（{@code ddl-auto=create}、Flyway 关闭）
  * + 真 Spring + SecurityFilter + 全局异常处理。SUPER_ADMIN 守卫点在 {@link AdminRole#disable()} /
- * {@link AdminRole#markAsDeleted()}（聚合内，单一执行点，仿 AdminUser 破窗号 guard，ADR-0003 修订）。</p>
+ * {@link AdminRole#requireDeletable()}（聚合内，单一执行点，仿 AdminUser 破窗号 guard，ADR-0003 修订；
+ * 删除守卫由应用服务在 {@code repository.delete()} 之前显式调用，ADR-0005）。</p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
