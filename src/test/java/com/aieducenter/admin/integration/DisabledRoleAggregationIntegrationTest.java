@@ -44,14 +44,15 @@ import cn.dev33.satoken.config.SaTokenConfig;
  * 禁用角色在汇总聚合中视为不存在（issue #21 / REQ-13-T1）——角色管理页的「禁用」成为真实的访问回收。
  *
  * <p>语义：用户菜单/权限 = 其全部<b>启用</b>角色的并集（CONTEXT.md「RBAC」条目决策①）。
- * 三个聚合方法（{@code getRoleCodes}/{@code getPermissions}/{@code getMenus}）同路径一次修齐，
+ * 各聚合方法（{@code getRoleCodes}/{@code getPermissions}/{@code getMyMenus}）同路径一次修齐，
  * 本类以 HTTP 外部行为钉住：</p>
  * <ul>
- *   <li>角色被禁用后，{@code /auth/current} 的 {@code roleCodes}/{@code permissions}/{@code menus}
- *       均剔除该角色贡献，其余启用角色贡献保留（并集语义）</li>
+ *   <li>角色被禁用后，{@code /auth/current} 的 {@code roleCodes}/{@code permissions} 与
+ *       {@code /menus/my} 的 {@code menus} 均剔除该角色贡献，其余启用角色贡献保留（并集语义）——
+ *       REQ-13-T3 起 {@code /auth/current} 收敛为身份 claims，菜单聚合断言由 {@code /menus/my} 承接</li>
  *   <li>仅持禁用角色的用户：三项聚合全空</li>
- *   <li>禁用后同一 token 访问受保护端点 → 403（{@code StpInterface} 与 {@code /auth/current}
- *       走同一聚合路径，无 Sa-Token 侧缓存——sa-token 1.45 {@code StpLogic.getPermissionList}
+ *   <li>禁用后同一 token 访问受保护端点 → 403（{@code StpInterface} 与 {@code /auth/current}、
+ *       {@code /menus/my} 走同一聚合路径，无 Sa-Token 侧缓存——sa-token 1.45 {@code StpLogic.getPermissionList}
  *       每请求直调 {@code StpInterface}）</li>
  *   <li>超管（SUPER_ADMIN）行为不受影响（其角色自身不可禁用，REQ-10 守卫不变）</li>
  * </ul>
@@ -144,11 +145,17 @@ class DisabledRoleAggregationIntegrationTest {
     @Test
     @DisplayName("启用角色基线：roleCodes/permissions/menus 为全部启用角色的并集")
     void given_enabledRoles_when_current_then_unionOfAllRoleContributions() {
-        JsonNode data = currentData(login(mixedUsername));
+        String token = login(mixedUsername);
+        JsonNode data = currentData(token);
+
+        // REQ-13-T3：/auth/current 收敛为 {user, roleCodes, permissions}——HTTP 接缝钉住 menus 键不存在
+        assertThat(data.has("user")).as("身份 claims 须含 user：%s", data).isTrue();
+        assertThat(data.has("menus")).as("/auth/current 不再下发 menus（导航归 /menus/my）：%s", data).isFalse();
 
         assertThat(stringList(data.path("roleCodes"))).containsExactlyInAnyOrder(roleACode, roleBCode);
         assertThat(stringList(data.path("permissions"))).containsExactlyInAnyOrder(PERM_A, PERM_B);
-        assertThat(menuRouteNames(data)).contains(menuXRouteName, menuYRouteName);
+        // menus 断言由 /menus/my 承接（REQ-13-T3）
+        assertThat(menuRouteNames(myData(token))).contains(menuXRouteName, menuYRouteName);
     }
 
     @Test
@@ -161,7 +168,7 @@ class DisabledRoleAggregationIntegrationTest {
 
         assertThat(stringList(data.path("roleCodes"))).containsExactly(roleBCode);
         assertThat(stringList(data.path("permissions"))).containsExactly(PERM_B);
-        assertThat(menuRouteNames(data)).contains(menuYRouteName).doesNotContain(menuXRouteName);
+        assertThat(menuRouteNames(myData(token))).contains(menuYRouteName).doesNotContain(menuXRouteName);
     }
 
     @Test
@@ -173,14 +180,14 @@ class DisabledRoleAggregationIntegrationTest {
         JsonNode before = currentData(token);
         assertThat(stringList(before.path("roleCodes"))).containsExactly(roleACode);
         assertThat(stringList(before.path("permissions"))).containsExactly(PERM_A);
-        assertThat(menuRouteNames(before)).contains(menuXRouteName);
+        assertThat(menuRouteNames(myData(token))).contains(menuXRouteName);
 
         roleAppService.updateStatus(roleAId, AdminRoleStatus.DISABLED);
 
         JsonNode after = currentData(token);
         assertThat(stringList(after.path("roleCodes"))).isEmpty();
         assertThat(stringList(after.path("permissions"))).isEmpty();
-        assertThat(after.path("menus").size()).isZero();
+        assertThat(myData(token).path("menus").size()).isZero();
     }
 
     @Test
@@ -209,20 +216,28 @@ class DisabledRoleAggregationIntegrationTest {
 
         JsonNode data = currentData(token);
         assertThat(stringList(data.path("roleCodes"))).containsExactly(AdminRole.SUPER_ADMIN_CODE);
-        // 超管菜单 = 不受角色裁剪的全量（含本用例创建的菜单 X/Y）
-        assertThat(menuRouteNames(data)).contains(menuXRouteName, menuYRouteName);
+        // 超管菜单 = 不受角色裁剪的全量（含本用例创建的菜单 X/Y），由 /menus/my 承接（REQ-13-T3）
+        assertThat(menuRouteNames(myData(token))).contains(menuXRouteName, menuYRouteName);
         assertThat(getWithToken("/api/admin/users", token).getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
     // ========== HTTP / JSON 辅助 ==========
 
     private JsonNode currentData(String token) {
-        ResponseEntity<String> response = getWithToken("/api/admin/auth/current", token);
-        assertThat(response.getStatusCode()).as("拉取当前用户应 200：%s", response.getBody()).isEqualTo(HttpStatus.OK);
+        return fetchData("/api/admin/auth/current", token);
+    }
+
+    private JsonNode myData(String token) {
+        return fetchData("/api/admin/menus/my", token);
+    }
+
+    private JsonNode fetchData(String path, String token) {
+        ResponseEntity<String> response = getWithToken(path, token);
+        assertThat(response.getStatusCode()).as("GET %s 应 200：%s", path, response.getBody()).isEqualTo(HttpStatus.OK);
         try {
             return objectMapper.readTree(response.getBody()).path("data");
         } catch (Exception e) {
-            throw new AssertionError("解析 /auth/current 响应失败：" + response.getBody(), e);
+            throw new AssertionError("解析 " + path + " 响应失败：" + response.getBody(), e);
         }
     }
 

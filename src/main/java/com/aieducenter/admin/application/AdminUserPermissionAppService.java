@@ -27,10 +27,10 @@ import static com.cartisan.core.util.Assertions.requirePresent;
  *   <li>通过领域模型聚合数据，避免跨表 SQL 查询</li>
  * </ul>
  *
- * <p>汇总聚合语义：用户菜单/权限/角色码 = 其全部<b>启用</b>角色的并集——禁用角色
+ * <p>汇总聚合语义：用户权限/角色码/导航 = 其全部<b>启用</b>角色的并集——禁用角色
  * （{@code AdminRoleStatus.DISABLED}）在任何汇总聚合中视为不存在（CONTEXT.md「RBAC」条目
- * 决策①，issue #21；{@code getRoleCodes}/{@code getPermissions}/{@code getMenus} 三方法
- * 同路径一次修齐）。超管不受影响：{@code SUPER_ADMIN} 角色自身不可禁用（REQ-10 聚合守卫）。</p>
+ * 决策①，issue #21；各聚合方法同路径一次修齐）。超管不受影响：{@code SUPER_ADMIN} 角色
+ * 自身不可禁用（REQ-10 聚合守卫）。</p>
  *
  * @since 0.1.0
  */
@@ -104,38 +104,6 @@ public class AdminUserPermissionAppService {
     }
 
     /**
-     * 获取管理员的菜单列表（树形）。
-     *
-     * @param adminId 管理员 ID
-     * @return 菜单 DTO 列表
-     */
-    @Transactional(readOnly = true)
-    public List<MenuResponse> getMenus(Long adminId) {
-        // 超管可见全部菜单（展示规则，与授权 bypass 无关——超管不靠角色-菜单绑定决定可见菜单）
-        if (adminUserRepository.hasRole(adminId, AdminRole.SUPER_ADMIN_CODE)) {
-            return menuManagementAppService.findTree(null);
-        }
-
-        AdminUser adminUser = requirePresent(
-                adminUserRepository.findById(adminId)
-        );
-
-        // 通过领域模型聚合菜单 ID
-        Set<Long> roleIds = adminUser.getRoleIds();
-        if (roleIds.isEmpty()) {
-            return List.of();
-        }
-
-        Set<Long> menuIds = unionMenuIds(enabledRoles(roleIds));
-
-        if (menuIds.isEmpty()) {
-            return List.of();
-        }
-
-        return menuManagementAppService.findTree(menuIds);
-    }
-
-    /**
      * 检查是否为超级管理员。
      */
     public boolean isSuperAdmin(Long adminId) {
@@ -180,7 +148,7 @@ public class AdminUserPermissionAppService {
         return new MyMenusResponse(home, menus);
     }
 
-    /** 角色列表的菜单 id 并集（{@link #getMenus} 与 {@link #getMyMenus} 共用）。 */
+    /** 角色列表的菜单 id 并集（{@link #getMyMenus} 使用）。 */
     private static Set<Long> unionMenuIds(List<AdminRole> roles) {
         Set<Long> menuIds = CollUtil.newHashSet();
         for (AdminRole role : roles) {

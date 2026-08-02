@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -253,9 +254,8 @@ class AdminUserAuthAppServiceTest {
         // Given
         AdminUser adminUser = new AdminUser("admin", "Test1234", "管理员");
         when(adminUserRepository.findById(1L)).thenReturn(Optional.of(adminUser));
-        when(adminPermissionAppService.getRoleCodes(1L)).thenReturn(java.util.List.of("ADMIN"));
-        when(adminPermissionAppService.getPermissions(1L)).thenReturn(java.util.List.of("admin:user:read"));
-        when(adminPermissionAppService.getMenus(1L)).thenReturn(java.util.List.of());
+        when(adminPermissionAppService.getRoleCodes(1L)).thenReturn(List.of("ADMIN"));
+        when(adminPermissionAppService.getPermissions(1L)).thenReturn(List.of("admin:user:read"));
 
         // When
         var response = adminAuthAppService.getCurrentAdmin(1L);
@@ -266,7 +266,6 @@ class AdminUserAuthAppServiceTest {
         assertThat(response.permissions()).containsExactly("admin:user:read");
         verify(adminPermissionAppService).getRoleCodes(1L);
         verify(adminPermissionAppService).getPermissions(1L);
-        verify(adminPermissionAppService).getMenus(1L);
     }
 
     @Test

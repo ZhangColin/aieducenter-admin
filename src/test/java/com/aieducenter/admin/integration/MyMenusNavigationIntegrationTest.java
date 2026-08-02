@@ -185,7 +185,7 @@ class MyMenusNavigationIntegrationTest {
                 .contains(dirERouteName, leafXRouteName, leafYRouteName)
                 .doesNotContain(leafWRouteName, dirDRouteName, leafZRouteName);
 
-        // 节点字段模型与 /auth/current.menus 一致（Soybean 路由生成器全字段，枚举整数 code 出站）
+        // 节点字段模型 = MenuResponse 全字段（Soybean 路由生成器全字段，枚举整数 code 出站）
         JsonNode leafX = root.path("children").get(0);
         assertThat(leafX.path("routePath").asText()).isEqualTo("/" + leafXRouteName);
         assertThat(leafX.path("component").asText()).isEqualTo("view." + leafXRouteName);

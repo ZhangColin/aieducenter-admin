@@ -12,8 +12,6 @@ import com.aieducenter.admin.application.dto.command.ResetPasswordCommand;
 import com.aieducenter.admin.application.dto.response.AdminUserResponse;
 import com.aieducenter.admin.application.dto.response.CurrentUserResponse;
 import com.aieducenter.admin.application.mapper.AdminUserMapper;
-import com.aieducenter.admin.application.dto.response.MenuResponse;
-import com.aieducenter.admin.application.dto.response.RoleResponse;
 import com.aieducenter.admin.domain.aggregate.AdminUser;
 import com.aieducenter.admin.domain.repository.AdminUserRepository;
 import com.aieducenter.admin.domain.service.PasswordEncoderService;
@@ -125,13 +123,12 @@ public class AdminUserAuthAppService {
         AdminUser adminUser = adminUserRepository.findById(userId)
                 .orElseThrow(() -> new ApplicationException(AdminMessage.ADMIN_NOT_FOUND));
 
-        // 获取角色、菜单、权限
+        // 获取角色、权限（导航 menus 已由 GET /menus/my 承接，REQ-13-T3）
         List<String> roleCodes = adminPermissionAppService.getRoleCodes(userId);
         List<String> permissionCodes = adminPermissionAppService.getPermissions(userId);
-        List<MenuResponse> menus = adminPermissionAppService.getMenus(userId);
 
         AdminUserResponse user = adminUserMapper.convert(adminUser);
 
-        return new CurrentUserResponse(user, roleCodes, menus, permissionCodes);
+        return new CurrentUserResponse(user, roleCodes, permissionCodes);
     }
 }
