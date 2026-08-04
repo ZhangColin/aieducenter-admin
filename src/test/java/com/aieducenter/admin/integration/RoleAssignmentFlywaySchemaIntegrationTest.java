@@ -55,7 +55,8 @@ import com.aieducenter.admin.domain.repository.AdminUserRepository;
         "spring.flyway.enabled=true",
         "spring.flyway.schemas=req7_flyway",
         "spring.flyway.default-schema=req7_flyway",
-        "spring.jpa.hibernate.ddl-auto=none"
+        "spring.jpa.hibernate.ddl-auto=none",
+        "admin.app-registry.base-url=http://localhost:8088"
 })
 @Transactional
 class RoleAssignmentFlywaySchemaIntegrationTest {

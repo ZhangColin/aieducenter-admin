@@ -11,14 +11,21 @@ spring:
       port: 26379
 
   flyway:
-    enabled: false
+    enabled: false  # 默认关闭：常规测试用 Hibernate ddl-auto=create 保证表隔离
+                    # Flyway 脚本正确性由 MenuSeedFlywayIntegrationTest
+                    # 和 RoleAssignmentFlywaySchemaIntegrationTest 在独立 schema 验证
 
   jpa:
     show-sql: true
     hibernate:
       # create（非 create-drop）：SessionFactory 启动时 drop+重建表、关闭时不 drop。
       # 套件有多个 @SpringBootTest 上下文（MOCK / RANDOM_PORT）共用本物理库，
-      # create-drop 会在某上下文 teardown 时 DROP 共享表，连累仍缓存的上下文
-      # （SoftDeleteReadFilterIntegrationTest 全量套件确定性失败，见 #10）。
+      # create-drop 会在某上下文 teardown 时 DROP 共享表，连累仍缓存的上下文。
       # create 既给每个上下文干净表、又无跨上下文清表 / 无脏数据累积。
       ddl-auto: create
+
+# 所有 @SpringBootTest 加载全量上下文，AppRegistryClient 需要此属性
+# （main/application.yml 中此值含嵌套占位符 ${APP_REGISTRY_URL:...}，部分场景不解析）
+admin:
+  app-registry:
+    base-url: http://localhost:8088

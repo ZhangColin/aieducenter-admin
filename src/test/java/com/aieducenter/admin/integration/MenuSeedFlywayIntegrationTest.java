@@ -29,19 +29,20 @@ import com.aieducenter.admin.domain.enums.MenuType;
 import com.cartisan.web.response.PageResponse;
 
 /**
- * 种子菜单回归（issue #14 / #26）：真 Flyway 全量迁移（V1–V10）下的 Soybean 种子。
+ * 种子菜单回归（issue #14 / #26 / #30）：真 Flyway 全量迁移（V1–V11）下的 Soybean 种子。
  *
  * <p>背景：测试库默认 {@code flyway.enabled=false} + {@code ddl-auto=create}——Hibernate 按实体建表、
  * Flyway 迁移<b>整条链路在套件里从不执行</b>。#13 落地 V6 时仅人工验过一次「干净启动」，
  * 自动化层对「全新库 init 后种子存在且结构正确」零覆盖（AC3）。本类补这块回归：在独立 schema 内跑真
- * Flyway V1–V10 + {@code ddl-auto=none} 复刻生产 schema，钉死七条 Soybean 种子经应用服务（{@code GET /menus}
+ * Flyway V1–V11 + {@code ddl-auto=none} 复刻生产 schema，钉死八条 Soybean 种子经应用服务（{@code GET /menus}
  * 分页与 {@code GET /menus/tree} 树端点的后端入口）可读、字段完整、directory 作路由前缀容器。</p>
  *
- * <p>种子契约（V6 + V10；ID 沿用 V2/V5 保留段 10/20/30/40/50/60/70）：</p>
+ * <p>种子契约（V6 + V10 + V11；ID 沿用 V2/V5 保留段 10/20/30/40/50/60/70/90）：</p>
  * <pre>
  *   home         menu       /home          layout.base$view.home   mdi:monitor-dashboard           order=1   i18n=route.home
  *   app          directory  /app           layout.base             carbon:application              order=2   i18n=route.app
  *     app_list     menu     /app/list      view.app_list           carbon:application              order=1   i18n=route.app_list
+ *     app_detail   menu     /app/list/:id  view.app_detail         carbon:application              order=2 hideInMenu  i18n=route.app_detail
  *   manage       directory  /manage        layout.base             carbon:cloud-service-management order=99  i18n=route.manage
  *     manage_user  menu     /manage/user   view.manage_user        ic:round-manage-accounts         order=1   i18n=route.manage_user
  *     manage_role  menu     /manage/role   view.manage_role        carbon:user-role                order=2   i18n=route.manage_role
@@ -60,7 +61,8 @@ import com.cartisan.web.response.PageResponse;
         "spring.flyway.enabled=true",
         "spring.flyway.schemas=menu_seed_flyway",
         "spring.flyway.default-schema=menu_seed_flyway",
-        "spring.jpa.hibernate.ddl-auto=none"
+        "spring.jpa.hibernate.ddl-auto=none",
+        "admin.app-registry.base-url=http://localhost:8088"
 })
 class MenuSeedFlywayIntegrationTest {
 
@@ -80,12 +82,12 @@ class MenuSeedFlywayIntegrationTest {
     }
 
     @Test
-    @DisplayName("全新库 Flyway V1–V10 init 后：GET /menus 扁平分页返回七条 Soybean 种子、字段完整")
-    void given_cleanFlywayMigration_when_findAll_then_sevenSoybeanSeedsWithFullMetadata() {
+    @DisplayName("全新库 Flyway V1–V11 init 后：GET /menus 扁平分页返回八条 Soybean 种子、字段完整")
+    void given_cleanFlywayMigration_when_findAll_then_eightSoybeanSeedsWithFullMetadata() {
         PageResponse<MenuResponse> page = menuAppService.findAll(
                 new MenuQuery(null, null, null, null), Pageable.ofSize(20));
 
-        assertThat(page.total()).as("V10 种子应恰好 7 条").isEqualTo(7);
+        assertThat(page.total()).as("V10+V11 种子应恰好 8 条").isEqualTo(8);
 
         // 按 routeName 索引（Soybean 路由唯一键），逐条断言全字段
         Map<String, MenuResponse> byRoute = page.items().stream()
@@ -132,6 +134,21 @@ class MenuSeedFlywayIntegrationTest {
         assertThat(appList.iconType()).isEqualTo(MenuIconType.ICONIFY);
         assertThat(appList.sortOrder()).isEqualTo(1);
         assertThat(appList.keepAlive()).isFalse();
+
+        // —— 应用详情（menu，挂应用管理下，hideInMenu，详情页路由注册）——
+        MenuResponse appDetail = byRoute.get("app_detail");
+        assertThat(appDetail).as("缺 app_detail 种子").isNotNull();
+        assertThat(appDetail.menuName()).isEqualTo("应用详情");
+        assertThat(appDetail.menuType()).isEqualTo(MenuType.MENU);
+        assertThat(appDetail.parentId()).isEqualTo(app.id());
+        assertThat(appDetail.routePath()).isEqualTo("/app/list/:id");
+        assertThat(appDetail.component()).isEqualTo("view.app_detail");
+        assertThat(appDetail.i18nKey()).isEqualTo("route.app_detail");
+        assertThat(appDetail.icon()).isEqualTo("carbon:application");
+        assertThat(appDetail.iconType()).isEqualTo(MenuIconType.ICONIFY);
+        assertThat(appDetail.sortOrder()).isEqualTo(2);
+        assertThat(appDetail.keepAlive()).isFalse();
+        assertThat(appDetail.hideInMenu()).as("app_detail 应 hideInMenu（详情页不在 sidebar 显示）").isTrue();
 
         // —— 系统管理（directory，路由前缀容器，sort_order V10 9→99）——
         MenuResponse manage = byRoute.get("manage");
@@ -203,9 +220,9 @@ class MenuSeedFlywayIntegrationTest {
 
         MenuResponse app = tree.stream().filter(m -> "app".equals(m.routeName())).findFirst().orElseThrow();
         assertThat(app.menuType()).isEqualTo(MenuType.DIRECTORY);
-        // app directory 挂一个 menu：app_list
+        // app directory 挂两个 menu：app_list + app_detail（按 sortOrder 升序）
         assertThat(app.children()).extracting(MenuResponse::routeName)
-                .containsExactly("app_list");
+                .containsExactly("app_list", "app_detail");
         assertThat(app.children()).allSatisfy(child ->
                 assertThat(child.menuType()).isEqualTo(MenuType.MENU));
 
@@ -219,13 +236,13 @@ class MenuSeedFlywayIntegrationTest {
     }
 
     @Test
-    @DisplayName("种子 count + 分页参数无关：page=0 size=1 时 total 仍为 7")
-    void given_smallPageSize_when_findAll_then_totalStillSeven() {
+    @DisplayName("种子 count + 分页参数无关：page=0 size=1 时 total 仍为 8")
+    void given_smallPageSize_when_findAll_then_totalStillEight() {
         PageResponse<MenuResponse> page = menuAppService.findAll(
                 new MenuQuery(null, null, null, null), PageRequest.of(0, 1));
 
         assertThat(page.items()).hasSize(1);
-        assertThat(page.total()).isEqualTo(7);
+        assertThat(page.total()).isEqualTo(8);
         assertThat(page.size()).isEqualTo(1);
     }
 }
