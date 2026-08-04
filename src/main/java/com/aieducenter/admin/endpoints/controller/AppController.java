@@ -2,10 +2,13 @@ package com.aieducenter.admin.endpoints.controller;
 
 import com.aieducenter.admin.application.AppManagementAppService;
 import com.aieducenter.admin.application.dto.command.CreateAppCommand;
+import com.aieducenter.admin.application.dto.command.ManageSsoClientCommand;
 import com.aieducenter.admin.application.dto.command.UpdateAppCommand;
 import com.aieducenter.admin.application.dto.query.AppManagementQuery;
+import com.aieducenter.admin.application.dto.response.ApiKeyCreatedResponse;
 import com.aieducenter.admin.application.dto.response.AppDetailResponse;
 import com.aieducenter.admin.application.dto.response.AppSummaryResponse;
+import com.aieducenter.admin.application.dto.response.SsoClientCreatedResponse;
 import com.aieducenter.admin.constants.AdminScopes;
 import com.cartisan.security.annotation.RequireAuth;
 import com.cartisan.security.annotation.RequirePermission;
@@ -117,5 +120,31 @@ public class AppController {
     public ApiResponse<Void> enable(@PathVariable Long id) {
         appManagementAppService.enable(id);
         return ApiResponse.ok();
+    }
+
+    @PostMapping("/{id}/api-key")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:app:write",
+            name = "平台管理 / 应用管理 / 编辑",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "生成/重置 ApiKey——无则生成、有则重置，返回含明文 apiSecret 的一次性响应")
+    public ApiResponse<ApiKeyCreatedResponse> manageApiKey(@PathVariable Long id) {
+        return ApiResponse.ok(appManagementAppService.manageApiKey(id));
+    }
+
+    @PostMapping("/{id}/sso-client")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:app:write",
+            name = "平台管理 / 应用管理 / 编辑",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "创建/更新 SSO 客户端——返回含明文 clientSecret 的一次性响应")
+    public ApiResponse<SsoClientCreatedResponse> manageSsoClient(
+            @PathVariable Long id,
+            @Valid @RequestBody ManageSsoClientCommand command) {
+        return ApiResponse.ok(appManagementAppService.manageSsoClient(id, command));
     }
 }

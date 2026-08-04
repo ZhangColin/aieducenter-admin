@@ -1,9 +1,12 @@
 package com.aieducenter.admin.infrastructure;
 
+import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyCreatedResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryAppResponse;
+import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientCreatedResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientResponse;
 import com.aieducenter.admin.application.dto.wire.CreateAppWireRequest;
+import com.aieducenter.admin.application.dto.wire.CreateSsoClientWireRequest;
 import com.aieducenter.admin.application.dto.wire.UpdateAppWireRequest;
 import com.cartisan.openapi.client.OpenApiClient;
 import com.cartisan.openapi.client.OpenApiClientException;
@@ -40,6 +43,10 @@ public class AppRegistryClient {
     private static final TypeReference<ApiResponse<AppRegistryAppResponse>> APP_DETAIL_WRITE_TYPEREF =
             new TypeReference<>() {};
     private static final TypeReference<ApiResponse<Void>> VOID_TYPEREF =
+            new TypeReference<>() {};
+    private static final TypeReference<ApiResponse<AppRegistryApiKeyCreatedResponse>> APIKEY_CREATED_TYPEREF =
+            new TypeReference<>() {};
+    private static final TypeReference<ApiResponse<AppRegistrySsoClientCreatedResponse>> SSO_CLIENT_CREATED_TYPEREF =
             new TypeReference<>() {};
 
     private final OpenApiClient openApiClient;
@@ -150,6 +157,26 @@ public class AppRegistryClient {
         String url = baseUrl + "/api/app-registry/apps/" + id + "/enable";
         log.debug("AppRegistryClient.enableApp: {}", url);
         openApiClient.put(url, null, VOID_TYPEREF);
+    }
+
+    /**
+     * 生成/重置 ApiKey——无则生成、有则重置，返回含明文 {@code apiSecret} 的一次性响应。
+     */
+    public AppRegistryApiKeyCreatedResponse createOrRotateApiKey(Long appId) {
+        String url = baseUrl + "/api/app-registry/apps/" + appId + "/api-keys";
+        log.debug("AppRegistryClient.createOrRotateApiKey: {}", url);
+        ApiResponse<AppRegistryApiKeyCreatedResponse> resp = openApiClient.post(url, null, APIKEY_CREATED_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 创建/更新 SSO 客户端——返回含明文 {@code clientSecret} 的一次性响应。
+     */
+    public AppRegistrySsoClientCreatedResponse createOrUpdateSsoClient(Long appId, CreateSsoClientWireRequest request) {
+        String url = baseUrl + "/api/app-registry/apps/" + appId + "/sso-clients";
+        log.debug("AppRegistryClient.createOrUpdateSsoClient: {}", url);
+        ApiResponse<AppRegistrySsoClientCreatedResponse> resp = openApiClient.post(url, request, SSO_CLIENT_CREATED_TYPEREF);
+        return resp.data();
     }
 
     private static String encode(String value) {

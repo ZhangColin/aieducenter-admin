@@ -1,14 +1,20 @@
 package com.aieducenter.admin.application;
 
 import com.aieducenter.admin.application.dto.command.CreateAppCommand;
+import com.aieducenter.admin.application.dto.command.ManageSsoClientCommand;
 import com.aieducenter.admin.application.dto.command.UpdateAppCommand;
 import com.aieducenter.admin.application.dto.query.AppManagementQuery;
+import com.aieducenter.admin.application.dto.response.ApiKeyCreatedResponse;
 import com.aieducenter.admin.application.dto.response.AppDetailResponse;
 import com.aieducenter.admin.application.dto.response.AppSummaryResponse;
+import com.aieducenter.admin.application.dto.response.SsoClientCreatedResponse;
+import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyCreatedResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryAppResponse;
+import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientCreatedResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientResponse;
 import com.aieducenter.admin.application.dto.wire.CreateAppWireRequest;
+import com.aieducenter.admin.application.dto.wire.CreateSsoClientWireRequest;
 import com.aieducenter.admin.application.dto.wire.UpdateAppWireRequest;
 import com.aieducenter.admin.infrastructure.AppRegistryClient;
 import com.cartisan.core.exception.BaseCodeMessage;
@@ -156,6 +162,47 @@ public class AppManagementAppService {
         log.info("Enabled app: id={}", id);
     }
 
+    /**
+     * 生成/重置 ApiKey——无则生成、有则重置，返回含明文 apiSecret 的一次性响应。
+     *
+     * <p>app-registry 404 透传为 {@link DomainException}。</p>
+     */
+    public ApiKeyCreatedResponse manageApiKey(Long appId) {
+        AppRegistryApiKeyCreatedResponse wire;
+        try {
+            wire = appRegistryClient.createOrRotateApiKey(appId);
+        } catch (OpenApiClientException e) {
+            if (e.getStatusCode() == 404) {
+                throw new DomainException(BaseCodeMessage.NOT_FOUND, appId);
+            }
+            throw e;
+        }
+        log.info("Managed ApiKey: appId={}, apiKey={}", appId, wire.apiKey());
+        return toApiKeyCreated(wire);
+    }
+
+    /**
+     * 创建/更新 SSO 客户端——返回含明文 clientSecret 的一次性响应。
+     *
+     * <p>app-registry 404 透传为 {@link DomainException}；校验（如 redirectUris 为空）由 app-registry 负责，
+     * 错误通过 {@link OpenApiClientException} 透传。</p>
+     */
+    public SsoClientCreatedResponse manageSsoClient(Long appId, ManageSsoClientCommand command) {
+        var wireRequest = new CreateSsoClientWireRequest(
+                command.redirectUris(), command.scopes(), command.grants());
+        AppRegistrySsoClientCreatedResponse wire;
+        try {
+            wire = appRegistryClient.createOrUpdateSsoClient(appId, wireRequest);
+        } catch (OpenApiClientException e) {
+            if (e.getStatusCode() == 404) {
+                throw new DomainException(BaseCodeMessage.NOT_FOUND, appId);
+            }
+            throw e;
+        }
+        log.info("Managed SsoClient: appId={}, clientId={}", appId, wire.clientId());
+        return toSsoClientCreated(wire);
+    }
+
     // ========== 映射方法 ==========
 
     private static AppSummaryResponse toSummary(AppRegistryAppResponse wire) {
@@ -187,5 +234,20 @@ public class AppManagementAppService {
                 app.status(), app.statusName(),
                 apiKeyInfo, ssoClientInfo,
                 app.createdAt(), app.updatedAt());
+    }
+
+    private static ApiKeyCreatedResponse toApiKeyCreated(AppRegistryApiKeyCreatedResponse wire) {
+        return new ApiKeyCreatedResponse(
+                wire.id(), wire.appId(), wire.apiKey(), wire.apiSecret(),
+                wire.status(), wire.statusName(),
+                wire.createdAt(), wire.updatedAt());
+    }
+
+    private static SsoClientCreatedResponse toSsoClientCreated(AppRegistrySsoClientCreatedResponse wire) {
+        return new SsoClientCreatedResponse(
+                wire.id(), wire.appId(), wire.clientId(), wire.clientSecret(),
+                wire.redirectUris(), wire.scopes(), wire.grants(),
+                wire.status(), wire.statusName(),
+                wire.createdAt(), wire.updatedAt());
     }
 }
