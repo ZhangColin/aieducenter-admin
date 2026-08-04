@@ -29,18 +29,20 @@ import com.aieducenter.admin.domain.enums.MenuType;
 import com.cartisan.web.response.PageResponse;
 
 /**
- * 种子菜单回归（issue #14 / T2 / ADR-0004）：真 Flyway 全量迁移（V1–V6）下的 Soybean 种子。
+ * 种子菜单回归（issue #14 / #26）：真 Flyway 全量迁移（V1–V10）下的 Soybean 种子。
  *
  * <p>背景：测试库默认 {@code flyway.enabled=false} + {@code ddl-auto=create}——Hibernate 按实体建表、
- * Flyway 迁移（含 V6 种子重建）<b>整条链路在套件里从不执行</b>。#13 落地 V6 时仅人工验过一次「干净启动」，
+ * Flyway 迁移<b>整条链路在套件里从不执行</b>。#13 落地 V6 时仅人工验过一次「干净启动」，
  * 自动化层对「全新库 init 后种子存在且结构正确」零覆盖（AC3）。本类补这块回归：在独立 schema 内跑真
- * Flyway V1–V6 + {@code ddl-auto=none} 复刻生产 schema，钉死五条 Soybean 种子经应用服务（{@code GET /menus}
+ * Flyway V1–V10 + {@code ddl-auto=none} 复刻生产 schema，钉死七条 Soybean 种子经应用服务（{@code GET /menus}
  * 分页与 {@code GET /menus/tree} 树端点的后端入口）可读、字段完整、directory 作路由前缀容器。</p>
  *
- * <p>种子契约（V6，镜像 soybean/example routes.ts；ID 沿用 V2/V5 保留段 10/20/30/50/60）：</p>
+ * <p>种子契约（V6 + V10；ID 沿用 V2/V5 保留段 10/20/30/40/50/60/70）：</p>
  * <pre>
  *   home         menu       /home          layout.base$view.home   mdi:monitor-dashboard           order=1   i18n=route.home
- *   manage       directory  /manage        layout.base             carbon:cloud-service-management order=9   i18n=route.manage
+ *   app          directory  /app           layout.base             carbon:application              order=2   i18n=route.app
+ *     app_list     menu     /app/list      view.app_list           carbon:application              order=1   i18n=route.app_list
+ *   manage       directory  /manage        layout.base             carbon:cloud-service-management order=99  i18n=route.manage
  *     manage_user  menu     /manage/user   view.manage_user        ic:round-manage-accounts         order=1   i18n=route.manage_user
  *     manage_role  menu     /manage/role   view.manage_role        carbon:user-role                order=2   i18n=route.manage_role
  *     manage_menu  menu     /manage/menu   view.manage_menu        material-symbols:route          order=3 keepAlive  i18n=route.manage_menu
@@ -78,12 +80,12 @@ class MenuSeedFlywayIntegrationTest {
     }
 
     @Test
-    @DisplayName("全新库 Flyway V1–V6 init 后：GET /menus 扁平分页返回五条 Soybean 种子、字段完整")
-    void given_cleanFlywayMigration_when_findAll_then_fiveSoybeanSeedsWithFullMetadata() {
+    @DisplayName("全新库 Flyway V1–V10 init 后：GET /menus 扁平分页返回七条 Soybean 种子、字段完整")
+    void given_cleanFlywayMigration_when_findAll_then_sevenSoybeanSeedsWithFullMetadata() {
         PageResponse<MenuResponse> page = menuAppService.findAll(
                 new MenuQuery(null, null, null, null), Pageable.ofSize(20));
 
-        assertThat(page.total()).as("V6 种子应恰好 5 条").isEqualTo(5);
+        assertThat(page.total()).as("V10 种子应恰好 7 条").isEqualTo(7);
 
         // 按 routeName 索引（Soybean 路由唯一键），逐条断言全字段
         Map<String, MenuResponse> byRoute = page.items().stream()
@@ -103,7 +105,35 @@ class MenuSeedFlywayIntegrationTest {
         assertThat(home.sortOrder()).isEqualTo(1);
         assertThat(home.keepAlive()).isFalse();
 
-        // —— 系统管理（directory，路由前缀容器）——
+        // —— 应用管理（directory，路由前缀容器）——
+        MenuResponse app = byRoute.get("app");
+        assertThat(app).as("缺 app 种子").isNotNull();
+        assertThat(app.menuName()).isEqualTo("应用管理");
+        assertThat(app.menuType()).isEqualTo(MenuType.DIRECTORY);
+        assertThat(app.parentId()).isNull();
+        assertThat(app.routePath()).isEqualTo("/app");
+        assertThat(app.component()).isEqualTo("layout.base");
+        assertThat(app.i18nKey()).isEqualTo("route.app");
+        assertThat(app.icon()).isEqualTo("carbon:application");
+        assertThat(app.iconType()).isEqualTo(MenuIconType.ICONIFY);
+        assertThat(app.sortOrder()).isEqualTo(2);
+        assertThat(app.keepAlive()).isFalse();
+
+        // —— 应用（menu，挂应用管理下）——
+        MenuResponse appList = byRoute.get("app_list");
+        assertThat(appList).as("缺 app_list 种子").isNotNull();
+        assertThat(appList.menuName()).isEqualTo("应用");
+        assertThat(appList.menuType()).isEqualTo(MenuType.MENU);
+        assertThat(appList.parentId()).isEqualTo(app.id());
+        assertThat(appList.routePath()).isEqualTo("/app/list");
+        assertThat(appList.component()).isEqualTo("view.app_list");
+        assertThat(appList.i18nKey()).isEqualTo("route.app_list");
+        assertThat(appList.icon()).isEqualTo("carbon:application");
+        assertThat(appList.iconType()).isEqualTo(MenuIconType.ICONIFY);
+        assertThat(appList.sortOrder()).isEqualTo(1);
+        assertThat(appList.keepAlive()).isFalse();
+
+        // —— 系统管理（directory，路由前缀容器，sort_order V10 9→99）——
         MenuResponse manage = byRoute.get("manage");
         assertThat(manage).as("缺 manage 种子").isNotNull();
         assertThat(manage.menuName()).isEqualTo("系统管理");
@@ -114,7 +144,7 @@ class MenuSeedFlywayIntegrationTest {
         assertThat(manage.i18nKey()).isEqualTo("route.manage");
         assertThat(manage.icon()).isEqualTo("carbon:cloud-service-management");
         assertThat(manage.iconType()).isEqualTo(MenuIconType.ICONIFY);
-        assertThat(manage.sortOrder()).isEqualTo(9);
+        assertThat(manage.sortOrder()).isEqualTo(99);
 
         // —— 用户管理（menu，挂系统管理下）——
         MenuResponse user = byRoute.get("manage_user");
@@ -160,16 +190,24 @@ class MenuSeedFlywayIntegrationTest {
     }
 
     @Test
-    @DisplayName("全新库 Flyway init 后：GET /menus/tree 返回 home + manage(directory→user/role/menu) 结构")
+    @DisplayName("全新库 Flyway init 后：GET /menus/tree 返回 home + app(directory→app_list) + manage(directory→user/role/menu) 结构")
     void given_cleanFlywayMigration_when_findTree_then_directoryStructureCorrect() {
         var tree = menuAppService.findTree();
 
-        // 两个根：home（menu）+ manage（directory）
-        assertThat(tree).hasSize(2);
+        // 三个根：home（menu）+ app（directory）+ manage（directory）
+        assertThat(tree).hasSize(3);
 
         MenuResponse home = tree.stream().filter(m -> "home".equals(m.routeName())).findFirst().orElseThrow();
         assertThat(home.menuType()).isEqualTo(MenuType.MENU);
         assertThat(home.children()).isEmpty();
+
+        MenuResponse app = tree.stream().filter(m -> "app".equals(m.routeName())).findFirst().orElseThrow();
+        assertThat(app.menuType()).isEqualTo(MenuType.DIRECTORY);
+        // app directory 挂一个 menu：app_list
+        assertThat(app.children()).extracting(MenuResponse::routeName)
+                .containsExactly("app_list");
+        assertThat(app.children()).allSatisfy(child ->
+                assertThat(child.menuType()).isEqualTo(MenuType.MENU));
 
         MenuResponse manage = tree.stream().filter(m -> "manage".equals(m.routeName())).findFirst().orElseThrow();
         assertThat(manage.menuType()).isEqualTo(MenuType.DIRECTORY);
@@ -181,13 +219,13 @@ class MenuSeedFlywayIntegrationTest {
     }
 
     @Test
-    @DisplayName("种子 count + 分页参数无关：page=0 size=1 时 total 仍为 5")
-    void given_smallPageSize_when_findAll_then_totalStillFive() {
+    @DisplayName("种子 count + 分页参数无关：page=0 size=1 时 total 仍为 7")
+    void given_smallPageSize_when_findAll_then_totalStillSeven() {
         PageResponse<MenuResponse> page = menuAppService.findAll(
                 new MenuQuery(null, null, null, null), PageRequest.of(0, 1));
 
         assertThat(page.items()).hasSize(1);
-        assertThat(page.total()).isEqualTo(5);
+        assertThat(page.total()).isEqualTo(7);
         assertThat(page.size()).isEqualTo(1);
     }
 }
