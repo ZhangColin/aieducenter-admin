@@ -20,6 +20,11 @@ spring:
     show-sql: false
 
 cartisan:
+  openapi:
+    self:
+      api-key: admin-console
+      api-secret: ${ADMIN_API_SECRET:}
+    apikey-service-url: ${APIKEY_SERVICE_URL:}
   security:
     interceptor:
       path-patterns:
@@ -39,6 +44,10 @@ sa-token:
   is-share: false
   token-style: uuid
   token-prefix: Bearer
+
+admin:
+  app-registry:
+    base-url: ${APP_REGISTRY_URL:http://localhost:8088}
 
 management:
   endpoints:

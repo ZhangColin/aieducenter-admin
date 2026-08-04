@@ -125,6 +125,11 @@
         </dependency>
         <dependency>
             <groupId>com.cartisan</groupId>
+            <artifactId>cartisan-openapi</artifactId>
+            <version>0.1.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>com.cartisan</groupId>
             <artifactId>cartisan-test</artifactId>
             <version>0.1.0-SNAPSHOT</version>
             <scope>test</scope>

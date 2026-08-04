@@ -35,6 +35,33 @@ _Avoid_: 在菜单模型上保留任何"Soybean 没有"的遗物（DIVIDER、旧
 **聚合 / 签名调用 (Aggregation via signed calls)**:
 前端不直连各能力域；统一后台经 **cartisan-openapi 签名调用**聚合各域（支付/钱包/模型网关/Token计量/…），对前端呈现统一视图。
 
+**应用注册中心 (App Registry)**:
+独立服务 `aieducenter-app-registry`（端口 8088），管理平台所有对接的外部应用/服务。Admin 通过 cartisan-openapi 签名调用其 API。Admin 自身的 apiKey=`admin-console`，apiSecret 已配置。核心聚合：`RegisteredApp`（应用信息）、`ApiKey`（apiKey/apiSecret，AES-GCM 可逆加密）、`SsoClient`（OIDC SSO 客户端，client_secret argon2 单向哈希）。Admin 的 BFF 层聚合这三个聚合的查询/维护为单一「应用管理」页面。
+
+**应用管理菜单 (App Management Menu)**:
+新增一级目录「应用管理」（`directory`, sort_order=2），位于首页之后、系统管理之前。其下二级菜单「应用」（`menu`）。系统管理 sort_order 同步调整为 99（原 9），为未来目录留空间。元数据已定：
+
+| 菜单 | route_name | route_path | component | icon | i18n_key | menu_type | sort_order | parent_id |
+|------|-----------|------------|-----------|------|----------|-----------|------------|-----------|
+| 应用管理 | `app` | `/app` | `layout.base` | `carbon:application` | `route.app` | directory(1) | 2 | NULL |
+| 应用 | `app_list` | `/app/list` | `view.app_list` | `carbon:application` | `route.app_list` | menu(2) | 1 | (应用管理id) |
+
+**应用管理 BFF 设计**:
+Admin 作为 BFF，前端只访问 admin，不对 app-registry 直连。Admin 透传 + 聚合调用 app-registry（经 cartisan-openapi 签名）。
+
+- `appCode` = `apiKey`（二者一致）
+- `apiSecret`：无则生成，有则重置
+- 业务逻辑全在 app-registry，admin 不做业务判断
+- 端点（`/api/admin/apps`）：列表、详情（聚合 app+apiKey+ssoClient）、创建、**更新应用信息**（name/description）、管理 apiKey（生成/重置）、管理 ssoClient（创建/更新）、启停用 — 各区块独立保存
+- 对 app-registry 的依赖 issue：[#14 列表接口](https://github.com/ZhangColin/aieducenter-app-registry/issues/14) / [#15 更新接口](https://github.com/ZhangColin/aieducenter-app-registry/issues/15)
+
+**应用详情页布局**（单页三区块，各独立保存）：
+1. 应用基本信息：appCode(只读) + name(编辑) + description(编辑) + status(启停按钮)
+2. API Key：apiKey(只读,=appCode) + apiSecret(生成/重置后展示一次) + 生成/重置按钮
+3. SSO Client(可选)：clientId(只读) + redirectUris(编辑) + scopes/grants(编辑) + clientSecret(重置后展示一次) + 配置/重置按钮
+
+（2026-08-04 开始讨论）
+
 **消费面 vs 管理面 (Consumption side vs Management side)**:
 同一资源的两种服务视角（REQ-13 定，2026-08-02）。**消费面** = 终端使用视角（我的导航、动态路由），只下发**启用**数据、登录即可访问（不挂管理权限）、禁用项不下发且 directory 禁用整棵子树不下发——对超管同样生效；**管理面** = 维护视角（菜单/角色管理页），全量含禁用项、挂 `@RequirePermission`。例：`GET /menus/my` 是消费面；`GET /menus`、`GET /menus/tree` 是管理面。身份 claims（user/roleCodes/permissions）留 auth 域（`/auth/current`），导航资源（menus/home）归 menu 域——身份 vs 导航不混在一个响应里。
 _Avoid_: 给消费面端点挂管理权限注解；让消费面为了"超管全量"而连禁用项也下发；在管理面端点上做消费面过滤。

@@ -8,3 +8,8 @@ spring:
       host: localhost
       port: 6379
 spring.jpa.show-sql: true
+
+# BFF 聚合——app-registry 地址
+admin:
+  app-registry:
+    base-url: http://localhost:8088
