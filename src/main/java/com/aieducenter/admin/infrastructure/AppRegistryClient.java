@@ -3,6 +3,8 @@ package com.aieducenter.admin.infrastructure;
 import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryAppResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientResponse;
+import com.aieducenter.admin.application.dto.wire.CreateAppWireRequest;
+import com.aieducenter.admin.application.dto.wire.UpdateAppWireRequest;
 import com.cartisan.openapi.client.OpenApiClient;
 import com.cartisan.openapi.client.OpenApiClientException;
 import com.cartisan.web.response.ApiResponse;
@@ -34,6 +36,10 @@ public class AppRegistryClient {
     private static final TypeReference<ApiResponse<AppRegistryApiKeyResponse>> APIKEY_TYPEREF =
             new TypeReference<>() {};
     private static final TypeReference<ApiResponse<AppRegistrySsoClientResponse>> SSO_CLIENT_TYPEREF =
+            new TypeReference<>() {};
+    private static final TypeReference<ApiResponse<AppRegistryAppResponse>> APP_DETAIL_WRITE_TYPEREF =
+            new TypeReference<>() {};
+    private static final TypeReference<ApiResponse<Void>> VOID_TYPEREF =
             new TypeReference<>() {};
 
     private final OpenApiClient openApiClient;
@@ -106,6 +112,44 @@ public class AppRegistryClient {
             }
             throw e;
         }
+    }
+
+    /**
+     * 创建应用。
+     */
+    public AppRegistryAppResponse createApp(CreateAppWireRequest request) {
+        String url = baseUrl + "/api/app-registry/apps";
+        log.debug("AppRegistryClient.createApp: {}", url);
+        ApiResponse<AppRegistryAppResponse> resp = openApiClient.post(url, request, APP_DETAIL_WRITE_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 更新应用——仅 name/description，appCode 不可变。
+     */
+    public AppRegistryAppResponse updateApp(Long id, UpdateAppWireRequest request) {
+        String url = baseUrl + "/api/app-registry/apps/" + id;
+        log.debug("AppRegistryClient.updateApp: {}", url);
+        ApiResponse<AppRegistryAppResponse> resp = openApiClient.put(url, request, APP_DETAIL_WRITE_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 停用应用。
+     */
+    public void disableApp(Long id) {
+        String url = baseUrl + "/api/app-registry/apps/" + id + "/disable";
+        log.debug("AppRegistryClient.disableApp: {}", url);
+        openApiClient.put(url, null, VOID_TYPEREF);
+    }
+
+    /**
+     * 启用应用。
+     */
+    public void enableApp(Long id) {
+        String url = baseUrl + "/api/app-registry/apps/" + id + "/enable";
+        log.debug("AppRegistryClient.enableApp: {}", url);
+        openApiClient.put(url, null, VOID_TYPEREF);
     }
 
     private static String encode(String value) {

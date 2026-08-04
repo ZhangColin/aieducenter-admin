@@ -1,11 +1,15 @@
 package com.aieducenter.admin.application;
 
+import com.aieducenter.admin.application.dto.command.CreateAppCommand;
+import com.aieducenter.admin.application.dto.command.UpdateAppCommand;
 import com.aieducenter.admin.application.dto.query.AppManagementQuery;
 import com.aieducenter.admin.application.dto.response.AppDetailResponse;
 import com.aieducenter.admin.application.dto.response.AppSummaryResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryAppResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientResponse;
+import com.aieducenter.admin.application.dto.wire.CreateAppWireRequest;
+import com.aieducenter.admin.application.dto.wire.UpdateAppWireRequest;
 import com.aieducenter.admin.infrastructure.AppRegistryClient;
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.openapi.client.OpenApiClientException;
@@ -27,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -138,5 +143,143 @@ class AppManagementAppServiceTest {
         assertThatThrownBy(() -> service.getDetail(1L))
                 .isInstanceOf(OpenApiClientException.class)
                 .matches(e -> ((OpenApiClientException) e).getStatusCode() == 500);
+    }
+
+    // ========== create ==========
+
+    @Test
+    void given_validCommand_when_create_then_delegateToClientAndReturnDetail() {
+        LocalDateTime now = LocalDateTime.now();
+        when(appRegistryClient.createApp(any(CreateAppWireRequest.class)))
+                .thenReturn(new AppRegistryAppResponse(1L, "new-app", "New App", "desc",
+                        1, "启用", now, now));
+
+        AppDetailResponse result = service.create(
+                new CreateAppCommand("new-app", "New App", "desc"));
+
+        assertThat(result.id()).isEqualTo(1L);
+        assertThat(result.appCode()).isEqualTo("new-app");
+        assertThat(result.name()).isEqualTo("New App");
+        assertThat(result.apiKey()).isNull();   // 新应用尚无 apiKey
+        assertThat(result.ssoClient()).isNull();
+        verify(appRegistryClient).createApp(any(CreateAppWireRequest.class));
+    }
+
+    @Test
+    void given_appRegistry404_when_create_then_throwDomainException() {
+        when(appRegistryClient.createApp(any(CreateAppWireRequest.class)))
+                .thenThrow(new OpenApiClientException(404, "{\"message\":\"Not Found\"}"));
+
+        assertThatThrownBy(() -> service.create(
+                new CreateAppCommand("bad", "Bad", "")))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 404);
+    }
+
+    @Test
+    void given_appRegistry409_when_create_then_throwDomainException() {
+        when(appRegistryClient.createApp(any(CreateAppWireRequest.class)))
+                .thenThrow(new OpenApiClientException(409, "{\"message\":\"Conflict\"}"));
+
+        assertThatThrownBy(() -> service.create(
+                new CreateAppCommand("dup", "Dup", "")))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 409);
+    }
+
+    // ========== update ==========
+
+    @Test
+    void given_validCommand_when_update_then_delegateToClientAndReturnDetail() {
+        LocalDateTime now = LocalDateTime.now();
+        when(appRegistryClient.updateApp(eq(1L), any(UpdateAppWireRequest.class)))
+                .thenReturn(new AppRegistryAppResponse(1L, "my-app", "Updated", "new-desc",
+                        1, "启用", now, now));
+
+        AppDetailResponse result = service.update(1L,
+                new UpdateAppCommand("Updated", "new-desc"));
+
+        assertThat(result.id()).isEqualTo(1L);
+        assertThat(result.name()).isEqualTo("Updated");
+        assertThat(result.description()).isEqualTo("new-desc");
+        verify(appRegistryClient).updateApp(eq(1L), any(UpdateAppWireRequest.class));
+    }
+
+    @Test
+    void given_appRegistry404_when_update_then_throwDomainException() {
+        when(appRegistryClient.updateApp(eq(99L), any(UpdateAppWireRequest.class)))
+                .thenThrow(new OpenApiClientException(404, "{\"message\":\"Not Found\"}"));
+
+        assertThatThrownBy(() -> service.update(99L,
+                new UpdateAppCommand("X", "")))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 404);
+    }
+
+    @Test
+    void given_appRegistry409_when_update_then_throwDomainException() {
+        when(appRegistryClient.updateApp(eq(1L), any(UpdateAppWireRequest.class)))
+                .thenThrow(new OpenApiClientException(409, "{\"message\":\"Conflict\"}"));
+
+        assertThatThrownBy(() -> service.update(1L,
+                new UpdateAppCommand("X", "")))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 409);
+    }
+
+    // ========== disable ==========
+
+    @Test
+    void given_validId_when_disable_then_delegateToClient() {
+        service.disable(1L);
+        verify(appRegistryClient).disableApp(1L);
+    }
+
+    @Test
+    void given_appRegistry404_when_disable_then_throwDomainException() {
+        doThrow(new OpenApiClientException(404, "{\"message\":\"Not Found\"}"))
+                .when(appRegistryClient).disableApp(99L);
+
+        assertThatThrownBy(() -> service.disable(99L))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 404);
+    }
+
+    @Test
+    void given_appRegistry409_when_disable_then_throwDomainException() {
+        doThrow(new OpenApiClientException(409, "{\"message\":\"Already disabled\"}"))
+                .when(appRegistryClient).disableApp(1L);
+
+        assertThatThrownBy(() -> service.disable(1L))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 409);
+    }
+
+    // ========== enable ==========
+
+    @Test
+    void given_validId_when_enable_then_delegateToClient() {
+        service.enable(1L);
+        verify(appRegistryClient).enableApp(1L);
+    }
+
+    @Test
+    void given_appRegistry404_when_enable_then_throwDomainException() {
+        doThrow(new OpenApiClientException(404, "{\"message\":\"Not Found\"}"))
+                .when(appRegistryClient).enableApp(99L);
+
+        assertThatThrownBy(() -> service.enable(99L))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 404);
+    }
+
+    @Test
+    void given_appRegistry409_when_enable_then_throwDomainException() {
+        doThrow(new OpenApiClientException(409, "{\"message\":\"Already enabled\"}"))
+                .when(appRegistryClient).enableApp(1L);
+
+        assertThatThrownBy(() -> service.enable(1L))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 409);
     }
 }

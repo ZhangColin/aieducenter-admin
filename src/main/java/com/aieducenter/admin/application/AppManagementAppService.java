@@ -1,11 +1,15 @@
 package com.aieducenter.admin.application;
 
+import com.aieducenter.admin.application.dto.command.CreateAppCommand;
+import com.aieducenter.admin.application.dto.command.UpdateAppCommand;
 import com.aieducenter.admin.application.dto.query.AppManagementQuery;
 import com.aieducenter.admin.application.dto.response.AppDetailResponse;
 import com.aieducenter.admin.application.dto.response.AppSummaryResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryAppResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientResponse;
+import com.aieducenter.admin.application.dto.wire.CreateAppWireRequest;
+import com.aieducenter.admin.application.dto.wire.UpdateAppWireRequest;
 import com.aieducenter.admin.infrastructure.AppRegistryClient;
 import com.cartisan.core.exception.BaseCodeMessage;
 import com.cartisan.core.exception.DomainException;
@@ -70,6 +74,86 @@ public class AppManagementAppService {
         Optional<AppRegistrySsoClientResponse> ssoClient = appRegistryClient.getSsoClient(id);
 
         return toDetail(app, apiKey.orElse(null), ssoClient.orElse(null));
+    }
+
+    /**
+     * 创建应用——透传 appCode + name + description 至 app-registry。
+     *
+     * <p>新创建的应用尚无 apiKey/ssoClient，响应中对应字段为 null。</p>
+     */
+    public AppDetailResponse create(CreateAppCommand command) {
+        var wireRequest = new CreateAppWireRequest(command.appCode(), command.name(), command.description());
+        AppRegistryAppResponse app;
+        try {
+            app = appRegistryClient.createApp(wireRequest);
+        } catch (OpenApiClientException e) {
+            if (e.getStatusCode() == 404) {
+                throw new DomainException(BaseCodeMessage.NOT_FOUND, command.appCode());
+            }
+            if (e.getStatusCode() == 409) {
+                throw new DomainException(BaseCodeMessage.CONFLICT, command.appCode());
+            }
+            throw e;
+        }
+        log.info("Created app: id={}, appCode={}", app.id(), app.appCode());
+        return toDetail(app, null, null);
+    }
+
+    /**
+     * 更新应用——仅 name/description 可改，appCode 不可变。
+     */
+    public AppDetailResponse update(Long id, UpdateAppCommand command) {
+        var wireRequest = new UpdateAppWireRequest(command.name(), command.description());
+        AppRegistryAppResponse app;
+        try {
+            app = appRegistryClient.updateApp(id, wireRequest);
+        } catch (OpenApiClientException e) {
+            if (e.getStatusCode() == 404) {
+                throw new DomainException(BaseCodeMessage.NOT_FOUND, id);
+            }
+            if (e.getStatusCode() == 409) {
+                throw new DomainException(BaseCodeMessage.CONFLICT, id);
+            }
+            throw e;
+        }
+        log.info("Updated app: id={}, appCode={}", app.id(), app.appCode());
+        return toDetail(app, null, null);
+    }
+
+    /**
+     * 停用应用——已停用时返回 409。
+     */
+    public void disable(Long id) {
+        try {
+            appRegistryClient.disableApp(id);
+        } catch (OpenApiClientException e) {
+            if (e.getStatusCode() == 404) {
+                throw new DomainException(BaseCodeMessage.NOT_FOUND, id);
+            }
+            if (e.getStatusCode() == 409) {
+                throw new DomainException(BaseCodeMessage.CONFLICT, id);
+            }
+            throw e;
+        }
+        log.info("Disabled app: id={}", id);
+    }
+
+    /**
+     * 启用应用——已启用时返回 409。
+     */
+    public void enable(Long id) {
+        try {
+            appRegistryClient.enableApp(id);
+        } catch (OpenApiClientException e) {
+            if (e.getStatusCode() == 404) {
+                throw new DomainException(BaseCodeMessage.NOT_FOUND, id);
+            }
+            if (e.getStatusCode() == 409) {
+                throw new DomainException(BaseCodeMessage.CONFLICT, id);
+            }
+            throw e;
+        }
+        log.info("Enabled app: id={}", id);
     }
 
     // ========== 映射方法 ==========

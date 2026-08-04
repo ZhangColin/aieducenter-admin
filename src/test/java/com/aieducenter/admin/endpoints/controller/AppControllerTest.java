@@ -4,12 +4,15 @@ import com.aieducenter.admin.application.AppManagementAppService;
 import com.aieducenter.admin.application.dto.response.AppDetailResponse;
 import com.aieducenter.admin.application.dto.response.AppSummaryResponse;
 import com.cartisan.web.response.PageResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -17,9 +20,12 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -71,5 +77,81 @@ class AppControllerTest {
                 .andExpect(jsonPath("$.data.apiKey.apiKey").value("my-app"));
 
         verify(appManagementAppService).getDetail(1L);
+    }
+
+    // ========== create ==========
+
+    @Test
+    void given_validBody_when_create_then_returnCreatedApp() throws Exception {
+        LocalDateTime now = LocalDateTime.now();
+        when(appManagementAppService.create(any()))
+                .thenReturn(new AppDetailResponse(1L, "new-app", "New App", "desc",
+                        1, "启用", null, null, now, now));
+
+        String body = new ObjectMapper().writeValueAsString(
+                java.util.Map.of("appCode", "new-app", "name", "New App", "description", "desc"));
+
+        mvc.perform(post("/api/admin/apps")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(1))
+                .andExpect(jsonPath("$.data.appCode").value("new-app"))
+                .andExpect(jsonPath("$.data.name").value("New App"));
+
+        verify(appManagementAppService).create(any());
+    }
+
+    @Test
+    void given_missingName_when_create_then_return400() throws Exception {
+        String body = new ObjectMapper().writeValueAsString(
+                java.util.Map.of("appCode", "new-app", "description", "desc"));
+
+        mvc.perform(post("/api/admin/apps")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ========== update ==========
+
+    @Test
+    void given_validBody_when_update_then_returnUpdatedApp() throws Exception {
+        LocalDateTime now = LocalDateTime.now();
+        when(appManagementAppService.update(eq(1L), any()))
+                .thenReturn(new AppDetailResponse(1L, "my-app", "Updated", "new-desc",
+                        1, "启用", null, null, now, now));
+
+        String body = new ObjectMapper().writeValueAsString(
+                java.util.Map.of("name", "Updated", "description", "new-desc"));
+
+        mvc.perform(put("/api/admin/apps/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.name").value("Updated"))
+                .andExpect(jsonPath("$.data.description").value("new-desc"));
+
+        verify(appManagementAppService).update(eq(1L), any());
+    }
+
+    // ========== disable ==========
+
+    @Test
+    void given_id_when_disable_then_return200() throws Exception {
+        mvc.perform(put("/api/admin/apps/1/disable"))
+                .andExpect(status().isOk());
+
+        verify(appManagementAppService).disable(1L);
+    }
+
+    // ========== enable ==========
+
+    @Test
+    void given_id_when_enable_then_return200() throws Exception {
+        mvc.perform(put("/api/admin/apps/1/enable"))
+                .andExpect(status().isOk());
+
+        verify(appManagementAppService).enable(1L);
     }
 }

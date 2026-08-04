@@ -1,11 +1,15 @@
 package com.aieducenter.admin.integration;
 
 import com.aieducenter.admin.application.AppManagementAppService;
+import com.aieducenter.admin.application.dto.command.CreateAppCommand;
+import com.aieducenter.admin.application.dto.command.UpdateAppCommand;
 import com.aieducenter.admin.application.dto.response.AppDetailResponse;
 import com.aieducenter.admin.application.dto.response.AppSummaryResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryAppResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientResponse;
+import com.aieducenter.admin.application.dto.wire.CreateAppWireRequest;
+import com.aieducenter.admin.application.dto.wire.UpdateAppWireRequest;
 import com.aieducenter.admin.infrastructure.AppRegistryClient;
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.openapi.client.OpenApiClientException;
@@ -24,8 +28,11 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -114,5 +121,79 @@ class AppBffIntegrationTest {
         assertThatThrownBy(() -> appService.getDetail(99L))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 404);
+    }
+
+    // ========== create ==========
+
+    @Test
+    void given_validCommand_when_create_then_returnAppDetail() {
+        LocalDateTime now = LocalDateTime.now();
+        when(appRegistryClient.createApp(any(CreateAppWireRequest.class)))
+                .thenReturn(new AppRegistryAppResponse(1L, "new-app", "New App", "desc",
+                        1, "启用", now, now));
+
+        AppDetailResponse result = appService.create(
+                new CreateAppCommand("new-app", "New App", "desc"));
+
+        assertThat(result.id()).isEqualTo(1L);
+        assertThat(result.appCode()).isEqualTo("new-app");
+        assertThat(result.name()).isEqualTo("New App");
+        assertThat(result.status()).isEqualTo(1);
+        assertThat(result.apiKey()).isNull();
+        assertThat(result.ssoClient()).isNull();
+    }
+
+    // ========== update ==========
+
+    @Test
+    void given_validCommand_when_update_then_returnAppDetail() {
+        LocalDateTime now = LocalDateTime.now();
+        when(appRegistryClient.updateApp(eq(1L), any(UpdateAppWireRequest.class)))
+                .thenReturn(new AppRegistryAppResponse(1L, "my-app", "Updated", "new-desc",
+                        1, "启用", now, now));
+
+        AppDetailResponse result = appService.update(1L,
+                new UpdateAppCommand("Updated", "new-desc"));
+
+        assertThat(result.name()).isEqualTo("Updated");
+        assertThat(result.description()).isEqualTo("new-desc");
+        // appCode 不可变
+        assertThat(result.appCode()).isEqualTo("my-app");
+    }
+
+    // ========== disable ==========
+
+    @Test
+    void given_enabledApp_when_disable_then_succeed() {
+        appService.disable(1L);
+        verify(appRegistryClient).disableApp(1L);
+    }
+
+    @Test
+    void given_alreadyDisabled_when_disable_then_throw409() {
+        doThrow(new OpenApiClientException(409, "{\"message\":\"Already disabled\"}"))
+                .when(appRegistryClient).disableApp(1L);
+
+        assertThatThrownBy(() -> appService.disable(1L))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 409);
+    }
+
+    // ========== enable ==========
+
+    @Test
+    void given_disabledApp_when_enable_then_succeed() {
+        appService.enable(1L);
+        verify(appRegistryClient).enableApp(1L);
+    }
+
+    @Test
+    void given_alreadyEnabled_when_enable_then_throw409() {
+        doThrow(new OpenApiClientException(409, "{\"message\":\"Already enabled\"}"))
+                .when(appRegistryClient).enableApp(1L);
+
+        assertThatThrownBy(() -> appService.enable(1L))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 409);
     }
 }
