@@ -1,0 +1,25 @@
+-- ============================================================================
+-- V12: Remove menu —— 应用详情（app_detail 路由废弃清理）
+--       (issue #31)
+-- ============================================================================
+-- Purpose: 删除 V11 插入的「应用详情」(app_detail) 菜单记录。
+-- Context: Admin (sys_)
+-- ============================================================================
+-- Background (issue #31):
+--   前端 aieducenter-admin-web 已将应用详情从独立路由 /app/list/:id 改为列表页内
+--   720px Modal 弹窗（前端 issue #32），app_detail 路由完全移除。V11 种子的
+--   app_detail 菜单不再被任何前端路由消费 → GET /menus/my 会返回悬空路由，需清理。
+--
+--   不修改 V11：现有环境已执行 V11，Flyway 校验和锁定已应用版本，改动 V11 会触发
+--   ValidationFailure。本迁移以新增 V12 的形式删除记录，保持迁移历史线性；日后
+--   从 0 重建库时再统一收敛 V11/V12。
+--
+--   删除范围：id=90（V11 分配的确定性 id）；route_name='app_detail' 兜底，覆盖任何
+--   路径插入的同名悬空记录。sys_admin_role_menus.menu_id 外键 ON DELETE CASCADE
+--   （V3 fk_sys_admin_role_menus_menu_id），若有角色分配了该菜单，关联行自动级联
+--   清除，无需手工处理。
+--
+--   幂等策略：DELETE 天然幂等（记录不存在时 0 rows affected，重复执行安全）。
+-- ============================================================================
+
+DELETE FROM sys_admin_menus WHERE id = 90 OR route_name = 'app_detail';

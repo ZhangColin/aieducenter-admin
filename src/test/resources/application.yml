@@ -12,8 +12,8 @@ spring:
 
   flyway:
     enabled: false  # 默认关闭：常规测试用 Hibernate ddl-auto=create 保证表隔离
-                    # Flyway 脚本正确性由 MenuSeedFlywayIntegrationTest
-                    # 和 RoleAssignmentFlywaySchemaIntegrationTest 在独立 schema 验证
+                    # Flyway 脚本正确性由 RoleAssignmentFlywaySchemaIntegrationTest
+                    # 在独立 schema 验证（迁移链路能否在干净库 init）
 
   jpa:
     show-sql: true
