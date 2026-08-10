@@ -453,4 +453,60 @@ class AppManagementAppServiceTest {
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == AdminMessage.ADMIN_SSO_CLIENT_NOT_PROVISIONED);
     }
+
+    // ========== enableSsoClient / disableSsoClient ==========
+
+    @Test
+    void given_provisionedSsoClient_when_enableSsoClient_then_delegateToClient() {
+        service.enableSsoClient(1L);
+        verify(appRegistryClient).enableSsoClient(1L);
+    }
+
+    @Test
+    void given_ssoClientNotProvisioned_when_enableSsoClient_then_throwNotProvisioned() {
+        // 未开通 → 下游 404 → ADMIN_SSO_CLIENT_NOT_PROVISIONED（绝不自动建凭证，ADR-0006）
+        doThrow(new OpenApiClientException(404, "{\"message\":\"Not Found\"}"))
+                .when(appRegistryClient).enableSsoClient(99L);
+
+        assertThatThrownBy(() -> service.enableSsoClient(99L))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == AdminMessage.ADMIN_SSO_CLIENT_NOT_PROVISIONED);
+    }
+
+    @Test
+    void given_alreadyEnabledSsoClient_when_enableSsoClient_then_throw409() {
+        // 已是目标状态 → 409 no-op → CONFLICT（沿用既有 app 启停用 409 映射）
+        doThrow(new OpenApiClientException(409, "{\"message\":\"Already enabled\"}"))
+                .when(appRegistryClient).enableSsoClient(1L);
+
+        assertThatThrownBy(() -> service.enableSsoClient(1L))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 409);
+    }
+
+    @Test
+    void given_provisionedSsoClient_when_disableSsoClient_then_delegateToClient() {
+        service.disableSsoClient(1L);
+        verify(appRegistryClient).disableSsoClient(1L);
+    }
+
+    @Test
+    void given_ssoClientNotProvisioned_when_disableSsoClient_then_throwNotProvisioned() {
+        doThrow(new OpenApiClientException(404, "{\"message\":\"Not Found\"}"))
+                .when(appRegistryClient).disableSsoClient(99L);
+
+        assertThatThrownBy(() -> service.disableSsoClient(99L))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == AdminMessage.ADMIN_SSO_CLIENT_NOT_PROVISIONED);
+    }
+
+    @Test
+    void given_alreadyDisabledSsoClient_when_disableSsoClient_then_throw409() {
+        doThrow(new OpenApiClientException(409, "{\"message\":\"Already disabled\"}"))
+                .when(appRegistryClient).disableSsoClient(1L);
+
+        assertThatThrownBy(() -> service.disableSsoClient(1L))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 409);
+    }
 }

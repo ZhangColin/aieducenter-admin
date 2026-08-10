@@ -195,6 +195,32 @@ public class AppRegistryClient {
         return resp.data();
     }
 
+    /**
+     * 启用 SsoClient——与 app status 独立、不级联，<strong>不动</strong>凭证（{@code client_id} /
+     * {@code client_secret}）与配置。
+     *
+     * <p>无 SsoClient（凭证未开通）时下游返 404、已是启用态返 409，均透传 {@link OpenApiClientException}，
+     * 由 AppService 翻译（404 ⟹ {@code ADMIN_SSO_CLIENT_NOT_PROVISIONED}、409 ⟹ {@code CONFLICT}）。</p>
+     */
+    public void enableSsoClient(Long appId) {
+        String url = baseUrl + "/api/app-registry/apps/" + appId + "/sso-clients/enable";
+        log.debug("AppRegistryClient.enableSsoClient: {}", url);
+        openApiClient.put(url, null, VOID_TYPEREF);
+    }
+
+    /**
+     * 禁用 SsoClient——与 app status 独立、不级联，<strong>不动</strong>凭证（{@code client_id} /
+     * {@code client_secret}）与配置。
+     *
+     * <p>无 SsoClient（凭证未开通）时下游返 404、已是禁用态返 409，均透传 {@link OpenApiClientException}，
+     * 由 AppService 翻译（404 ⟹ {@code ADMIN_SSO_CLIENT_NOT_PROVISIONED}、409 ⟹ {@code CONFLICT}）。</p>
+     */
+    public void disableSsoClient(Long appId) {
+        String url = baseUrl + "/api/app-registry/apps/" + appId + "/sso-clients/disable";
+        log.debug("AppRegistryClient.disableSsoClient: {}", url);
+        openApiClient.put(url, null, VOID_TYPEREF);
+    }
+
     private static String encode(String value) {
         // 简单 URL 编码，避免特殊字符问题
         return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);

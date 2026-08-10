@@ -160,4 +160,30 @@ public class AppController {
         // 不加 @Valid：admin 作为 BFF 纯透传，配置校验（如两 URI 列表 @NotEmpty）由 app-registry 做（ADR-0006 §5）。
         return ApiResponse.ok(appManagementAppService.updateSsoClientConfig(id, command));
     }
+
+    @PutMapping("/{id}/sso-client/enable")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:app:write",
+            name = "平台管理 / 应用管理 / 编辑",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "启用 SSO 客户端——与 app status 独立、不级联、不动凭证/配置")
+    public ApiResponse<Void> enableSsoClient(@PathVariable Long id) {
+        appManagementAppService.enableSsoClient(id);
+        return ApiResponse.ok();
+    }
+
+    @PutMapping("/{id}/sso-client/disable")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:app:write",
+            name = "平台管理 / 应用管理 / 编辑",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "禁用 SSO 客户端——与 app status 独立、不级联、不动凭证/配置")
+    public ApiResponse<Void> disableSsoClient(@PathVariable Long id) {
+        appManagementAppService.disableSsoClient(id);
+        return ApiResponse.ok();
+    }
 }

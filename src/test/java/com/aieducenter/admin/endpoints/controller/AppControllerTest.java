@@ -229,4 +229,22 @@ class AppControllerTest {
 
         verify(appManagementAppService).updateSsoClientConfig(eq(1L), any());
     }
+
+    // ========== enableSsoClient / disableSsoClient ==========
+
+    @Test
+    void given_id_when_enableSsoClient_then_return200() throws Exception {
+        mvc.perform(put("/api/admin/apps/1/sso-client/enable"))
+                .andExpect(status().isOk());
+
+        verify(appManagementAppService).enableSsoClient(1L);
+    }
+
+    @Test
+    void given_id_when_disableSsoClient_then_return200() throws Exception {
+        mvc.perform(put("/api/admin/apps/1/sso-client/disable"))
+                .andExpect(status().isOk());
+
+        verify(appManagementAppService).disableSsoClient(1L);
+    }
 }

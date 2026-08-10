@@ -231,6 +231,49 @@ public class AppManagementAppService {
         return toSsoClient(wire);
     }
 
+    /**
+     * 启用 SsoClient——与 app status 独立、不级联，<strong>不动</strong> {@code client_id} / {@code client_secret} / 配置。
+     *
+     * <p>SsoClient 未开通（下游 404）→ {@link AdminMessage#ADMIN_SSO_CLIENT_NOT_PROVISIONED}（绝不自动建凭证，
+     * 见 [ADR-0006](../docs/adr/0006-sso-client-bff-mirrors-credential-config-split.md) 安全护栏）；
+     * 已是启用态（下游 409 no-op）→ {@link BaseCodeMessage#CONFLICT}（沿用既有 app 启停用 409 映射）。</p>
+     */
+    public void enableSsoClient(Long appId) {
+        try {
+            appRegistryClient.enableSsoClient(appId);
+        } catch (OpenApiClientException e) {
+            if (e.getStatusCode() == 404) {
+                throw new DomainException(AdminMessage.ADMIN_SSO_CLIENT_NOT_PROVISIONED, appId);
+            }
+            if (e.getStatusCode() == 409) {
+                throw new DomainException(BaseCodeMessage.CONFLICT, appId);
+            }
+            throw e;
+        }
+        log.info("Enabled SsoClient: appId={}", appId);
+    }
+
+    /**
+     * 禁用 SsoClient——与 app status 独立、不级联，<strong>不动</strong> {@code client_id} / {@code client_secret} / 配置。
+     *
+     * <p>SsoClient 未开通（下游 404）→ {@link AdminMessage#ADMIN_SSO_CLIENT_NOT_PROVISIONED}；
+     * 已是禁用态（下游 409 no-op）→ {@link BaseCodeMessage#CONFLICT}（沿用既有 app 启停用 409 映射）。</p>
+     */
+    public void disableSsoClient(Long appId) {
+        try {
+            appRegistryClient.disableSsoClient(appId);
+        } catch (OpenApiClientException e) {
+            if (e.getStatusCode() == 404) {
+                throw new DomainException(AdminMessage.ADMIN_SSO_CLIENT_NOT_PROVISIONED, appId);
+            }
+            if (e.getStatusCode() == 409) {
+                throw new DomainException(BaseCodeMessage.CONFLICT, appId);
+            }
+            throw e;
+        }
+        log.info("Disabled SsoClient: appId={}", appId);
+    }
+
     // ========== 映射方法 ==========
 
     private static AppSummaryResponse toSummary(AppRegistryAppResponse wire) {
