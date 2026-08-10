@@ -47,6 +47,7 @@ public record AppDetailResponse(
             Long id,
             String clientId,
             List<String> redirectUris,
+            List<String> postLogoutRedirectUris,
             Set<String> scopes,
             Set<String> grants,
             Integer status,

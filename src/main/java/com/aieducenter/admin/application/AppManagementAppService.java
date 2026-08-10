@@ -1,7 +1,6 @@
 package com.aieducenter.admin.application;
 
 import com.aieducenter.admin.application.dto.command.CreateAppCommand;
-import com.aieducenter.admin.application.dto.command.ManageSsoClientCommand;
 import com.aieducenter.admin.application.dto.command.UpdateAppCommand;
 import com.aieducenter.admin.application.dto.query.AppManagementQuery;
 import com.aieducenter.admin.application.dto.response.ApiKeyCreatedResponse;
@@ -14,7 +13,6 @@ import com.aieducenter.admin.application.dto.wire.AppRegistryAppResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientCreatedResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientResponse;
 import com.aieducenter.admin.application.dto.wire.CreateAppWireRequest;
-import com.aieducenter.admin.application.dto.wire.CreateSsoClientWireRequest;
 import com.aieducenter.admin.application.dto.wire.UpdateAppWireRequest;
 import com.aieducenter.admin.infrastructure.AppRegistryClient;
 import com.cartisan.core.exception.BaseCodeMessage;
@@ -182,24 +180,23 @@ public class AppManagementAppService {
     }
 
     /**
-     * 创建/更新 SSO 客户端——返回含明文 clientSecret 的一次性响应。
+     * 开通/重置 SSO 客户端凭证——无则创建（生成 client_id + client_secret）、有则仅重置 client_secret
+     * （client_id 终身稳定），返回含一次性明文 clientSecret 的全量视图。
      *
-     * <p>app-registry 404 透传为 {@link DomainException}；校验（如 redirectUris 为空）由 app-registry 负责，
-     * 错误通过 {@link OpenApiClientException} 透传。</p>
+     * <p>凭证与配置分离（ADR-0006）：本方法只动凭证、不动配置（redirectUris 等）与 status；配置由独立的
+     * 配置 PUT 编排。app-registry 404（app 不存在）透传为 {@link DomainException}。</p>
      */
-    public SsoClientCreatedResponse manageSsoClient(Long appId, ManageSsoClientCommand command) {
-        var wireRequest = new CreateSsoClientWireRequest(
-                command.redirectUris(), command.scopes(), command.grants());
+    public SsoClientCreatedResponse manageSsoClientCredentials(Long appId) {
         AppRegistrySsoClientCreatedResponse wire;
         try {
-            wire = appRegistryClient.createOrUpdateSsoClient(appId, wireRequest);
+            wire = appRegistryClient.createOrResetSsoClientCredentials(appId);
         } catch (OpenApiClientException e) {
             if (e.getStatusCode() == 404) {
                 throw new DomainException(BaseCodeMessage.NOT_FOUND, appId);
             }
             throw e;
         }
-        log.info("Managed SsoClient: appId={}, clientId={}", appId, wire.clientId());
+        log.info("Provisioned SsoClient credentials: appId={}, clientId={}", appId, wire.clientId());
         return toSsoClientCreated(wire);
     }
 
@@ -224,7 +221,8 @@ public class AppManagementAppService {
         AppDetailResponse.SsoClientInfo ssoClientInfo = ssoClient != null
                 ? new AppDetailResponse.SsoClientInfo(
                         ssoClient.id(), ssoClient.clientId(),
-                        ssoClient.redirectUris(), ssoClient.scopes(), ssoClient.grants(),
+                        ssoClient.redirectUris(), ssoClient.postLogoutRedirectUris(),
+                        ssoClient.scopes(), ssoClient.grants(),
                         ssoClient.status(), ssoClient.statusName(),
                         ssoClient.createdAt(), ssoClient.updatedAt())
                 : null;
@@ -246,7 +244,8 @@ public class AppManagementAppService {
     private static SsoClientCreatedResponse toSsoClientCreated(AppRegistrySsoClientCreatedResponse wire) {
         return new SsoClientCreatedResponse(
                 wire.id(), wire.appId(), wire.clientId(), wire.clientSecret(),
-                wire.redirectUris(), wire.scopes(), wire.grants(),
+                wire.redirectUris(), wire.postLogoutRedirectUris(),
+                wire.scopes(), wire.grants(),
                 wire.status(), wire.statusName(),
                 wire.createdAt(), wire.updatedAt());
     }

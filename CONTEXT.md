@@ -52,15 +52,23 @@ Admin 作为 BFF，前端只访问 admin，不对 app-registry 直连。Admin �
 - `appCode` = `apiKey`（二者一致）
 - `apiSecret`：无则生成，有则重置
 - 业务逻辑全在 app-registry，admin 不做业务判断
-- 端点（`/api/admin/apps`）：列表、详情（聚合 app+apiKey+ssoClient）、创建、**更新应用信息**（name/description）、管理 apiKey（生成/重置）、管理 ssoClient（创建/更新）、启停用 — 各区块独立保存
+- 端点（`/api/admin/apps`）：列表、详情（聚合 app+apiKey+ssoClient）、创建、**更新应用信息**（name/description）、管理 apiKey（生成/重置）、管理 ssoClient（**凭证 create/reset + 配置 PUT + 启停用**，三独立原语，issue #33）、应用启停用 — 各区块独立保存
 - 对 app-registry 的依赖 issue：[#14 列表接口](https://github.com/ZhangColin/aieducenter-app-registry/issues/14) / [#15 更新接口](https://github.com/ZhangColin/aieducenter-app-registry/issues/15)
 
 **应用详情页布局**（单页三区块，各独立保存）：
 1. 应用基本信息：appCode(只读) + name(编辑) + description(编辑) + status(启停按钮)
 2. API Key：apiKey(只读,=appCode) + apiSecret(生成/重置后展示一次) + 生成/重置按钮
-3. SSO Client(可选)：clientId(只读) + redirectUris(编辑) + scopes/grants(编辑) + clientSecret(重置后展示一次) + 配置/重置按钮
+3. SSO Client(可选)：clientId(只读) + status(启停按钮) + redirectUris(编辑) + postLogoutRedirectUris(编辑) + scopes/grants(编辑) + clientSecret(开通/重置后展示一次) + 开通/配置/重置按钮（首次须先开通（凭证）再配置——PUT 在 SsoClient 未建时 404）
 
-（2026-08-04 开始讨论）
+（2026-08-04 开始讨论；2026-08-10 issue #33：region 3 拆为 开通/配置/重置 三动作 + 加 postLogoutRedirectUris + SsoClient status 启停）
+
+**SSO 凭证 (Credential) vs 配置 (Config)**:
+SsoClient 管理拆为两个独立原语（对齐 app-registry [ADR-0005](../aieducenter-app-registry/docs/adr/0005-sso-client-config-credential-separation.md)，2026-08-10、issue #33）：**凭证** = `client_id` + `client_secret` 对（`client_id` 终身稳定、创建时生成一次；`client_secret` 仅创建/重置时一次性返明文、余皆 argon2 hash-only）→ 凭证接口（create-or-reset，无 body）；**配置** = `redirectUris` / `postLogoutRedirectUris` / `scopes` / `grants` → 配置 PUT（整份替换，不动凭证、不动 status，无 SsoClient 则 404）。首次开通 = 先凭证后配置。admin 北向两独立端点镜像下游、纯透传、**不自动建凭证**（否则一次性明文 secret 会被静默丢弃）。
+_Avoid_: 把凭证与配置混在一个端点（旧 `createOrRotate` 已废）、配置改动连换凭证；用"轮换"指代 SSO 凭证更新。
+
+**重置 (Reset) vs 轮换 (Rotate)**:
+**重置** = 仅重新生成 `client_secret`（`client_id` 不变）；**轮换** = `client_id`+`client_secret` 同时换——SSO 适配后**全链路不再使用**（`client_id` 终身稳定；OIDC 约定 `client_id` 稳定、`client_secret` 才是密钥）。apiKey 的"无则生成/有则重置"同为 reset 语义。
+_Avoid_: 用"轮换"指代 SSO 凭证或 apiKey 更新。
 
 **消费面 vs 管理面 (Consumption side vs Management side)**:
 同一资源的两种服务视角（REQ-13 定，2026-08-02）。**消费面** = 终端使用视角（我的导航、动态路由），只下发**启用**数据、登录即可访问（不挂管理权限）、禁用项不下发且 directory 禁用整棵子树不下发——对超管同样生效；**管理面** = 维护视角（菜单/角色管理页），全量含禁用项、挂 `@RequirePermission`。例：`GET /menus/my` 是消费面；`GET /menus`、`GET /menus/tree` 是管理面。身份 claims（user/roleCodes/permissions）留 auth 域（`/auth/current`），导航资源（menus/home）归 menu 域——身份 vs 导航不混在一个响应里。
@@ -100,6 +108,7 @@ _Avoid_: 给消费面端点挂管理权限注解；让消费面为了"超管全�
 **待核实已清**——issue #11 的"用户列表 total=2 但无行"+ 三聚合（User/Role/Menu）软删读过滤一致性，此前已解决（commit `3bc447a`/`b5c0d0b`，REQ-5 软删读过滤），无需再查。
 **已定(REQ-11 用户档案)**——用户档案对齐 Soybean（[issue #17](https://github.com/ZhangColin/aieducenter-admin/issues/17)）：`AdminUser` 加 `gender`（`AdminUserGender` 1 男 / 2 女，整数枚举，V8 迁移加可空 `gender` 列），透传 `Create/UpdateAdminUserCommand` + `AdminUserQuery` + `AdminUserResponse`（+`genderName` 镜像既有 `statusName`）；`AdminUserQuery` 加独立 `phone` 模糊搜索（keyword 仍覆盖 username/nickname/email，phone 独立字段）；**用户列表项内联角色摘要**（裁剪投影 `{id,name,code}`，按本页全部用户角色 ID 批量 `findByIdIn` 一次取齐、内存分组，无 N+1；关联指向的角色已物理删除则不回显，与详情同语义）；`AdminUserResponse` 出 `createdAt/updatedAt`（REQ-12 审计字段先出此二者、`createdBy/updatedBy` 暂缓，见上 REQ-12 搁置条）。
 - ✅ **[REQ-14] 三聚合软删 → 物理删除**（[issue #24](https://github.com/ZhangColin/aieducenter-admin/issues/24)，2026-08-03）：角色删除 in-use 守卫被软删用户的残留 `user_roles` 行永阻（403 `ADMIN_013`）——triage 拍板不做查询侧补丁，从根上迁移：`AdminUser`/`AdminRole`/`AdminMenu` 基类 `AuditableSoftDeletable` → `Auditable`，删除即物理 DELETE；`markAsDeleted()` 整体移除（框架对「有该方法但非 SoftDeletable」走反射软存，残留则物理删除失效）；破窗/超管守卫迁为显式 `requireDeletable()` 由 AppService 删除前调用（行为不变：403 + 原错误码）；V9 迁移先 purge 历史软删行再 `DROP COLUMN deleted`（三张主表）；查询侧 `DeletedFalse` 派生查询与 JPQL `r.deleted = false` 全清。见 [ADR-0005](docs/adr/0005-soft-delete-to-physical-delete.md)；框架侧软删文档/约定降级由 [cartisan-boot#10](https://github.com/ZhangColin/cartisan-boot/issues/10) 独立跟踪。
+- ⏳ **[REQ-15-T6] 适配 app-registry SsoClient 管理 API 破坏性变更**（[issue #33](https://github.com/ZhangColin/aieducenter-admin/issues/33)，2026-08-10 grill 定稿）：app-registry #22（commit `d9e1444`）删 `createOrRotate` 单端点，拆成**凭证**（`POST .../sso-clients/credentials`，create-or-reset `client_secret`、`client_id` 终身稳定、一次性返明文）+ **配置 PUT**（`PUT .../sso-clients`，整份替换 `redirectUris`/`postLogoutRedirectUris`/`scopes`/`grants`，不动凭证/状态、无 SsoClient→404）+ 启停用。**已定**——admin 北向两端点（`POST .../sso-client/credentials` + `PUT .../sso-client`）+ `enable`/`disable` 镜像下游、纯透传、**不在配置 PUT 自动建凭证**（一次性明文 secret 必须被显式捕获，否则静默丢失）；配置 PUT 的 404 翻译为专属 `ADMIN_SSO_CLIENT_NOT_PROVISIONED`；`postLogoutRedirectUris` 加入 admin 全链路（6 DTO + 详情 region 3）；首次开通由前端编排（凭证→配置），"凭证已建、配置未 PUT"中间态接受（继承 app-registry ADR-0005）；弃用"轮换(rotate)"措辞、`client_id` 终身稳定。无 admin 侧校验、无 DB 迁移。见 [ADR-0006](docs/adr/0006-sso-client-bff-mirrors-credential-config-split.md) + 上「SSO 凭证 vs 配置」「重置 vs 轮换」术语。
 
 ## ADR
 

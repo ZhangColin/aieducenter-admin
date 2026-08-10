@@ -14,6 +14,7 @@ import com.cartisan.core.exception.CodeMessage;
  *   <li>登录错误 (401): LOGIN_FAILED, ADMIN_DISABLED</li>
  *   <li>业务限制 (403): ROLE_IN_USE, SUPER_ADMIN_CANNOT_DELETE, BREAK_GLASS_CANNOT_DELETE, BREAK_GLASS_CANNOT_DISABLE, BREAK_GLASS_SUPER_ADMIN_REQUIRED</li>
  *   <li>菜单限制 (403): MENU_HAS_CHILDREN, MENU_DEPTH_EXCEEDED, MENU_INVALID_PARENT</li>
+ *   <li>应用管理 (404): ADMIN_SSO_CLIENT_NOT_PROVISIONED</li>
  * </ul>
  *
  * @since 0.1.0
@@ -139,7 +140,16 @@ public enum AdminMessage implements CodeMessage {
     /**
      * 内置破窗账号必须保留超级管理员角色（保证全权救援能力）。
      */
-    BREAK_GLASS_SUPER_ADMIN_REQUIRED(403, "ADMIN_017", "内置账号必须保留超级管理员角色");
+    BREAK_GLASS_SUPER_ADMIN_REQUIRED(403, "ADMIN_017", "内置账号必须保留超级管理员角色"),
+
+    // ========== 应用管理 / SsoClient 凭证与配置 (404) ==========
+    // 凭证与配置职责分离（ADR-0006）：配置 PUT 命中未开通凭证的 SsoClient 时，下游 404 翻译为此专属码，
+    // 前端据此提示「请先点开通」。本片（#34）只注册、不触发，供片 2/3 配置 PUT 使用。
+
+    /**
+     * SSO 客户端尚未开通凭证（配置 PUT 前须先开通凭证）。
+     */
+    ADMIN_SSO_CLIENT_NOT_PROVISIONED(404, "ADMIN_018", "SSO 客户端尚未开通，请先开通凭证");
 
     private final int httpStatus;
     private final String code;

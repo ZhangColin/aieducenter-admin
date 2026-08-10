@@ -1,7 +1,6 @@
 package com.aieducenter.admin.application;
 
 import com.aieducenter.admin.application.dto.command.CreateAppCommand;
-import com.aieducenter.admin.application.dto.command.ManageSsoClientCommand;
 import com.aieducenter.admin.application.dto.command.UpdateAppCommand;
 import com.aieducenter.admin.application.dto.query.AppManagementQuery;
 import com.aieducenter.admin.application.dto.response.ApiKeyCreatedResponse;
@@ -14,7 +13,6 @@ import com.aieducenter.admin.application.dto.wire.AppRegistryAppResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientCreatedResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientResponse;
 import com.aieducenter.admin.application.dto.wire.CreateAppWireRequest;
-import com.aieducenter.admin.application.dto.wire.CreateSsoClientWireRequest;
 import com.aieducenter.admin.application.dto.wire.UpdateAppWireRequest;
 import com.aieducenter.admin.infrastructure.AppRegistryClient;
 import com.cartisan.core.exception.DomainException;
@@ -38,6 +36,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -101,7 +100,9 @@ class AppManagementAppServiceTest {
                 new AppRegistryApiKeyResponse(10L, 1L, "my-app", 1, "启用", now, now)));
         when(appRegistryClient.getSsoClient(1L)).thenReturn(Optional.of(
                 new AppRegistrySsoClientResponse(20L, 1L, "oidc-client",
-                        List.of("https://example.com/callback"), Set.of("openid"), Set.of("authorization_code"),
+                        List.of("https://example.com/callback"),
+                        List.of("https://example.com/logout"),
+                        Set.of("openid"), Set.of("authorization_code"),
                         1, "启用", now, now)));
 
         AppDetailResponse detail = service.getDetail(1L);
@@ -113,6 +114,7 @@ class AppManagementAppServiceTest {
         assertThat(detail.ssoClient()).isNotNull();
         assertThat(detail.ssoClient().clientId()).isEqualTo("oidc-client");
         assertThat(detail.ssoClient().redirectUris()).containsExactly("https://example.com/callback");
+        assertThat(detail.ssoClient().postLogoutRedirectUris()).containsExactly("https://example.com/logout");
     }
 
     @Test
@@ -330,56 +332,67 @@ class AppManagementAppServiceTest {
                 .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 404);
     }
 
-    // ========== manageSsoClient ==========
+    // ========== manageSsoClientCredentials ==========
 
     @Test
-    void given_noExistingSsoClient_when_manageSsoClient_then_createAndReturnSecret() {
+    void given_noExistingSsoClient_when_manageSsoClientCredentials_then_createAndReturnSecret() {
         LocalDateTime now = LocalDateTime.now();
-        when(appRegistryClient.createOrUpdateSsoClient(eq(1L), any(CreateSsoClientWireRequest.class)))
+        // 凭证原语：无 SsoClient 则创建（生成 client_id + client_secret）
+        when(appRegistryClient.createOrResetSsoClientCredentials(1L))
                 .thenReturn(new AppRegistrySsoClientCreatedResponse(20L, 1L, "oidc-client", "cs-xyz789",
-                        List.of("https://example.com/callback"), Set.of("openid"), Set.of("authorization_code"),
+                        List.of(), List.of(), Set.of(), Set.of(),
                         1, "启用", now, now));
 
-        SsoClientCreatedResponse result = service.manageSsoClient(1L,
-                new ManageSsoClientCommand(List.of("https://example.com/callback"), Set.of("openid"), Set.of("authorization_code")));
+        SsoClientCreatedResponse result = service.manageSsoClientCredentials(1L);
 
         assertThat(result.id()).isEqualTo(20L);
         assertThat(result.clientId()).isEqualTo("oidc-client");
         assertThat(result.clientSecret()).isEqualTo("cs-xyz789");
-        assertThat(result.redirectUris()).containsExactly("https://example.com/callback");
-        assertThat(result.scopes()).containsExactly("openid");
-        assertThat(result.grants()).containsExactly("authorization_code");
+        // create 时配置四件套全空（含 postLogoutRedirectUris），由配置 PUT 单独编排
+        assertThat(result.redirectUris()).isEmpty();
+        assertThat(result.postLogoutRedirectUris()).isEmpty();
+        assertThat(result.scopes()).isEmpty();
+        assertThat(result.grants()).isEmpty();
         assertThat(result.status()).isEqualTo(1);
-        verify(appRegistryClient).createOrUpdateSsoClient(eq(1L), any(CreateSsoClientWireRequest.class));
+        verify(appRegistryClient).createOrResetSsoClientCredentials(1L);
     }
 
     @Test
-    void given_existingSsoClient_when_manageSsoClient_then_updateAndReturnNewSecret() {
+    void given_existingSsoClient_when_manageSsoClientCredentials_then_resetSecretKeepClientIdStable() {
         LocalDateTime now = LocalDateTime.now();
-        when(appRegistryClient.createOrUpdateSsoClient(eq(1L), any(CreateSsoClientWireRequest.class)))
-                .thenReturn(new AppRegistrySsoClientCreatedResponse(20L, 1L, "oidc-client-v2", "cs-new-secret",
-                        List.of("https://new.example.com/callback"), Set.of("openid", "profile"), Set.of("authorization_code", "refresh_token"),
-                        1, "启用", now, now));
+        // 重置：client_id 终身稳定、client_secret 换新（reset ≠ rotate）
+        when(appRegistryClient.createOrResetSsoClientCredentials(1L))
+                .thenReturn(new AppRegistrySsoClientCreatedResponse(20L, 1L, "oidc-stable", "cs-first",
+                                List.of("https://example.com/callback"),
+                                List.of("https://example.com/logout"),
+                                Set.of("openid"), Set.of("authorization_code"),
+                                1, "启用", now, now),
+                        new AppRegistrySsoClientCreatedResponse(20L, 1L, "oidc-stable", "cs-second",
+                                List.of("https://example.com/callback"),
+                                List.of("https://example.com/logout"),
+                                Set.of("openid"), Set.of("authorization_code"),
+                                1, "启用", now, now));
 
-        SsoClientCreatedResponse result = service.manageSsoClient(1L,
-                new ManageSsoClientCommand(List.of("https://new.example.com/callback"),
-                        Set.of("openid", "profile"), Set.of("authorization_code", "refresh_token")));
+        SsoClientCreatedResponse first = service.manageSsoClientCredentials(1L);
+        SsoClientCreatedResponse second = service.manageSsoClientCredentials(1L);
 
-        assertThat(result.clientId()).isEqualTo("oidc-client-v2");
-        assertThat(result.clientSecret()).isEqualTo("cs-new-secret");
-        assertThat(result.redirectUris()).containsExactly("https://new.example.com/callback");
-        assertThat(result.scopes()).containsExactlyInAnyOrder("openid", "profile");
-        assertThat(result.grants()).containsExactlyInAnyOrder("authorization_code", "refresh_token");
-        verify(appRegistryClient).createOrUpdateSsoClient(eq(1L), any(CreateSsoClientWireRequest.class));
+        // client_id 跨重置终身稳定
+        assertThat(first.clientId()).isEqualTo("oidc-stable");
+        assertThat(second.clientId()).isEqualTo(first.clientId());
+        // client_secret 每次重置都换新
+        assertThat(first.clientSecret()).isEqualTo("cs-first");
+        assertThat(second.clientSecret()).isEqualTo("cs-second").isNotEqualTo(first.clientSecret());
+        // 配置不动（reset 只换 secret，postLogoutRedirectUris 等配置保留）
+        assertThat(second.postLogoutRedirectUris()).containsExactly("https://example.com/logout");
+        verify(appRegistryClient, times(2)).createOrResetSsoClientCredentials(1L);
     }
 
     @Test
-    void given_appNotFound_when_manageSsoClient_then_throwDomainException404() {
-        when(appRegistryClient.createOrUpdateSsoClient(eq(99L), any(CreateSsoClientWireRequest.class)))
+    void given_appNotFound_when_manageSsoClientCredentials_then_throwDomainException404() {
+        when(appRegistryClient.createOrResetSsoClientCredentials(99L))
                 .thenThrow(new OpenApiClientException(404, "{\"message\":\"Not Found\"}"));
 
-        assertThatThrownBy(() -> service.manageSsoClient(99L,
-                new ManageSsoClientCommand(List.of("https://cb.example.com"), Set.of(), Set.of())))
+        assertThatThrownBy(() -> service.manageSsoClientCredentials(99L))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 404);
     }

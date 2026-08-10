@@ -177,50 +177,23 @@ class AppControllerTest {
         verify(appManagementAppService).manageApiKey(1L);
     }
 
-    // ========== manageSsoClient ==========
+    // ========== manageSsoClientCredentials ==========
 
     @Test
-    void given_validBody_when_manageSsoClient_then_returnCreatedWithSecret() throws Exception {
+    void given_id_when_manageSsoClientCredentials_then_returnCreatedWithSecret() throws Exception {
         LocalDateTime now = LocalDateTime.now();
-        when(appManagementAppService.manageSsoClient(eq(1L), any()))
+        when(appManagementAppService.manageSsoClientCredentials(1L))
                 .thenReturn(new SsoClientCreatedResponse(20L, 1L, "oidc-client", "cs-xyz789",
-                        List.of("https://example.com/callback"), Set.of("openid"), Set.of("authorization_code"),
+                        List.of(), List.of(), Set.of(), Set.of(),
                         1, "启用", now, now));
 
-        String body = new ObjectMapper().writeValueAsString(
-                java.util.Map.of(
-                        "redirectUris", List.of("https://example.com/callback"),
-                        "scopes", List.of("openid"),
-                        "grants", List.of("authorization_code")));
-
-        mvc.perform(post("/api/admin/apps/1/sso-client")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
+        mvc.perform(post("/api/admin/apps/1/sso-client/credentials"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(20))
                 .andExpect(jsonPath("$.data.clientId").value("oidc-client"))
                 .andExpect(jsonPath("$.data.clientSecret").value("cs-xyz789"))
-                .andExpect(jsonPath("$.data.redirectUris[0]").value("https://example.com/callback"));
+                .andExpect(jsonPath("$.data.status").value(1));
 
-        verify(appManagementAppService).manageSsoClient(eq(1L), any());
-    }
-
-    @Test
-    void given_emptyRedirectUris_when_manageSsoClient_then_delegateToService() throws Exception {
-        // 校验（如 redirectUris 为空）由 app-registry 负责，admin 不做本地拦截
-        LocalDateTime now = LocalDateTime.now();
-        when(appManagementAppService.manageSsoClient(eq(1L), any()))
-                .thenReturn(new SsoClientCreatedResponse(20L, 1L, "oidc-client", "cs-xyz789",
-                        List.of(), Set.of(), Set.of(), 1, "启用", now, now));
-
-        String body = new ObjectMapper().writeValueAsString(
-                java.util.Map.of("redirectUris", List.of(), "scopes", List.of(), "grants", List.of()));
-
-        mvc.perform(post("/api/admin/apps/1/sso-client")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
-                .andExpect(status().isOk());
-
-        verify(appManagementAppService).manageSsoClient(eq(1L), any());
+        verify(appManagementAppService).manageSsoClientCredentials(1L);
     }
 }

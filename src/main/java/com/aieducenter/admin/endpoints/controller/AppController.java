@@ -2,7 +2,6 @@ package com.aieducenter.admin.endpoints.controller;
 
 import com.aieducenter.admin.application.AppManagementAppService;
 import com.aieducenter.admin.application.dto.command.CreateAppCommand;
-import com.aieducenter.admin.application.dto.command.ManageSsoClientCommand;
 import com.aieducenter.admin.application.dto.command.UpdateAppCommand;
 import com.aieducenter.admin.application.dto.query.AppManagementQuery;
 import com.aieducenter.admin.application.dto.response.ApiKeyCreatedResponse;
@@ -134,17 +133,15 @@ public class AppController {
         return ApiResponse.ok(appManagementAppService.manageApiKey(id));
     }
 
-    @PostMapping("/{id}/sso-client")
+    @PostMapping("/{id}/sso-client/credentials")
     @RequireAuth
     @RequirePermission(
             value = "admin:app:write",
             name = "平台管理 / 应用管理 / 编辑",
             scope = AdminScopes.ADMIN
     )
-    @Operation(summary = "创建/更新 SSO 客户端——返回含明文 clientSecret 的一次性响应")
-    public ApiResponse<SsoClientCreatedResponse> manageSsoClient(
-            @PathVariable Long id,
-            @Valid @RequestBody ManageSsoClientCommand command) {
-        return ApiResponse.ok(appManagementAppService.manageSsoClient(id, command));
+    @Operation(summary = "开通/重置 SSO 客户端凭证——返回含一次性明文 clientSecret 的全量视图")
+    public ApiResponse<SsoClientCreatedResponse> manageSsoClientCredentials(@PathVariable Long id) {
+        return ApiResponse.ok(appManagementAppService.manageSsoClientCredentials(id));
     }
 }

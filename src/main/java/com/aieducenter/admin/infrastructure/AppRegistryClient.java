@@ -6,7 +6,6 @@ import com.aieducenter.admin.application.dto.wire.AppRegistryAppResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientCreatedResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientResponse;
 import com.aieducenter.admin.application.dto.wire.CreateAppWireRequest;
-import com.aieducenter.admin.application.dto.wire.CreateSsoClientWireRequest;
 import com.aieducenter.admin.application.dto.wire.UpdateAppWireRequest;
 import com.cartisan.openapi.client.OpenApiClient;
 import com.cartisan.openapi.client.OpenApiClientException;
@@ -170,12 +169,13 @@ public class AppRegistryClient {
     }
 
     /**
-     * 创建/更新 SSO 客户端——返回含明文 {@code clientSecret} 的一次性响应。
+     * 开通/重置 SSO 客户端凭证——无则创建、有则仅重置 {@code client_secret}（{@code client_id} 终身稳定），
+     * 返回含一次性明文 {@code clientSecret} 的全量视图（无请求体）。
      */
-    public AppRegistrySsoClientCreatedResponse createOrUpdateSsoClient(Long appId, CreateSsoClientWireRequest request) {
-        String url = baseUrl + "/api/app-registry/apps/" + appId + "/sso-clients";
-        log.debug("AppRegistryClient.createOrUpdateSsoClient: {}", url);
-        ApiResponse<AppRegistrySsoClientCreatedResponse> resp = openApiClient.post(url, request, SSO_CLIENT_CREATED_TYPEREF);
+    public AppRegistrySsoClientCreatedResponse createOrResetSsoClientCredentials(Long appId) {
+        String url = baseUrl + "/api/app-registry/apps/" + appId + "/sso-clients/credentials";
+        log.debug("AppRegistryClient.createOrResetSsoClientCredentials: {}", url);
+        ApiResponse<AppRegistrySsoClientCreatedResponse> resp = openApiClient.post(url, null, SSO_CLIENT_CREATED_TYPEREF);
         return resp.data();
     }
 

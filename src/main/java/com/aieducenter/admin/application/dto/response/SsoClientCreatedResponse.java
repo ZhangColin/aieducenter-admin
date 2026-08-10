@@ -7,9 +7,10 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * SsoClient 创建/更新响应——<strong>一次性</strong>返回明文 {@code clientSecret}。
+ * SsoClient 凭证（开通/重置 {@code client_secret}）响应——<strong>一次性</strong>返回明文 {@code clientSecret}。
  *
- * <p>消费方必须在此次响应里捕获并妥善保管 clientSecret：之后任何接口都不可再取回明文。</p>
+ * <p>{@code client_id} 终身稳定，重置只换 {@code client_secret}。消费方必须在此次响应里捕获并妥善保管 clientSecret：
+ * 之后任何接口都不可再取回明文。</p>
  *
  * @since 0.1.0
  */
@@ -20,6 +21,7 @@ public record SsoClientCreatedResponse(
         String clientId,
         String clientSecret,
         List<String> redirectUris,
+        List<String> postLogoutRedirectUris,
         Set<String> scopes,
         Set<String> grants,
         Integer status,

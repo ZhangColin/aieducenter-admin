@@ -14,6 +14,7 @@ public record AppRegistrySsoClientResponse(
         Long appId,
         String clientId,
         List<String> redirectUris,
+        List<String> postLogoutRedirectUris,
         Set<String> scopes,
         Set<String> grants,
         Integer status,
