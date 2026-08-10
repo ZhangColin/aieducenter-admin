@@ -2,11 +2,13 @@ package com.aieducenter.admin.application;
 
 import com.aieducenter.admin.application.dto.command.CreateAppCommand;
 import com.aieducenter.admin.application.dto.command.UpdateAppCommand;
+import com.aieducenter.admin.application.dto.command.UpdateSsoClientConfigCommand;
 import com.aieducenter.admin.application.dto.query.AppManagementQuery;
 import com.aieducenter.admin.application.dto.response.ApiKeyCreatedResponse;
 import com.aieducenter.admin.application.dto.response.AppDetailResponse;
 import com.aieducenter.admin.application.dto.response.AppSummaryResponse;
 import com.aieducenter.admin.application.dto.response.SsoClientCreatedResponse;
+import com.aieducenter.admin.application.dto.response.SsoClientResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyCreatedResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryAppResponse;
@@ -14,6 +16,8 @@ import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientCreatedRes
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientResponse;
 import com.aieducenter.admin.application.dto.wire.CreateAppWireRequest;
 import com.aieducenter.admin.application.dto.wire.UpdateAppWireRequest;
+import com.aieducenter.admin.application.dto.wire.UpdateSsoClientConfigWireRequest;
+import com.aieducenter.admin.domain.error.AdminMessage;
 import com.aieducenter.admin.infrastructure.AppRegistryClient;
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.openapi.client.OpenApiClientException;
@@ -21,6 +25,7 @@ import com.cartisan.web.response.PageResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
@@ -395,5 +400,57 @@ class AppManagementAppServiceTest {
         assertThatThrownBy(() -> service.manageSsoClientCredentials(99L))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 404);
+    }
+
+    // ========== updateSsoClientConfig ==========
+
+    @Test
+    void given_validConfig_when_updateSsoClientConfig_then_replaceConfigAndRoundTripPostLogoutUris() {
+        LocalDateTime now = LocalDateTime.now();
+        // 配置 PUT：整份替换四件套，不动 client_id/status，响应无 clientSecret
+        when(appRegistryClient.updateSsoClientConfig(eq(1L), any(UpdateSsoClientConfigWireRequest.class)))
+                .thenReturn(new AppRegistrySsoClientResponse(20L, 1L, "oidc-stable",
+                        List.of("https://example.com/cb"),
+                        List.of("https://example.com/logout"),
+                        Set.of("openid", "profile"),
+                        Set.of("authorization_code"),
+                        1, "启用", now, now));
+
+        SsoClientResponse result = service.updateSsoClientConfig(1L,
+                new UpdateSsoClientConfigCommand(
+                        List.of("https://example.com/cb"),
+                        List.of("https://example.com/logout"),
+                        Set.of("openid", "profile"),
+                        Set.of("authorization_code")));
+
+        // 命令 → wire 透传（四件套整份替换、含 postLogoutRedirectUris）
+        ArgumentCaptor<UpdateSsoClientConfigWireRequest> captor =
+                ArgumentCaptor.forClass(UpdateSsoClientConfigWireRequest.class);
+        verify(appRegistryClient).updateSsoClientConfig(eq(1L), captor.capture());
+        assertThat(captor.getValue().redirectUris()).containsExactly("https://example.com/cb");
+        assertThat(captor.getValue().postLogoutRedirectUris()).containsExactly("https://example.com/logout");
+        assertThat(captor.getValue().scopes()).containsExactlyInAnyOrder("openid", "profile");
+        assertThat(captor.getValue().grants()).containsExactly("authorization_code");
+
+        // 响应：client_id/status 不动、原样回显；配置四件套往返一致（含 postLogoutRedirectUris）
+        assertThat(result.id()).isEqualTo(20L);
+        assertThat(result.clientId()).isEqualTo("oidc-stable");
+        assertThat(result.redirectUris()).containsExactly("https://example.com/cb");
+        assertThat(result.postLogoutRedirectUris()).containsExactly("https://example.com/logout");
+        assertThat(result.status()).isEqualTo(1);
+        // 响应类型 SsoClientResponse 结构上无 clientSecret 字段（一次性 secret 仅凭证接口返）
+    }
+
+    @Test
+    void given_ssoClientNotProvisioned_when_updateSsoClientConfig_then_throwNotProvisioned() {
+        // SsoClient 未建（凭证未开通）→ 下游 404 → ADMIN_SSO_CLIENT_NOT_PROVISIONED（绝不自动建凭证，ADR-0006）
+        when(appRegistryClient.updateSsoClientConfig(eq(99L), any(UpdateSsoClientConfigWireRequest.class)))
+                .thenThrow(new OpenApiClientException(404, "{\"message\":\"Not Found\"}"));
+
+        assertThatThrownBy(() -> service.updateSsoClientConfig(99L,
+                new UpdateSsoClientConfigCommand(
+                        List.of("https://example.com/cb"), List.of(), Set.of(), Set.of())))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == AdminMessage.ADMIN_SSO_CLIENT_NOT_PROVISIONED);
     }
 }

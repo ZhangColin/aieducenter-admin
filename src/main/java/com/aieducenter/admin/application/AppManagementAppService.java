@@ -2,11 +2,13 @@ package com.aieducenter.admin.application;
 
 import com.aieducenter.admin.application.dto.command.CreateAppCommand;
 import com.aieducenter.admin.application.dto.command.UpdateAppCommand;
+import com.aieducenter.admin.application.dto.command.UpdateSsoClientConfigCommand;
 import com.aieducenter.admin.application.dto.query.AppManagementQuery;
 import com.aieducenter.admin.application.dto.response.ApiKeyCreatedResponse;
 import com.aieducenter.admin.application.dto.response.AppDetailResponse;
 import com.aieducenter.admin.application.dto.response.AppSummaryResponse;
 import com.aieducenter.admin.application.dto.response.SsoClientCreatedResponse;
+import com.aieducenter.admin.application.dto.response.SsoClientResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyCreatedResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryAppResponse;
@@ -14,6 +16,8 @@ import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientCreatedRes
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientResponse;
 import com.aieducenter.admin.application.dto.wire.CreateAppWireRequest;
 import com.aieducenter.admin.application.dto.wire.UpdateAppWireRequest;
+import com.aieducenter.admin.application.dto.wire.UpdateSsoClientConfigWireRequest;
+import com.aieducenter.admin.domain.error.AdminMessage;
 import com.aieducenter.admin.infrastructure.AppRegistryClient;
 import com.cartisan.core.exception.BaseCodeMessage;
 import com.cartisan.core.exception.DomainException;
@@ -200,6 +204,33 @@ public class AppManagementAppService {
         return toSsoClientCreated(wire);
     }
 
+    /**
+     * 整份替换 SsoClient 配置——替换 {@code redirectUris} / {@code postLogoutRedirectUris} / {@code scopes} /
+     * {@code grants} 四件套，<strong>不动</strong> {@code client_id} / {@code client_secret} / status，返回不含
+     * {@code clientSecret} 的视图。
+     *
+     * <p>凭证与配置分离（[ADR-0006](../docs/adr/0006-sso-client-bff-mirrors-credential-config-split.md)）：
+     * SsoClient 未建（凭证未开通）时下游返 404，翻译为 {@link AdminMessage#ADMIN_SSO_CLIENT_NOT_PROVISIONED}
+     * ——<strong>绝不</strong>自动建凭证（一次性明文 {@code client_secret} 须由操作员经凭证接口显式捕获）。
+     * app 已由详情确立存在，故此 404 ⟹ 未开通。</p>
+     */
+    public SsoClientResponse updateSsoClientConfig(Long appId, UpdateSsoClientConfigCommand command) {
+        var wireRequest = new UpdateSsoClientConfigWireRequest(
+                command.redirectUris(), command.postLogoutRedirectUris(),
+                command.scopes(), command.grants());
+        AppRegistrySsoClientResponse wire;
+        try {
+            wire = appRegistryClient.updateSsoClientConfig(appId, wireRequest);
+        } catch (OpenApiClientException e) {
+            if (e.getStatusCode() == 404) {
+                throw new DomainException(AdminMessage.ADMIN_SSO_CLIENT_NOT_PROVISIONED, appId);
+            }
+            throw e;
+        }
+        log.info("Updated SsoClient config: appId={}, clientId={}", appId, wire.clientId());
+        return toSsoClient(wire);
+    }
+
     // ========== 映射方法 ==========
 
     private static AppSummaryResponse toSummary(AppRegistryAppResponse wire) {
@@ -244,6 +275,15 @@ public class AppManagementAppService {
     private static SsoClientCreatedResponse toSsoClientCreated(AppRegistrySsoClientCreatedResponse wire) {
         return new SsoClientCreatedResponse(
                 wire.id(), wire.appId(), wire.clientId(), wire.clientSecret(),
+                wire.redirectUris(), wire.postLogoutRedirectUris(),
+                wire.scopes(), wire.grants(),
+                wire.status(), wire.statusName(),
+                wire.createdAt(), wire.updatedAt());
+    }
+
+    private static SsoClientResponse toSsoClient(AppRegistrySsoClientResponse wire) {
+        return new SsoClientResponse(
+                wire.id(), wire.appId(), wire.clientId(),
                 wire.redirectUris(), wire.postLogoutRedirectUris(),
                 wire.scopes(), wire.grants(),
                 wire.status(), wire.statusName(),

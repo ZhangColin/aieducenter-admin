@@ -3,10 +3,12 @@ package com.aieducenter.admin.integration;
 import com.aieducenter.admin.application.AppManagementAppService;
 import com.aieducenter.admin.application.dto.command.CreateAppCommand;
 import com.aieducenter.admin.application.dto.command.UpdateAppCommand;
+import com.aieducenter.admin.application.dto.command.UpdateSsoClientConfigCommand;
 import com.aieducenter.admin.application.dto.response.ApiKeyCreatedResponse;
 import com.aieducenter.admin.application.dto.response.AppDetailResponse;
 import com.aieducenter.admin.application.dto.response.AppSummaryResponse;
 import com.aieducenter.admin.application.dto.response.SsoClientCreatedResponse;
+import com.aieducenter.admin.application.dto.response.SsoClientResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyCreatedResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryApiKeyResponse;
 import com.aieducenter.admin.application.dto.wire.AppRegistryAppResponse;
@@ -14,6 +16,8 @@ import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientCreatedRes
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientResponse;
 import com.aieducenter.admin.application.dto.wire.CreateAppWireRequest;
 import com.aieducenter.admin.application.dto.wire.UpdateAppWireRequest;
+import com.aieducenter.admin.application.dto.wire.UpdateSsoClientConfigWireRequest;
+import com.aieducenter.admin.domain.error.AdminMessage;
 import com.aieducenter.admin.infrastructure.AppRegistryClient;
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.openapi.client.OpenApiClientException;
@@ -301,5 +305,48 @@ class AppBffIntegrationTest {
         assertThatThrownBy(() -> appService.manageSsoClientCredentials(99L))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 404);
+    }
+
+    // ========== updateSsoClientConfig ==========
+
+    @Test
+    void given_validConfig_when_updateSsoClientConfig_then_replaceConfigAndRoundTripPostLogoutUris() {
+        LocalDateTime now = LocalDateTime.now();
+        when(appRegistryClient.updateSsoClientConfig(eq(1L), any(UpdateSsoClientConfigWireRequest.class)))
+                .thenReturn(new AppRegistrySsoClientResponse(20L, 1L, "oidc-stable",
+                        List.of("https://cb.example.com"),
+                        List.of("https://cb.example.com/logout"),
+                        Set.of("openid", "profile"),
+                        Set.of("authorization_code"),
+                        1, "启用", now, now));
+
+        SsoClientResponse result = appService.updateSsoClientConfig(1L,
+                new UpdateSsoClientConfigCommand(
+                        List.of("https://cb.example.com"),
+                        List.of("https://cb.example.com/logout"),
+                        Set.of("openid", "profile"),
+                        Set.of("authorization_code")));
+
+        // 配置四件套往返一致（含 postLogoutRedirectUris）；client_id/status 不动、原样回显
+        assertThat(result.clientId()).isEqualTo("oidc-stable");
+        assertThat(result.redirectUris()).containsExactly("https://cb.example.com");
+        assertThat(result.postLogoutRedirectUris()).containsExactly("https://cb.example.com/logout");
+        assertThat(result.scopes()).containsExactlyInAnyOrder("openid", "profile");
+        assertThat(result.grants()).containsExactly("authorization_code");
+        assertThat(result.status()).isEqualTo(1);
+        verify(appRegistryClient).updateSsoClientConfig(eq(1L), any(UpdateSsoClientConfigWireRequest.class));
+    }
+
+    @Test
+    void given_ssoClientNotProvisioned_when_updateSsoClientConfig_then_throwNotProvisioned() {
+        // SsoClient 未建（凭证未开通）→ 下游 404 → ADMIN_SSO_CLIENT_NOT_PROVISIONED（绝不自动建凭证）
+        when(appRegistryClient.updateSsoClientConfig(eq(99L), any(UpdateSsoClientConfigWireRequest.class)))
+                .thenThrow(new OpenApiClientException(404, "{\"message\":\"Not Found\"}"));
+
+        assertThatThrownBy(() -> appService.updateSsoClientConfig(99L,
+                new UpdateSsoClientConfigCommand(
+                        List.of("https://cb.example.com"), List.of(), Set.of(), Set.of())))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == AdminMessage.ADMIN_SSO_CLIENT_NOT_PROVISIONED);
     }
 }

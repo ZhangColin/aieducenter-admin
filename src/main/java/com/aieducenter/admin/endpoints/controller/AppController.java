@@ -3,11 +3,13 @@ package com.aieducenter.admin.endpoints.controller;
 import com.aieducenter.admin.application.AppManagementAppService;
 import com.aieducenter.admin.application.dto.command.CreateAppCommand;
 import com.aieducenter.admin.application.dto.command.UpdateAppCommand;
+import com.aieducenter.admin.application.dto.command.UpdateSsoClientConfigCommand;
 import com.aieducenter.admin.application.dto.query.AppManagementQuery;
 import com.aieducenter.admin.application.dto.response.ApiKeyCreatedResponse;
 import com.aieducenter.admin.application.dto.response.AppDetailResponse;
 import com.aieducenter.admin.application.dto.response.AppSummaryResponse;
 import com.aieducenter.admin.application.dto.response.SsoClientCreatedResponse;
+import com.aieducenter.admin.application.dto.response.SsoClientResponse;
 import com.aieducenter.admin.constants.AdminScopes;
 import com.cartisan.security.annotation.RequireAuth;
 import com.cartisan.security.annotation.RequirePermission;
@@ -143,5 +145,19 @@ public class AppController {
     @Operation(summary = "开通/重置 SSO 客户端凭证——返回含一次性明文 clientSecret 的全量视图")
     public ApiResponse<SsoClientCreatedResponse> manageSsoClientCredentials(@PathVariable Long id) {
         return ApiResponse.ok(appManagementAppService.manageSsoClientCredentials(id));
+    }
+
+    @PutMapping("/{id}/sso-client")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:app:write",
+            name = "平台管理 / 应用管理 / 编辑",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "整份替换 SSO 客户端配置——返回不含 clientSecret 的视图")
+    public ApiResponse<SsoClientResponse> updateSsoClientConfig(@PathVariable Long id,
+                                                                 @RequestBody UpdateSsoClientConfigCommand command) {
+        // 不加 @Valid：admin 作为 BFF 纯透传，配置校验（如两 URI 列表 @NotEmpty）由 app-registry 做（ADR-0006 §5）。
+        return ApiResponse.ok(appManagementAppService.updateSsoClientConfig(id, command));
     }
 }

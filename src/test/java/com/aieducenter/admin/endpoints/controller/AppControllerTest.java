@@ -5,6 +5,7 @@ import com.aieducenter.admin.application.dto.response.ApiKeyCreatedResponse;
 import com.aieducenter.admin.application.dto.response.AppDetailResponse;
 import com.aieducenter.admin.application.dto.response.AppSummaryResponse;
 import com.aieducenter.admin.application.dto.response.SsoClientCreatedResponse;
+import com.aieducenter.admin.application.dto.response.SsoClientResponse;
 import com.cartisan.web.response.PageResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -195,5 +196,37 @@ class AppControllerTest {
                 .andExpect(jsonPath("$.data.status").value(1));
 
         verify(appManagementAppService).manageSsoClientCredentials(1L);
+    }
+
+    // ========== updateSsoClientConfig ==========
+
+    @Test
+    void given_validBody_when_updateSsoClientConfig_then_returnViewWithoutSecret() throws Exception {
+        LocalDateTime now = LocalDateTime.now();
+        when(appManagementAppService.updateSsoClientConfig(eq(1L), any()))
+                .thenReturn(new SsoClientResponse(20L, 1L, "oidc-stable",
+                        List.of("https://example.com/cb"),
+                        List.of("https://example.com/logout"),
+                        Set.of("openid"), Set.of("authorization_code"),
+                        1, "启用", now, now));
+
+        String body = new ObjectMapper().writeValueAsString(java.util.Map.of(
+                "redirectUris", List.of("https://example.com/cb"),
+                "postLogoutRedirectUris", List.of("https://example.com/logout"),
+                "scopes", Set.of("openid"),
+                "grants", Set.of("authorization_code")));
+
+        mvc.perform(put("/api/admin/apps/1/sso-client")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(20))
+                .andExpect(jsonPath("$.data.clientId").value("oidc-stable"))
+                .andExpect(jsonPath("$.data.redirectUris[0]").value("https://example.com/cb"))
+                .andExpect(jsonPath("$.data.postLogoutRedirectUris[0]").value("https://example.com/logout"))
+                // 一次性 clientSecret 仅凭证接口返——配置 PUT 响应绝不带
+                .andExpect(jsonPath("$.data.clientSecret").doesNotExist());
+
+        verify(appManagementAppService).updateSsoClientConfig(eq(1L), any());
     }
 }

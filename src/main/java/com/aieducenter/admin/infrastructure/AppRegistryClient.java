@@ -7,6 +7,7 @@ import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientCreatedRes
 import com.aieducenter.admin.application.dto.wire.AppRegistrySsoClientResponse;
 import com.aieducenter.admin.application.dto.wire.CreateAppWireRequest;
 import com.aieducenter.admin.application.dto.wire.UpdateAppWireRequest;
+import com.aieducenter.admin.application.dto.wire.UpdateSsoClientConfigWireRequest;
 import com.cartisan.openapi.client.OpenApiClient;
 import com.cartisan.openapi.client.OpenApiClientException;
 import com.cartisan.web.response.ApiResponse;
@@ -176,6 +177,21 @@ public class AppRegistryClient {
         String url = baseUrl + "/api/app-registry/apps/" + appId + "/sso-clients/credentials";
         log.debug("AppRegistryClient.createOrResetSsoClientCredentials: {}", url);
         ApiResponse<AppRegistrySsoClientCreatedResponse> resp = openApiClient.post(url, null, SSO_CLIENT_CREATED_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 整份替换 SsoClient 配置——替换 {@code redirectUris} / {@code postLogoutRedirectUris} / {@code scopes} /
+     * {@code grants} 四件套，<strong>不动</strong>凭证（{@code client_id} / {@code client_secret}）与 status。
+     *
+     * <p>无 SsoClient（凭证未开通）时下游返 404，本方法透传 {@link OpenApiClientException}，由 AppService 翻译为
+     * {@code ADMIN_SSO_CLIENT_NOT_PROVISIONED}（绝不在此自动建凭证，见 ADR-0006 安全护栏）。
+     * 响应为不含 {@code clientSecret} 的视图。</p>
+     */
+    public AppRegistrySsoClientResponse updateSsoClientConfig(Long appId, UpdateSsoClientConfigWireRequest request) {
+        String url = baseUrl + "/api/app-registry/apps/" + appId + "/sso-clients";
+        log.debug("AppRegistryClient.updateSsoClientConfig: {}", url);
+        ApiResponse<AppRegistrySsoClientResponse> resp = openApiClient.put(url, request, SSO_CLIENT_TYPEREF);
         return resp.data();
     }
 
