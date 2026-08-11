@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -20,6 +21,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.domain.PageRequest;
 
 import com.aieducenter.admin.payment.application.PaymentManagementAppService;
+import com.aieducenter.admin.payment.application.dto.command.RefundAuditCommand;
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
 import com.aieducenter.admin.payment.application.dto.response.OrderLifecycleResponse;
@@ -27,6 +29,7 @@ import com.aieducenter.admin.payment.application.dto.response.PaymentOrderDetail
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummaryResponse;
+import com.aieducenter.admin.payment.application.dto.wire.AuditRefundWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
@@ -380,5 +383,94 @@ class PaymentBffIntegrationTest {
         assertThatThrownBy(() -> paymentAppService.getLifecycle("NOPE"))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 404);
+    }
+
+    // ========== auditRefund · 操作者身份 + 决策透传（首个写端点） ==========
+
+    @Test
+    void given_auditApprove_when_auditRefund_then_wireRequestCarriesAuditorAndDecision_returnsMappedDetail() {
+        LocalDateTime now = LocalDateTime.now();
+        when(paymentClient.auditRefund(eq("RF-1"), any(AuditRefundWireRequest.class))).thenReturn(
+                new RefundOrderDetailWireResponse("RF-1", "PAY-1", "BIZ-1", "course-svc", "APPROVED",
+                        new BigDecimal("99.00"), "MANUAL", 1001L, "alice",
+                        now, now.minusMinutes(10)));
+
+        RefundOrderDetailResponse detail = paymentAppService.auditRefund(
+                "RF-1", new RefundAuditCommand(true, "同意退款"), 1001L, "alice");
+
+        // 出站 wire 请求体：决策（agreed=true）+ 操作者身份（auditorId/auditorName）+ 备注 均正确透传
+        ArgumentCaptor<AuditRefundWireRequest> captor = ArgumentCaptor.forClass(AuditRefundWireRequest.class);
+        verify(paymentClient).auditRefund(eq("RF-1"), captor.capture());
+        AuditRefundWireRequest wire = captor.getValue();
+        assertThat(wire.auditorId()).isEqualTo(1001L);
+        assertThat(wire.auditorName()).isEqualTo("alice");
+        assertThat(wire.agreed()).isTrue();
+        assertThat(wire.remark()).isEqualTo("同意退款");
+
+        // 响应映射：审核后退款单聚合（与详情同形）
+        assertThat(detail.refundOrderNo()).isEqualTo("RF-1");
+        assertThat(detail.status()).isEqualTo("APPROVED");
+        assertThat(detail.auditType()).isEqualTo("MANUAL");
+        assertThat(detail.auditorId()).isEqualTo(1001L);
+        assertThat(detail.auditorName()).isEqualTo("alice");
+        assertThat(detail.auditedAt()).isEqualTo(now);
+    }
+
+    @Test
+    void given_auditReject_when_auditRefund_then_wireRequestCarriesAgreedFalse() {
+        when(paymentClient.auditRefund(eq("RF-2"), any(AuditRefundWireRequest.class))).thenReturn(
+                new RefundOrderDetailWireResponse("RF-2", null, null, null, "REJECTED",
+                        null, "MANUAL", 2002L, "bob", null, null));
+
+        paymentAppService.auditRefund("RF-2", new RefundAuditCommand(false, "金额不符"), 2002L, "bob");
+
+        // 拒绝：agreed=false 透传（payment 据此落 AUDIT_REJECT 操作日志）
+        ArgumentCaptor<AuditRefundWireRequest> captor = ArgumentCaptor.forClass(AuditRefundWireRequest.class);
+        verify(paymentClient).auditRefund(eq("RF-2"), captor.capture());
+        assertThat(captor.getValue().agreed()).isFalse();
+        assertThat(captor.getValue().auditorId()).isEqualTo(2002L);
+        assertThat(captor.getValue().auditorName()).isEqualTo("bob");
+        assertThat(captor.getValue().remark()).isEqualTo("金额不符");
+    }
+
+    @Test
+    void given_auditRemarkNull_when_auditRefund_then_wireRequestCarriesNullRemark() {
+        when(paymentClient.auditRefund(eq("RF-3"), any(AuditRefundWireRequest.class))).thenReturn(
+                new RefundOrderDetailWireResponse("RF-3", null, null, null, "APPROVED",
+                        null, "MANUAL", 3003L, "carol", null, null));
+
+        // remark 选填——前端不传时透传 null（payment 侧 @Size 仅约束非空长度）
+        paymentAppService.auditRefund("RF-3", new RefundAuditCommand(true, null), 3003L, "carol");
+
+        ArgumentCaptor<AuditRefundWireRequest> captor = ArgumentCaptor.forClass(AuditRefundWireRequest.class);
+        verify(paymentClient).auditRefund(eq("RF-3"), captor.capture());
+        assertThat(captor.getValue().remark()).isNull();
+        assertThat(captor.getValue().agreed()).isTrue();
+    }
+
+    // ========== auditRefund · 错误翻译 ==========
+
+    @Test
+    void given_downstream404_when_auditRefund_then_throwNotFound() {
+        // payment 404（退款单不存在）→ admin 404
+        when(paymentClient.auditRefund(eq("NOPE"), any(AuditRefundWireRequest.class)))
+                .thenThrow(new OpenApiClientException(404, "{\"message\":\"not found\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.auditRefund(
+                "NOPE", new RefundAuditCommand(true, null), 1001L, "alice"))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.NOT_FOUND);
+    }
+
+    @Test
+    void given_downstream400NotPending_when_auditRefund_then_throwBadRequest() {
+        // payment 400（退款单非待审核状态、无法审核）→ admin 400（BAD_REQUEST）
+        when(paymentClient.auditRefund(eq("RF-DONE"), any(AuditRefundWireRequest.class)))
+                .thenThrow(new OpenApiClientException(400, "{\"message\":\"退款订单不是待审核状态\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.auditRefund(
+                "RF-DONE", new RefundAuditCommand(true, null), 1001L, "alice"))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.BAD_REQUEST);
     }
 }

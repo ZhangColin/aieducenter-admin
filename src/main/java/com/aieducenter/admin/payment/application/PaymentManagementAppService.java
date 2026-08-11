@@ -1,5 +1,6 @@
 package com.aieducenter.admin.payment.application;
 
+import com.aieducenter.admin.payment.application.dto.command.RefundAuditCommand;
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
 import com.aieducenter.admin.payment.application.dto.response.OrderLifecycleResponse;
@@ -7,6 +8,7 @@ import com.aieducenter.admin.payment.application.dto.response.PaymentOrderDetail
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummaryResponse;
+import com.aieducenter.admin.payment.application.dto.wire.AuditRefundWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
@@ -161,6 +163,39 @@ public class PaymentManagementAppService {
                 wire.businessSystemName(), wire.status(), wire.refundAmount(),
                 wire.auditType(), wire.auditorId(), wire.auditorName(),
                 wire.auditedAt(), wire.createdAt());
+    }
+
+    /**
+     * 审核退款（透传 payment）——首个写端点，打通操作者身份透传范式。
+     *
+     * <p>运营人员的审核决策（{@code agreed}）来自前端 {@link RefundAuditCommand}，审核人身份
+     * （{@code auditorId} / {@code auditorName}）由 controller 从 {@code RequestContext} 读取后
+     * 显式传入——admin 应用层<strong>不</strong>读 {@code RequestContext}、不触 Sa-Token/DB，
+     * 身份来源对方法签名可见、可测（零 Sa-Token/零 DB/零新注解）。payment 落 {@code OperationLog}
+     * （auditType=MANUAL），admin 不本地记账。</p>
+     *
+     * <p>错误翻译（复用 {@link #translatePaymentError}）：payment 404（退款单不存在）⟹
+     * {@link BaseCodeMessage#NOT_FOUND}；payment 400（退款单非待审核状态）⟹
+     * {@link BaseCodeMessage#BAD_REQUEST}。</p>
+     *
+     * @param refundOrderNo 退款订单号
+     * @param command       前端审核决策（agreed + remark，不含审核人身份）
+     * @param auditorId     审核人 ID（RequestContext.getUserId()）
+     * @param auditorName   审核人姓名（RequestContext.getUserName()）
+     * @return payment 返回的审核后退款单聚合（与详情同形）
+     */
+    public RefundOrderDetailResponse auditRefund(String refundOrderNo, RefundAuditCommand command,
+                                                 Long auditorId, String auditorName) {
+        // 决策来自前端、身份来自 RequestContext——二者拼成 payment 的完整 wire 载荷
+        var wireRequest = new AuditRefundWireRequest(
+                auditorId, auditorName, command.agreed(), command.remark());
+        RefundOrderDetailWireResponse wire;
+        try {
+            wire = paymentClient.auditRefund(refundOrderNo, wireRequest);
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+        return toRefundDetail(wire);
     }
 
     /**

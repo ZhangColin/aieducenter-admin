@@ -2,6 +2,7 @@ package com.aieducenter.admin.payment.endpoints.controller;
 
 import com.aieducenter.admin.constants.AdminScopes;
 import com.aieducenter.admin.payment.application.PaymentManagementAppService;
+import com.aieducenter.admin.payment.application.dto.command.RefundAuditCommand;
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
 import com.aieducenter.admin.payment.application.dto.response.OrderLifecycleResponse;
@@ -9,17 +10,21 @@ import com.aieducenter.admin.payment.application.dto.response.PaymentOrderDetail
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummaryResponse;
+import com.cartisan.core.context.RequestContext;
 import com.cartisan.security.annotation.RequireAuth;
 import com.cartisan.security.annotation.RequirePermission;
 import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -105,5 +110,22 @@ public class PaymentController {
     public ApiResponse<OrderLifecycleResponse> getLifecycle(
             @PathVariable String orderNo) {
         return ApiResponse.ok(paymentAppService.getLifecycle(orderNo));
+    }
+
+    @PostMapping("/refunds/{refundOrderNo}/audit")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:refund:audit",
+            name = "支付管理 / 退款审核",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "审核退款（approve/reject）——操作者身份从 RequestContext 透传，审计归 payment")
+    public ApiResponse<RefundOrderDetailResponse> auditRefund(
+            @PathVariable String refundOrderNo,
+            @Valid @RequestBody RefundAuditCommand command) {
+        // 操作者身份从 RequestContext 透传到 payment 请求体（零 Sa-Token/零 DB/零新注解）：
+        // auditorId/auditorName 不来自前端、不可伪造；payment 落 OperationLog（auditType=MANUAL）。
+        return ApiResponse.ok(paymentAppService.auditRefund(
+                refundOrderNo, command, RequestContext.getUserId(), RequestContext.getUserName()));
     }
 }

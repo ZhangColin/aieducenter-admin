@@ -1,5 +1,6 @@
 package com.aieducenter.admin.payment.infrastructure;
 
+import com.aieducenter.admin.payment.application.dto.wire.AuditRefundWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
@@ -149,6 +150,26 @@ public class PaymentClient {
         String url = baseUrl + "/api/v1/refunds/" + encode(refundOrderNo);
         log.debug("PaymentClient.getRefund: {}", url);
         ApiResponse<RefundOrderDetailWireResponse> resp = openApiClient.get(url, REFUND_DETAIL_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 审核退款（透传 payment）——首个写端点，打通操作者身份透传范式。
+     *
+     * <p>请求体（{@link AuditRefundWireRequest}）承载审核决策 + 操作者身份（auditorId/auditorName 由应用层从
+     * {@code RequestContext} 注入）；payment 落 {@code OperationLog}（auditType=MANUAL），admin 不本地记账。
+     * 响应为审核后的退款单聚合（与详情同形）。</p>
+     *
+     * @param refundOrderNo 退款订单号
+     * @param request       wire 层审核载荷（含决策 + 操作者身份）
+     * @return payment 返回的审核后退款单聚合
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 404（退款单不存在）、
+     *         400（退款单非待审核状态）等透传，由应用层翻译
+     */
+    public RefundOrderDetailWireResponse auditRefund(String refundOrderNo, AuditRefundWireRequest request) {
+        String url = baseUrl + "/api/v1/refunds/" + encode(refundOrderNo) + "/audit";
+        log.debug("PaymentClient.auditRefund: {}", url);
+        ApiResponse<RefundOrderDetailWireResponse> resp = openApiClient.post(url, request, REFUND_DETAIL_TYPEREF);
         return resp.data();
     }
 

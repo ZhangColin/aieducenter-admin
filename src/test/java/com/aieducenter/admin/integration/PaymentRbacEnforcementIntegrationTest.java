@@ -3,6 +3,8 @@ package com.aieducenter.admin.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -11,8 +13,10 @@ import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -32,6 +36,7 @@ import com.aieducenter.admin.application.dto.command.AssignPermissionsCommand;
 import com.aieducenter.admin.application.dto.command.AssignRolesCommand;
 import com.aieducenter.admin.application.dto.command.CreateAdminUserCommand;
 import com.aieducenter.admin.application.dto.command.CreateRoleCommand;
+import com.aieducenter.admin.payment.application.dto.wire.AuditRefundWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
@@ -53,6 +58,11 @@ import cn.dev33.satoken.config.SaTokenConfig;
  * 200 用例 mock {@link PaymentClient}（返回空页），证明权限放行后整条 controller→appservice→client 通路接通。
  * 登录/鉴权辅助沿用 {@code RbacEnforcementIntegrationTest}；超管 bypass 行为由框架级
  * {@code RbacEnforcementIntegrationTest} / {@code BreakGlassAccountProtectionIntegrationTest} 钉住，此处不重复。</p>
+ *
+ * <p>退款审核写端点（{@code POST /refunds/{no}/audit}、挂 {@code admin:payment:refund:audit}）在此一并覆盖三态，
+ * 并在 200 用例用 {@link ArgumentCaptor} 抓取出站 {@link AuditRefundWireRequest}，断言
+ * {@code auditorId}/{@code auditorName} == 登录用户的 id/昵称——这是「操作者身份从 RequestContext 透传到
+ * payment 请求体（零 Sa-Token/零 DB/零新注解）」契约的端到端证据（SecurityFilter 从 session 注入 RequestContext）。</p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -60,6 +70,7 @@ class PaymentRbacEnforcementIntegrationTest {
 
     private static final String PASSWORD = "Test1234";
     private static final String PERMISSION_CODE = "admin:payment:read";
+    private static final String AUDIT_PERMISSION_CODE = "admin:payment:refund:audit";
 
     /** 挂 {@code admin:payment:read} 的全部端点（列表 + 详情 + 生命周期）——逐一验证三态。 */
     private static final List<String> ENDPOINTS = List.of(
@@ -84,6 +95,9 @@ class PaymentRbacEnforcementIntegrationTest {
 
     private String usernameWithPermission;
     private String usernameWithoutPermission;
+    private String usernameWithAuditPermission;
+    private Long auditUserId;
+    private String auditUserNickname;
 
     @Autowired
     PaymentRbacEnforcementIntegrationTest(
@@ -104,6 +118,7 @@ class PaymentRbacEnforcementIntegrationTest {
         String suffix = uuidSuffix();
         usernameWithPermission = "payop" + suffix;
         usernameWithoutPermission = "paynone" + suffix;
+        usernameWithAuditPermission = "payauditor" + suffix;
 
         Long roleId = roleAppService.create(
                 new CreateRoleCommand("支付运营_" + suffix, "PAYOP_" + suffix, "仅有支付查看权限", 20, null));
@@ -115,6 +130,15 @@ class PaymentRbacEnforcementIntegrationTest {
 
         userAppService.create(
                 new CreateAdminUserCommand(usernameWithoutPermission, PASSWORD, "无权限运营", null, null, null));
+
+        // 退款审核专用运营（仅有 admin:payment:refund:audit）——身份透传 200 用例用其 id/昵称做断言
+        Long auditRoleId = roleAppService.create(
+                new CreateRoleCommand("退款审核_" + suffix, "PAYAUDIT_" + suffix, "仅有退款审核权限", 30, null));
+        roleAppService.assignPermissions(auditRoleId, new AssignPermissionsCommand(List.of(AUDIT_PERMISSION_CODE)));
+        auditUserNickname = "退款审核员_" + suffix;
+        auditUserId = userAppService.create(
+                new CreateAdminUserCommand(usernameWithAuditPermission, PASSWORD, auditUserNickname, null, null, null));
+        userAppService.assignRoles(auditUserId, new AssignRolesCommand(List.of(auditRoleId)));
 
         // 200 用例：payment 下游 mock 为空页/空时间线，证明通路接通（不依赖真实 payment 服务）
         when(paymentClient.listPayments(any(), anyInt(), anyInt()))
@@ -129,6 +153,10 @@ class PaymentRbacEnforcementIntegrationTest {
                         null, null, null, null, null, null));
         when(paymentClient.getLifecycle("PAY-1")).thenReturn(
                 new OrderLifecycleWireResponse("PAY-1", List.of()));
+        // 退款审核 200 用例：mock 返回审核后退款单，证明写通路接通；出站 wire 请求体由 ArgumentCaptor 抓取
+        when(paymentClient.auditRefund(eq("RF-1"), any(AuditRefundWireRequest.class))).thenReturn(
+                new RefundOrderDetailWireResponse("RF-1", null, null, null, "APPROVED",
+                        null, "MANUAL", null, null, null, null));
     }
 
     @ParameterizedTest(name = "[{0}] 非超管且拥有 admin:payment:read → 200")
@@ -154,6 +182,49 @@ class PaymentRbacEnforcementIntegrationTest {
     @DisplayName("未登录访问支付管理列表端点返回 401")
     void given_unauthenticated_when_list_then_401(String endpoint) {
         ResponseEntity<String> response = getWithToken(endpoint, null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    // ========== 退款审核（POST /refunds/{no}/audit）· 权限三态 + 操作者身份透传 ==========
+
+    @Test
+    @DisplayName("非超管且拥有 admin:payment:refund:audit：审核退款返回 200，且出站请求体含登录用户身份")
+    void given_nonSuperAdminWithAuditPermission_when_audit_then_200_andWireRequestCarriesRequestContextIdentity() {
+        String token = login(usernameWithAuditPermission);
+        ResponseEntity<String> response = postWithToken(
+                "/api/admin/payment/refunds/RF-1/audit", token,
+                "{\"agreed\":true,\"remark\":\"同意退款\"}");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // 操作者身份从 RequestContext 透传到 payment 请求体（零 Sa-Token/零 DB/零新注解）：
+        // auditorId == 登录用户 id，auditorName == 登录用户昵称
+        // （HTTP 登录 → 框架写 session.userName → SecurityFilter 注入 RequestContext → controller → 出站请求体）。
+        ArgumentCaptor<AuditRefundWireRequest> captor = ArgumentCaptor.forClass(AuditRefundWireRequest.class);
+        verify(paymentClient).auditRefund(eq("RF-1"), captor.capture());
+        AuditRefundWireRequest wire = captor.getValue();
+        assertThat(wire.auditorId()).isEqualTo(auditUserId);
+        assertThat(wire.auditorName()).isEqualTo(auditUserNickname);
+        assertThat(wire.agreed()).isTrue();
+        assertThat(wire.remark()).isEqualTo("同意退款");
+    }
+
+    @Test
+    @DisplayName("仅有 admin:payment:read（无 refund:audit）→ 审核退款 403（read ≠ audit）")
+    void given_nonSuperAdminWithReadOnly_when_audit_then_403() {
+        String token = login(usernameWithPermission);
+        ResponseEntity<String> response = postWithToken(
+                "/api/admin/payment/refunds/RF-1/audit", token,
+                "{\"agreed\":true,\"remark\":\"同意\"}");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("未登录审核退款返回 401")
+    void given_unauthenticated_when_audit_then_401() {
+        ResponseEntity<String> response = postWithToken(
+                "/api/admin/payment/refunds/RF-1/audit", null,
+                "{\"agreed\":true,\"remark\":\"同意\"}");
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
@@ -184,6 +255,19 @@ class PaymentRbacEnforcementIntegrationTest {
             headers.set(cfg.getTokenName(), value);
         }
         return restTemplate.exchange(url(path), HttpMethod.GET, new HttpEntity<>(headers), String.class);
+    }
+
+    private ResponseEntity<String> postWithToken(String path, String token, String body) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        if (token != null) {
+            SaTokenConfig cfg = SaManager.getConfig();
+            String value = (cfg.getTokenPrefix() == null || cfg.getTokenPrefix().isEmpty())
+                    ? token
+                    : cfg.getTokenPrefix() + " " + token;
+            headers.set(cfg.getTokenName(), value);
+        }
+        return restTemplate.exchange(url(path), HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
     }
 
     private String url(String path) {
