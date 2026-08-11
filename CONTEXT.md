@@ -29,6 +29,10 @@ _Avoid_: 给 `system` 列塞"系统管理员"的授权含义；把破窗号设�
 端点：扁平分页 `GET /menus`（Soybean 菜单表格用，集合根分页、对齐 `/users`/`/roles`）+ 树 `GET /menus/tree`（父级选择器/角色分配用）；页名选择器（`fetchGetAllPages`）由前端构建期派生，不向后端要。
 _Avoid_: 在菜单模型上保留任何"Soybean 没有"的遗物（DIVIDER、旧 path 不变量、Material Symbols）；把 Soybean 既定的 type/icon 语义当开放项重新讨论。
 
+**详情页 = 弹窗/抽屉优先 (Detail = drawer/modal first)**:
+详情默认是**列表页内的前端弹窗/抽屉**，**不进后端菜单种子**；仅当信息量大到值得整页时才做独立路由——且那是**前端 constant 路由**（前端自有，仍不经后端菜单树）。后端 `sys_admin_menus` 只承载**侧边栏导航**，详情可达性是前端职责（信息量大小 → 弹窗/抽屉/整页，由前端定，UI 走 admin-web issue）。`app_detail`（id=90）即此例：V11 曾种为 `hideInMenu` 路由，前端改为 720px Modal（前端 issue #32）后，V12 删除种子（[issue #31](https://github.com/ZhangColin/aieducenter-admin/issues/31)）。
+_Avoid_: 给详情页种 `hideInMenu` 菜单行（除非已确认要整页独立路由）；把后端菜单树当详情页路由的唯一来源。
+
 **财务上下文 (Finance Context)**:
 本应用内的一个**限界上下文（非独立域/服务）**。只读各能力域（支付/钱包/Token计量）做**收入确认（consume-based，履约时点）+ append-only 冲销 + 负债/营销费用视角**。**不收款（支付域）、不持余额（钱包域）、不计量 token（Token计量域）**。详见架构仓库 architecture.md §6.15。
 
@@ -74,6 +78,42 @@ _Avoid_: 用"轮换"指代 SSO 凭证或 apiKey 更新。
 同一资源的两种服务视角（REQ-13 定，2026-08-02）。**消费面** = 终端使用视角（我的导航、动态路由），只下发**启用**数据、登录即可访问（不挂管理权限）、禁用项不下发且 directory 禁用整棵子树不下发——对超管同样生效；**管理面** = 维护视角（菜单/角色管理页），全量含禁用项、挂 `@RequirePermission`。例：`GET /menus/my` 是消费面；`GET /menus`、`GET /menus/tree` 是管理面。身份 claims（user/roleCodes/permissions）留 auth 域（`/auth/current`），导航资源（menus/home）归 menu 域——身份 vs 导航不混在一个响应里。
 _Avoid_: 给消费面端点挂管理权限注解；让消费面为了"超管全量"而连禁用项也下发；在管理面端点上做消费面过滤。
 
+**支付管理上下文 (Payment Admin Context)**:
+admin 内 `payment` 子包承载的**运营管理**关注点——支付/退款订单列表与详情、订单生命周期视图、退款审核、通知重发、统计 dashboard。admin 作为 BFF 经 cartisan-openapi 签名调用 payment 服务（消费视角契约见 issue #37）。**≠ 财务上下文**（只读收入确认 + append-only 冲销，尚未建）：payment admin 是**运营写操作 + 运营看板**，财务是**会计视角的只读聚合**；两者都读 payment 数据，但关注点不同，不可混。
+_Avoid_: 把退款审核/通知重发塞进财务上下文；把 payment admin 的运营 dashboard 当作财务报表。
+
+**admin 是 BFF（非严格 DDD 领域服务）**:
+admin 的职责 = **调接口 + DTO 转换 + 聚合**，无重业务逻辑。出站服务客户端（`AppRegistryClient` / `PaymentClient` / 未来钱包·Token 客户端）为 **infrastructure 包内裸 `@Component`**，应用层直接注入——**不走** `@Port(CLIENT)` + `@Adapter(CLIENT)`。`@Port`/`@Adapter` 是**业务服务**南向端口的 DDD 规范（Domain 定义 Port、Infra 实现 Adapter），admin 作为 BFF 没有那样的 domain 厚度值得去解耦。Q5 grill 定（2026-08-11，issue #37）。
+_Avoid_: 在 admin 里给出站客户端套 @Port/@Adapter（误把 BFF 当领域服务）；future 想统一时另立 ADR 再动。
+
+**BFF 不记业务审计**:
+业务操作（退款审核、通知重发等）的**权威审计归各业务服务**（system of record）——payment 侧 `OperationLog`（payment ADR-0002）记 operatorId/operatorName/operatorSystem/result。admin **不本地再记一份**，仅透传操作者身份 + 读回展示；双源必不一致。除非特别声明（如合规要求 admin 自证操作链），admin 不建本地审计表。
+_Avoid_: admin 给 payment 操作建镜像审计表；把 admin 当成业务操作的源头记账。
+
+**BFF 仪表盘 = 需求驱动、可跨服务聚合 (BFF dashboards are need-driven, may aggregate across services)**:
+后台 dashboard 的数据**不一定来自单一服务**——BFF 的作用恰是按真实使用需求，把多个能力域（支付/钱包/Token计量/…）的数据**聚合到一个看板**。当前 payment stats 端点（tier-1/2）是**先行拍脑袋**的预置，admin 直接透传；真实运营需求到来后，dashboard widget 可能跨服务取数、admin 侧组合，**不要求每个 widget 都对应一个单服务端点**。故 payment admin 的 `PaymentStats*` 客户端现在纯透传，但 BFF 架构要为日后跨服务聚合留余地（不把「payment 端点 ↔ dashboard widget」焊死成 1:1）。
+_Avoid_: 假设每个 dashboard widget 都必须有对应的单服务端点；把 BFF 仪表盘写成对单一服务的薄透传而不留聚合余地。
+
+**退款审核 (Refund Audit)**:
+运营对退款单的 approve/reject 操作（payment `POST /api/v1/refunds/{no}/audit`），落 payment `OperationLog`、`auditType=MANUAL`。admin 透传当前 operator 的 `auditorId`/`auditorName` 于请求体，**不改本地状态**。权限码 `admin:payment:refund:audit`（独立于 read）。
+
+**通知重发 (Notification Resend)**:
+重发支付/退款结果通知到业务系统（payment `POST .../notifications/resend`），**不改订单状态**（payment ADR-0001：admin 不施加订单状态）。权限码 `admin:payment:notification:resend`。
+
+**支付管理菜单 (Payment Management Menu)**:
+新增一级目录「支付管理」（`directory`, sort_order=3，夹应用管理 2 与系统管理 99 之间），其下二级菜单。**统计概览前置（sort=1）**。详情页（支付/退款详情）走前端弹窗/抽屉、**不种菜单**（见上「详情页 = 弹窗/抽屉优先」）；生命周期视图是详情抽屉内 tab，无菜单。V13 迁移种子，`ON CONFLICT (id) DO NOTHING`，**不写种子快照测试**（V12 已删，脆性高；迁移正确性由 `RoleAssignmentFlywaySchemaIntegrationTest` 兜底），SUPER_ADMIN 经 bypass 见全树（无 role-menu 种子行）。
+
+| 菜单 | route_name | route_path | component | icon | i18n_key | menu_type | sort_order | parent_id |
+|---|---|---|---|---|---|---|---|---|
+| 支付管理 | `payment` | `/payment` | `layout.base` | `carbon:finance` | `route.payment` | directory(1) | 3 | NULL |
+| 统计概览 | `payment_stats` | `/payment/stats` | `view.payment_stats` | `carbon:dashboard` | `route.payment_stats` | menu(2) | 1 | 80 |
+| 支付订单 | `payment_order` | `/payment/order` | `view.payment_order` | `carbon:currency` | `route.payment_order` | menu(2) | 2 | 80 |
+| 退款订单 | `payment_refund` | `/payment/refund` | `view.payment_refund` | `carbon:currency-refund` | `route.payment_refund` | menu(2) | 3 | 80 |
+| 通道交互日志 | `payment_channel_log` | `/payment/channel-log` | `view.payment_channel_log` | `carbon:exchange` | `route.payment_channel_log` | menu(2) | 4 | 80 |
+| 订单操作记录 | `payment_operation` | `/payment/operation` | `view.payment_operation` | `carbon:activity` | `route.payment_operation` | menu(2) | 5 | 80 |
+
+ID：directory=80；leaves=100/110/120/130/140（支付/退款详情不种）。route_name/component 为提案，admin-web UI issue 对齐。「通道交互日志」= payment `PaymentLog`（与银行/通道网关的机机交互留痕）；「订单操作记录」= payment `OperationLog`（行为者对订单的操作留痕）。（2026-08-11 issue #37 grill 定稿）
+
 ## 稳定不变式（来自平台架构，本项目务必遵守）
 
 - Operator 归本应用自有；不做 Operator SSO。
@@ -93,9 +133,10 @@ _Avoid_: 给消费面端点挂管理权限注解；让消费面为了"超管全�
 - ⏳ 部门 / 岗位模型（树？数据权限挂钩？）
 - ⏳ 权限模型：注解扫描 + 列存 vs 独立 `sys_permissions` 字典表
 
-### Phase 2 — 财务上下文 + 各能力域聚合
-- ⏳ 财务首批视图 + 与各域取数契约
-- ⏳ cartisan-openapi 签名客户端
+### Phase 2 — 财务上下文 + 各能力域聚合（BFF）
+- ✅ cartisan-openapi 签名客户端 —— **复用框架 `OpenApiClient`**（admin-console 身份，无需新建凭据/客户端）；各能力域签名约定**统一一套**（issue #37 grill 定，2026-08-11，见上「admin 是 BFF」）
+- ⏳ **支付管理（payment admin BFF）** —— [issue #37](https://github.com/ZhangColin/aieducenter-admin/issues/37) grill 定稿（2026-08-11）：全量 16 端点分期实现；`payment` 子包；菜单见上「支付管理菜单」；出站客户端 `PaymentClient` 复用框架 `OpenApiClient`（裸 `@Component`，[ADR-0007](docs/adr/0007-admin-bff-outbound-clients-are-flat-components.md)）；操作者身份走 `RequestContext.getUserId()/getUserName()`；审计归 payment；dashboard 当下透传、留跨服务聚合余地
+- ⏳ 财务上下文（只读收入确认）—— 与支付管理不同关注点，见上「支付管理上下文」
 
 ### Issue 处置（前端 aieducenter-admin-web 提的需求）
 - ✅ **[REQ-13] 「我的导航」端点 `GET /menus/my` + `/auth/current` 移除 menus**（[issue #20](https://github.com/ZhangColin/aieducenter-admin/issues/20)，spec 已发布于 issue 评论；拆票线性链 [#21](https://github.com/ZhangColin/aieducenter-admin/issues/21) ✅ 禁用角色汇总剔除 → [#22](https://github.com/ZhangColin/aieducenter-admin/issues/22) ✅ `/menus/my` 端点 → [#23](https://github.com/ZhangColin/aieducenter-admin/issues/23) ✅ `/auth/current` 移除 menus）：前端翻 `VITE_AUTH_ROUTE_MODE=dynamic`，按「身份 vs 导航」拆域——`/auth/current` 收敛为 `{user, roleCodes, permissions}`（身份 claims 留 auth 域）；新增 `/menus/my` 出 `{home, menus}`（导航资源归 menu 域，登录即可、不挂 `@RequirePermission`，贴 Soybean `UserRoute` 原生形状 `{routes, home}`）。消费面只下发**启用（status=1）菜单，directory 禁用则整棵子树不下发**（修原 `/auth/current.menus` 不过滤 status=0 之弊；T2 落地于 `MenuTreeAssembler.assembleVisible`——可见 = 自身启用 ∧ 祖先链全启用，在 id 集合层过滤故幸存子节点不提升到根；超管走 `findVisibleTree(null)`，与管理面 `findTree(null)` 语义分叉）；管理面 `GET /menus`、`GET /menus/tree` 保持全量。**已定①**——禁用角色在任何汇总聚合中视为不存在（见上「RBAC」条目）；**已定②**——`home` = 用户全部启用角色按 `(sortOrder 升, id 升)` 取第一个非空白 home，全空 → `null`（超管同规则，种子 `SUPER_ADMIN.home`=NULL，前端兜底第一个可见叶子）；**已定③**——status 过滤对超管同样生效：「超管全量」= 不受角色裁剪的全量**启用**菜单，禁用项仅管理面可见（否则禁用开关对超管形同虚设、动态路由会把禁用页注册成可访问路由）。

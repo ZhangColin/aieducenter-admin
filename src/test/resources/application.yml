@@ -24,8 +24,10 @@ spring:
       # create 既给每个上下文干净表、又无跨上下文清表 / 无脏数据累积。
       ddl-auto: create
 
-# 所有 @SpringBootTest 加载全量上下文，AppRegistryClient 需要此属性
-# （main/application.yml 中此值含嵌套占位符 ${APP_REGISTRY_URL:...}，部分场景不解析）
+# 所有 @SpringBootTest 加载全量上下文，出站客户端需要此属性
+# （main/application.yml 中此值含嵌套占位符 ${..._URL:...}，部分场景不解析）
 admin:
   app-registry:
     base-url: http://localhost:8088
+  payment:
+    base-url: http://localhost:8082

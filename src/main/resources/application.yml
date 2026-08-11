@@ -48,6 +48,9 @@ sa-token:
 admin:
   app-registry:
     base-url: ${APP_REGISTRY_URL:http://localhost:8088}
+  # payment 能力域地址（联调前默认值占位，真实部署经 PAYMENT_SERVICE_URL 覆盖）
+  payment:
+    base-url: ${PAYMENT_SERVICE_URL:http://localhost:8082}
 
 management:
   endpoints:
