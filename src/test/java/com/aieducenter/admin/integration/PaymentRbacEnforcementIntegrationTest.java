@@ -32,7 +32,10 @@ import com.aieducenter.admin.application.dto.command.AssignPermissionsCommand;
 import com.aieducenter.admin.application.dto.command.AssignRolesCommand;
 import com.aieducenter.admin.application.dto.command.CreateAdminUserCommand;
 import com.aieducenter.admin.application.dto.command.CreateRoleCommand;
+import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.RefundOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
 import com.aieducenter.admin.payment.infrastructure.PaymentClient;
 import com.cartisan.web.response.PageResponse;
@@ -58,10 +61,13 @@ class PaymentRbacEnforcementIntegrationTest {
     private static final String PASSWORD = "Test1234";
     private static final String PERMISSION_CODE = "admin:payment:read";
 
-    /** 挂 {@code admin:payment:read} 的全部列表端点——逐一验证三态。 */
+    /** 挂 {@code admin:payment:read} 的全部端点（列表 + 详情 + 生命周期）——逐一验证三态。 */
     private static final List<String> ENDPOINTS = List.of(
             "/api/admin/payment/payments",
-            "/api/admin/payment/refunds");
+            "/api/admin/payment/refunds",
+            "/api/admin/payment/payments/PAY-1",
+            "/api/admin/payment/refunds/RF-1",
+            "/api/admin/payment/orders/PAY-1/lifecycle");
 
     static Stream<String> endpoints() {
         return ENDPOINTS.stream();
@@ -110,11 +116,19 @@ class PaymentRbacEnforcementIntegrationTest {
         userAppService.create(
                 new CreateAdminUserCommand(usernameWithoutPermission, PASSWORD, "无权限运营", null, null, null));
 
-        // 200 用例：payment 下游 mock 为空页，证明通路接通（不依赖真实 payment 服务）
+        // 200 用例：payment 下游 mock 为空页/空时间线，证明通路接通（不依赖真实 payment 服务）
         when(paymentClient.listPayments(any(), anyInt(), anyInt()))
                 .thenReturn(new PageResponse<PaymentOrderWireResponse>(List.of(), 0L, 0, 20));
         when(paymentClient.listRefunds(any(), anyInt(), anyInt()))
                 .thenReturn(new PageResponse<RefundOrderWireResponse>(List.of(), 0L, 0, 20));
+        when(paymentClient.getPayment("PAY-1")).thenReturn(
+                new PaymentOrderDetailWireResponse("PAY-1", null, null, "PAID",
+                        null, null, null, null, null, null));
+        when(paymentClient.getRefund("RF-1")).thenReturn(
+                new RefundOrderDetailWireResponse("RF-1", null, null, null, "PENDING",
+                        null, null, null, null, null, null));
+        when(paymentClient.getLifecycle("PAY-1")).thenReturn(
+                new OrderLifecycleWireResponse("PAY-1", List.of()));
     }
 
     @ParameterizedTest(name = "[{0}] 非超管且拥有 admin:payment:read → 200")

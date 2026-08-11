@@ -1,10 +1,14 @@
 package com.aieducenter.admin.payment.infrastructure;
 
+import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.RefundOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
 import com.cartisan.openapi.client.OpenApiClient;
+import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
 import com.fasterxml.jackson.core.type.TypeReference;
 import org.slf4j.Logger;
@@ -32,6 +36,15 @@ public class PaymentClient {
             new TypeReference<>() {};
 
     private static final TypeReference<PageResponse<RefundOrderWireResponse>> REFUND_PAGE_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<PaymentOrderDetailWireResponse>> PAYMENT_DETAIL_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<RefundOrderDetailWireResponse>> REFUND_DETAIL_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<OrderLifecycleWireResponse>> LIFECYCLE_TYPEREF =
             new TypeReference<>() {};
 
     private final OpenApiClient openApiClient;
@@ -109,6 +122,51 @@ public class PaymentClient {
         appendParam(url, "createdAtTo", filter.createdAtTo());
         log.debug("PaymentClient.listRefunds: {}", url);
         return openApiClient.get(url.toString(), REFUND_PAGE_TYPEREF);
+    }
+
+    /**
+     * 查询支付订单详情（透传 payment）。
+     *
+     * @param paymentOrderNo 支付订单号
+     * @return payment 返回的支付订单聚合详情
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 404（订单不存在）等透传，由应用层翻译
+     */
+    public PaymentOrderDetailWireResponse getPayment(String paymentOrderNo) {
+        String url = baseUrl + "/api/v1/payments/" + encode(paymentOrderNo);
+        log.debug("PaymentClient.getPayment: {}", url);
+        ApiResponse<PaymentOrderDetailWireResponse> resp = openApiClient.get(url, PAYMENT_DETAIL_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 查询退款订单详情（透传 payment）。
+     *
+     * @param refundOrderNo 退款订单号
+     * @return payment 返回的退款订单聚合详情
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 404（订单不存在）等透传，由应用层翻译
+     */
+    public RefundOrderDetailWireResponse getRefund(String refundOrderNo) {
+        String url = baseUrl + "/api/v1/refunds/" + encode(refundOrderNo);
+        log.debug("PaymentClient.getRefund: {}", url);
+        ApiResponse<RefundOrderDetailWireResponse> resp = openApiClient.get(url, REFUND_DETAIL_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 查询订单生命周期（透传 payment）。
+     *
+     * <p>payment 侧按 {@code orderNo} 把 PaymentLog + OperationLog union 后按时间排序返回
+     * （payment ADR-0002 读模型）；admin 透传此<strong>已合并</strong>的时间线，不本地合并。</p>
+     *
+     * @param orderNo 订单号（支付单号或退款单号）
+     * @return payment 返回的已合并生命周期时间线
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 404（订单不存在）等透传，由应用层翻译
+     */
+    public OrderLifecycleWireResponse getLifecycle(String orderNo) {
+        String url = baseUrl + "/api/v1/orders/" + encode(orderNo) + "/lifecycle";
+        log.debug("PaymentClient.getLifecycle: {}", url);
+        ApiResponse<OrderLifecycleWireResponse> resp = openApiClient.get(url, LIFECYCLE_TYPEREF);
+        return resp.data();
     }
 
     private static void appendParam(StringBuilder url, String name, Object value) {

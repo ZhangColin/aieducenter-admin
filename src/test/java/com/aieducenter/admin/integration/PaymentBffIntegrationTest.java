@@ -22,10 +22,16 @@ import org.springframework.data.domain.PageRequest;
 import com.aieducenter.admin.payment.application.PaymentManagementAppService;
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
+import com.aieducenter.admin.payment.application.dto.response.OrderLifecycleResponse;
+import com.aieducenter.admin.payment.application.dto.response.PaymentOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
+import com.aieducenter.admin.payment.application.dto.response.RefundOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummaryResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.RefundOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
 import com.aieducenter.admin.payment.infrastructure.PaymentClient;
@@ -239,5 +245,140 @@ class PaymentBffIntegrationTest {
                 PageRequest.of(0, 20)))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.NOT_FOUND);
+    }
+
+    // ========== getPaymentDetail · DTO 映射 ==========
+
+    @Test
+    void given_paymentOrder_when_getPaymentDetail_then_returnMappedDetail() {
+        LocalDateTime now = LocalDateTime.now();
+        when(paymentClient.getPayment("PAY-1")).thenReturn(
+                new PaymentOrderDetailWireResponse("PAY-1", "BIZ-1", "course-svc", "PAID",
+                        new BigDecimal("99.00"), "WECHAT", "WEB", "WECHAT_NATIVE",
+                        now, now.minusMinutes(5)));
+
+        PaymentOrderDetailResponse detail = paymentAppService.getPaymentDetail("PAY-1");
+
+        // 详情聚合逐字段映射
+        assertThat(detail.paymentOrderNo()).isEqualTo("PAY-1");
+        assertThat(detail.businessOrderNo()).isEqualTo("BIZ-1");
+        assertThat(detail.businessSystemName()).isEqualTo("course-svc");
+        assertThat(detail.status()).isEqualTo("PAID");
+        assertThat(detail.amount()).isEqualByComparingTo("99.00");
+        assertThat(detail.payMode()).isEqualTo("WECHAT");
+        assertThat(detail.accessType()).isEqualTo("WEB");
+        assertThat(detail.paymentChannel()).isEqualTo("WECHAT_NATIVE");
+        assertThat(detail.paidAt()).isEqualTo(now);
+        assertThat(detail.createdAt()).isEqualTo(now.minusMinutes(5));
+    }
+
+    @Test
+    void given_payment404_when_getPaymentDetail_then_throwNotFound() {
+        // payment 404（订单不存在）→ admin 404
+        when(paymentClient.getPayment("NOPE"))
+                .thenThrow(new OpenApiClientException(404, "{\"message\":\"not found\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.getPaymentDetail("NOPE"))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 404);
+    }
+
+    // ========== getRefundDetail · DTO 映射 ==========
+
+    @Test
+    void given_refundOrder_when_getRefundDetail_then_returnMappedDetail() {
+        LocalDateTime now = LocalDateTime.now();
+        when(paymentClient.getRefund("RF-1")).thenReturn(
+                new RefundOrderDetailWireResponse("RF-1", "PAY-1", "BIZ-1", "course-svc", "SUCCESS",
+                        new BigDecimal("99.00"), "MANUAL", 1001L, "alice",
+                        now.minusMinutes(3), now.minusMinutes(10)));
+
+        RefundOrderDetailResponse detail = paymentAppService.getRefundDetail("RF-1");
+
+        // 详情聚合逐字段映射
+        assertThat(detail.refundOrderNo()).isEqualTo("RF-1");
+        assertThat(detail.paymentOrderNo()).isEqualTo("PAY-1");
+        assertThat(detail.businessOrderNo()).isEqualTo("BIZ-1");
+        assertThat(detail.businessSystemName()).isEqualTo("course-svc");
+        assertThat(detail.status()).isEqualTo("SUCCESS");
+        assertThat(detail.refundAmount()).isEqualByComparingTo("99.00");
+        assertThat(detail.auditType()).isEqualTo("MANUAL");
+        assertThat(detail.auditorId()).isEqualTo(1001L);
+        assertThat(detail.auditorName()).isEqualTo("alice");
+        assertThat(detail.auditedAt()).isEqualTo(now.minusMinutes(3));
+        assertThat(detail.createdAt()).isEqualTo(now.minusMinutes(10));
+    }
+
+    @Test
+    void given_refund404_when_getRefundDetail_then_throwNotFound() {
+        when(paymentClient.getRefund("NOPE"))
+                .thenThrow(new OpenApiClientException(404, "{\"message\":\"not found\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.getRefundDetail("NOPE"))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 404);
+    }
+
+    // ========== getLifecycle · 已合并时间线透传（payment 合并，admin 不改序） ==========
+
+    @Test
+    void given_mergedTimeline_when_getLifecycle_then_preserveOrderAndMapBothSources() {
+        LocalDateTime t1 = LocalDateTime.of(2026, 8, 12, 10, 0);
+        LocalDateTime t2 = LocalDateTime.of(2026, 8, 12, 10, 5);
+        // 故意让 payment 回传的顺序与时间序相反（t2 在前、t1 在后）——证明 admin 是透传、不重排：
+        // 若 admin 偷偷按 createdAt 排序，事件顺序会变成 t1/t2（与输入相反），断言即失败。
+        // 合并与排序归 payment（ADR-0002），admin 只 map 不 sort。
+        when(paymentClient.getLifecycle("PAY-1")).thenReturn(new OrderLifecycleWireResponse("PAY-1", List.of(
+                new OrderLifecycleWireResponse.LifecycleEventWireResponse(
+                        "OPERATION_LOG", t2,
+                        null, null, null, null, null, null, null, null,
+                        "PAYMENT", "PAY-1", "NOTIFY_RESEND", 1001L, "alice", "admin-console", "SUCCESS", "manual resend"),
+                new OrderLifecycleWireResponse.LifecycleEventWireResponse(
+                        "PAYMENT_LOG", t1,
+                        "PAYMENT_REQUEST", "PAY-1", null, "ICBC_PAY", "000000", "success", 120L, true,
+                        null, null, null, null, null, null, null, null)
+        )));
+
+        OrderLifecycleResponse lifecycle = paymentAppService.getLifecycle("PAY-1");
+
+        assertThat(lifecycle.orderNo()).isEqualTo("PAY-1");
+        assertThat(lifecycle.events()).hasSize(2);
+        // 顺序原样保留（payment 给的 t2→t1，admin 不重排为 t1→t2）
+        OrderLifecycleResponse.LifecycleEvent first = lifecycle.events().get(0);
+        assertThat(first.source()).isEqualTo("OPERATION_LOG");
+        assertThat(first.createdAt()).isEqualTo(t2);
+        // 操作字段组映射
+        assertThat(first.operation()).isEqualTo("NOTIFY_RESEND");
+        assertThat(first.operatorId()).isEqualTo(1001L);
+        assertThat(first.operatorName()).isEqualTo("alice");
+        assertThat(first.operatorSystem()).isEqualTo("admin-console");
+        assertThat(first.result()).isEqualTo("SUCCESS");
+        assertThat(first.remark()).isEqualTo("manual resend");
+        // 网关字段组为 null（union 另一半）
+        assertThat(first.logType()).isNull();
+        assertThat(first.bankInterface()).isNull();
+
+        OrderLifecycleResponse.LifecycleEvent second = lifecycle.events().get(1);
+        assertThat(second.source()).isEqualTo("PAYMENT_LOG");
+        assertThat(second.createdAt()).isEqualTo(t1);
+        // 网关字段组映射
+        assertThat(second.logType()).isEqualTo("PAYMENT_REQUEST");
+        assertThat(second.bankInterface()).isEqualTo("ICBC_PAY");
+        assertThat(second.returnCode()).isEqualTo("000000");
+        assertThat(second.executionTime()).isEqualTo(120L);
+        assertThat(second.success()).isTrue();
+        // 操作字段组为 null
+        assertThat(second.operation()).isNull();
+        assertThat(second.operatorId()).isNull();
+    }
+
+    @Test
+    void given_lifecycle404_when_getLifecycle_then_throwNotFound() {
+        when(paymentClient.getLifecycle("NOPE"))
+                .thenThrow(new OpenApiClientException(404, "{\"message\":\"not found\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.getLifecycle("NOPE"))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage().httpStatus() == 404);
     }
 }

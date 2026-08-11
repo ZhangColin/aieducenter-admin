@@ -2,10 +2,16 @@ package com.aieducenter.admin.payment.application;
 
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
+import com.aieducenter.admin.payment.application.dto.response.OrderLifecycleResponse;
+import com.aieducenter.admin.payment.application.dto.response.PaymentOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
+import com.aieducenter.admin.payment.application.dto.response.RefundOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummaryResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.RefundOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
 import com.aieducenter.admin.payment.infrastructure.PaymentClient;
@@ -15,6 +21,8 @@ import com.cartisan.openapi.client.OpenApiClientException;
 import com.cartisan.web.response.PageResponse;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 /**
  * 支付管理 BFF 应用服务——聚合 payment 能力域的运营查询。
@@ -108,6 +116,82 @@ public class PaymentManagementAppService {
                 wire.businessSystemName(), wire.status(), wire.refundAmount(),
                 wire.auditType(), wire.auditorId(), wire.auditorName(),
                 wire.auditedAt(), wire.createdAt());
+    }
+
+    /**
+     * 查询支付订单详情（透传 payment）——完整聚合投影。
+     *
+     * <p>payment 404（订单不存在）翻译为 {@link BaseCodeMessage#NOT_FOUND}（404）。</p>
+     */
+    public PaymentOrderDetailResponse getPaymentDetail(String paymentOrderNo) {
+        PaymentOrderDetailWireResponse wire;
+        try {
+            wire = paymentClient.getPayment(paymentOrderNo);
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+        return toPaymentDetail(wire);
+    }
+
+    private static PaymentOrderDetailResponse toPaymentDetail(PaymentOrderDetailWireResponse wire) {
+        return new PaymentOrderDetailResponse(
+                wire.paymentOrderNo(), wire.businessOrderNo(), wire.businessSystemName(),
+                wire.status(), wire.amount(), wire.payMode(), wire.accessType(),
+                wire.paymentChannel(), wire.paidAt(), wire.createdAt());
+    }
+
+    /**
+     * 查询退款订单详情（透传 payment）——完整聚合投影。
+     *
+     * <p>payment 404（订单不存在）翻译为 {@link BaseCodeMessage#NOT_FOUND}（404）。</p>
+     */
+    public RefundOrderDetailResponse getRefundDetail(String refundOrderNo) {
+        RefundOrderDetailWireResponse wire;
+        try {
+            wire = paymentClient.getRefund(refundOrderNo);
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+        return toRefundDetail(wire);
+    }
+
+    private static RefundOrderDetailResponse toRefundDetail(RefundOrderDetailWireResponse wire) {
+        return new RefundOrderDetailResponse(
+                wire.refundOrderNo(), wire.paymentOrderNo(), wire.businessOrderNo(),
+                wire.businessSystemName(), wire.status(), wire.refundAmount(),
+                wire.auditType(), wire.auditorId(), wire.auditorName(),
+                wire.auditedAt(), wire.createdAt());
+    }
+
+    /**
+     * 查询订单生命周期（透传 payment）——payment 已合并（PaymentLog + OperationLog 按时间排序）的时间线。
+     *
+     * <p>合并在 payment 完成（ADR-0002 读模型），admin 透传不改序、不本地合并——避免双逻辑不一致。
+     * payment 404（订单不存在）翻译为 {@link BaseCodeMessage#NOT_FOUND}（404）。</p>
+     */
+    public OrderLifecycleResponse getLifecycle(String orderNo) {
+        OrderLifecycleWireResponse wire;
+        try {
+            wire = paymentClient.getLifecycle(orderNo);
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+        List<OrderLifecycleResponse.LifecycleEvent> events =
+                wire.events() == null ? List.of()
+                        : wire.events().stream().map(PaymentManagementAppService::toLifecycleEvent).toList();
+        return new OrderLifecycleResponse(wire.orderNo(), events);
+    }
+
+    private static OrderLifecycleResponse.LifecycleEvent toLifecycleEvent(
+            OrderLifecycleWireResponse.LifecycleEventWireResponse wire) {
+        return new OrderLifecycleResponse.LifecycleEvent(
+                wire.source(), wire.createdAt(),
+                wire.logType(), wire.paymentOrderNo(), wire.refundOrderNo(),
+                wire.bankInterface(), wire.returnCode(), wire.returnMsg(),
+                wire.executionTime(), wire.success(),
+                wire.targetType(), wire.targetNo(), wire.operation(),
+                wire.operatorId(), wire.operatorName(), wire.operatorSystem(),
+                wire.result(), wire.remark());
     }
 
     /**
