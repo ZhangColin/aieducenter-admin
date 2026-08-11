@@ -1,9 +1,13 @@
 package com.aieducenter.admin.payment.application;
 
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
+import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
+import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.RefundOrderListWireRequest;
+import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
 import com.aieducenter.admin.payment.infrastructure.PaymentClient;
 import com.cartisan.core.exception.BaseCodeMessage;
 import com.cartisan.core.exception.DomainException;
@@ -66,6 +70,44 @@ public class PaymentManagementAppService {
                 wire.paymentOrderNo(), wire.businessOrderNo(), wire.businessSystemName(),
                 wire.status(), wire.amount(), wire.payMode(), wire.accessType(),
                 wire.paymentChannel(), wire.paidAt(), wire.createdAt());
+    }
+
+    /**
+     * 分页查询退款订单列表（透传 payment）。
+     *
+     * <p>分页形状对齐 admin 现有列表端点（与 {@code /apps}、{@code /payments} 同形）：{@code Pageable}
+     * 0-based 页码 +1 传入客户端（客户端约定 1-based），响应沿用 payment 回显的 {@code total/page/size}。</p>
+     */
+    public PageResponse<RefundOrderSummaryResponse> listRefunds(RefundOrderQuery query, Pageable pageable) {
+        // query（北向 controller 绑定）→ wire（出站载荷），与 list 把 PaymentOrderQuery 拆成 wire 参数同位
+        var filter = new RefundOrderListWireRequest(
+                query.refundOrderNo(), query.paymentOrderNo(), query.businessOrderNo(),
+                query.businessSystemName(), query.statuses(), query.auditType(), query.auditorId(),
+                query.refundAmountMin(), query.refundAmountMax(),
+                query.createdAtFrom(), query.createdAtTo());
+        PageResponse<RefundOrderWireResponse> page;
+        try {
+            page = paymentClient.listRefunds(
+                    filter,
+                    pageable.getPageNumber() + 1,   // Spring Pageable 0-based → 客户端 1-based
+                    pageable.getPageSize());
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+
+        var items = page.items().stream()
+                .map(PaymentManagementAppService::toRefundSummary)
+                .toList();
+
+        return new PageResponse<>(items, page.total(), page.page(), page.size());
+    }
+
+    private static RefundOrderSummaryResponse toRefundSummary(RefundOrderWireResponse wire) {
+        return new RefundOrderSummaryResponse(
+                wire.refundOrderNo(), wire.paymentOrderNo(), wire.businessOrderNo(),
+                wire.businessSystemName(), wire.status(), wire.refundAmount(),
+                wire.auditType(), wire.auditorId(), wire.auditorName(),
+                wire.auditedAt(), wire.createdAt());
     }
 
     /**

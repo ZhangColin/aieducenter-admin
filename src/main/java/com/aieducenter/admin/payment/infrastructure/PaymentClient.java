@@ -2,6 +2,8 @@ package com.aieducenter.admin.payment.infrastructure;
 
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.RefundOrderListWireRequest;
+import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
 import com.cartisan.openapi.client.OpenApiClient;
 import com.cartisan.web.response.PageResponse;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -27,6 +29,9 @@ public class PaymentClient {
     private static final Logger log = LoggerFactory.getLogger(PaymentClient.class);
 
     private static final TypeReference<PageResponse<PaymentOrderWireResponse>> PAYMENT_PAGE_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<PageResponse<RefundOrderWireResponse>> REFUND_PAGE_TYPEREF =
             new TypeReference<>() {};
 
     private final OpenApiClient openApiClient;
@@ -71,6 +76,39 @@ public class PaymentClient {
         appendParam(url, "paidAtTo", filter.paidAtTo());
         log.debug("PaymentClient.listPayments: {}", url);
         return openApiClient.get(url.toString(), PAYMENT_PAGE_TYPEREF);
+    }
+
+    /**
+     * 分页查询退款订单列表（透传 payment）。
+     *
+     * @param filter wire 层过滤参数（由应用层从 {@code RefundOrderQuery} 映射而来）
+     * @param page   页码，<strong>1-based</strong>（应用层由 Spring {@code Pageable} 的 0-based 页码 +1 传入；
+     *               此处 {@code page - 1} 还原为 payment 端 Spring {@code Pageable} 的 0-based）
+     * @param size   每页大小
+     * @return payment 返回的分页结果
+     */
+    public PageResponse<RefundOrderWireResponse> listRefunds(RefundOrderListWireRequest filter, int page, int size) {
+        // 入参 page 为 1-based，payment 端用 Spring Pageable 的 0-based，故 -1（与 listPayments / AppRegistryClient 一致）。
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/v1/refunds?page=").append(page - 1)
+                .append("&size=").append(size);
+        appendParam(url, "refundOrderNo", filter.refundOrderNo());
+        appendParam(url, "paymentOrderNo", filter.paymentOrderNo());
+        appendParam(url, "businessOrderNo", filter.businessOrderNo());
+        appendParam(url, "businessSystemName", filter.businessSystemName());
+        if (filter.statuses() != null && !filter.statuses().isEmpty()) {
+            for (String status : filter.statuses()) {
+                appendParam(url, "status", status);
+            }
+        }
+        appendParam(url, "auditType", filter.auditType());
+        appendParam(url, "auditorId", filter.auditorId());
+        appendParam(url, "refundAmountMin", filter.refundAmountMin());
+        appendParam(url, "refundAmountMax", filter.refundAmountMax());
+        appendParam(url, "createdAtFrom", filter.createdAtFrom());
+        appendParam(url, "createdAtTo", filter.createdAtTo());
+        log.debug("PaymentClient.listRefunds: {}", url);
+        return openApiClient.get(url.toString(), REFUND_PAGE_TYPEREF);
     }
 
     private static void appendParam(StringBuilder url, String name, Object value) {

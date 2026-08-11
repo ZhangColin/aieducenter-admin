@@ -7,10 +7,12 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -31,6 +33,7 @@ import com.aieducenter.admin.application.dto.command.AssignRolesCommand;
 import com.aieducenter.admin.application.dto.command.CreateAdminUserCommand;
 import com.aieducenter.admin.application.dto.command.CreateRoleCommand;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
 import com.aieducenter.admin.payment.infrastructure.PaymentClient;
 import com.cartisan.web.response.PageResponse;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -43,8 +46,9 @@ import cn.dev33.satoken.config.SaTokenConfig;
  * 支付管理端点 RBAC 强制执行集成测试——真实 Sa-Token 过滤链，断言
  * {@code @RequirePermission("admin:payment:read")} 对未登录（401）/ 无权者（403）/ 有权者（200）的行为。
  *
- * <p>200 用例 mock {@link PaymentClient}（返回空页），证明权限放行后整条 controller→appservice→client 通路接通。
- * 覆盖 401/403/200 三态（登录/鉴权辅助沿用 {@code RbacEnforcementIntegrationTest}）；超管 bypass 行为由框架级
+ * <p>对挂 {@code admin:payment:read} 的全部列表端点（{@code /payments}、{@code /refunds}）逐一验证三态。
+ * 200 用例 mock {@link PaymentClient}（返回空页），证明权限放行后整条 controller→appservice→client 通路接通。
+ * 登录/鉴权辅助沿用 {@code RbacEnforcementIntegrationTest}；超管 bypass 行为由框架级
  * {@code RbacEnforcementIntegrationTest} / {@code BreakGlassAccountProtectionIntegrationTest} 钉住，此处不重复。</p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -53,7 +57,15 @@ class PaymentRbacEnforcementIntegrationTest {
 
     private static final String PASSWORD = "Test1234";
     private static final String PERMISSION_CODE = "admin:payment:read";
-    private static final String ENDPOINT = "/api/admin/payment/payments";
+
+    /** 挂 {@code admin:payment:read} 的全部列表端点——逐一验证三态。 */
+    private static final List<String> ENDPOINTS = List.of(
+            "/api/admin/payment/payments",
+            "/api/admin/payment/refunds");
+
+    static Stream<String> endpoints() {
+        return ENDPOINTS.stream();
+    }
 
     private final AdminUserManagementAppService userAppService;
     private final RoleManagementAppService roleAppService;
@@ -101,28 +113,33 @@ class PaymentRbacEnforcementIntegrationTest {
         // 200 用例：payment 下游 mock 为空页，证明通路接通（不依赖真实 payment 服务）
         when(paymentClient.listPayments(any(), anyInt(), anyInt()))
                 .thenReturn(new PageResponse<PaymentOrderWireResponse>(List.of(), 0L, 0, 20));
+        when(paymentClient.listRefunds(any(), anyInt(), anyInt()))
+                .thenReturn(new PageResponse<RefundOrderWireResponse>(List.of(), 0L, 0, 20));
     }
 
-    @Test
-    @DisplayName("非超管且拥有 admin:payment:read：访问支付订单列表返回 200")
-    void given_nonSuperAdminWithPermission_when_listPayments_then_200() {
+    @ParameterizedTest(name = "[{0}] 非超管且拥有 admin:payment:read → 200")
+    @MethodSource("endpoints")
+    @DisplayName("非超管且拥有 admin:payment:read：访问支付管理列表端点返回 200")
+    void given_nonSuperAdminWithPermission_when_list_then_200(String endpoint) {
         String token = login(usernameWithPermission);
-        ResponseEntity<String> response = getWithToken(ENDPOINT, token);
+        ResponseEntity<String> response = getWithToken(endpoint, token);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
-    @Test
-    @DisplayName("非超管且缺少权限：访问支付订单列表返回 403")
-    void given_nonSuperAdminWithoutPermission_when_listPayments_then_403() {
+    @ParameterizedTest(name = "[{0}] 非超管且缺少权限 → 403")
+    @MethodSource("endpoints")
+    @DisplayName("非超管且缺少权限：访问支付管理列表端点返回 403")
+    void given_nonSuperAdminWithoutPermission_when_list_then_403(String endpoint) {
         String token = login(usernameWithoutPermission);
-        ResponseEntity<String> response = getWithToken(ENDPOINT, token);
+        ResponseEntity<String> response = getWithToken(endpoint, token);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
-    @Test
-    @DisplayName("未登录访问支付订单列表返回 401")
-    void given_unauthenticated_when_listPayments_then_401() {
-        ResponseEntity<String> response = getWithToken(ENDPOINT, null);
+    @ParameterizedTest(name = "[{0}] 未登录 → 401")
+    @MethodSource("endpoints")
+    @DisplayName("未登录访问支付管理列表端点返回 401")
+    void given_unauthenticated_when_list_then_401(String endpoint) {
+        ResponseEntity<String> response = getWithToken(endpoint, null);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 

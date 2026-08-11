@@ -3,7 +3,9 @@ package com.aieducenter.admin.payment.endpoints.controller;
 import com.aieducenter.admin.constants.AdminScopes;
 import com.aieducenter.admin.payment.application.PaymentManagementAppService;
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
+import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
+import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummaryResponse;
 import com.cartisan.security.annotation.RequireAuth;
 import com.cartisan.security.annotation.RequirePermission;
 import com.cartisan.web.response.ApiResponse;
@@ -46,5 +48,19 @@ public class PaymentController {
             PaymentOrderQuery query,
             @PageableDefault(size = 20) Pageable pageable) {
         return ApiResponse.ok(paymentAppService.list(query, pageable));
+    }
+
+    @GetMapping("/refunds")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:read",
+            name = "支付管理 / 查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "分页查询退款订单列表")
+    public ApiResponse<PageResponse<RefundOrderSummaryResponse>> listRefunds(
+            RefundOrderQuery query,
+            @PageableDefault(size = 20) Pageable pageable) {
+        return ApiResponse.ok(paymentAppService.listRefunds(query, pageable));
     }
 }
