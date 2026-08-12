@@ -38,6 +38,8 @@ import com.aieducenter.admin.application.dto.command.CreateAdminUserCommand;
 import com.aieducenter.admin.application.dto.command.CreateRoleCommand;
 import com.aieducenter.admin.payment.application.dto.wire.AuditRefundWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OperationLogWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentLogWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderDetailWireResponse;
@@ -54,7 +56,8 @@ import cn.dev33.satoken.config.SaTokenConfig;
  * 支付管理端点 RBAC 强制执行集成测试——真实 Sa-Token 过滤链，断言
  * {@code @RequirePermission("admin:payment:read")} 对未登录（401）/ 无权者（403）/ 有权者（200）的行为。
  *
- * <p>对挂 {@code admin:payment:read} 的全部列表端点（{@code /payments}、{@code /refunds}）逐一验证三态。
+ * <p>对挂 {@code admin:payment:read} 的全部列表端点（{@code /payments}、{@code /refunds}、
+ * {@code /payment-logs}、{@code /operation-logs}）逐一验证三态。
  * 200 用例 mock {@link PaymentClient}（返回空页），证明权限放行后整条 controller→appservice→client 通路接通。
  * 登录/鉴权辅助沿用 {@code RbacEnforcementIntegrationTest}；超管 bypass 行为由框架级
  * {@code RbacEnforcementIntegrationTest} / {@code BreakGlassAccountProtectionIntegrationTest} 钉住，此处不重复。</p>
@@ -72,10 +75,12 @@ class PaymentRbacEnforcementIntegrationTest {
     private static final String PERMISSION_CODE = "admin:payment:read";
     private static final String AUDIT_PERMISSION_CODE = "admin:payment:refund:audit";
 
-    /** 挂 {@code admin:payment:read} 的全部端点（列表 + 详情 + 生命周期）——逐一验证三态。 */
+    /** 挂 {@code admin:payment:read} 的全部端点（列表 + 详情 + 生命周期 + 日志）——逐一验证三态。 */
     private static final List<String> ENDPOINTS = List.of(
             "/api/admin/payment/payments",
             "/api/admin/payment/refunds",
+            "/api/admin/payment/payment-logs",
+            "/api/admin/payment/operation-logs",
             "/api/admin/payment/payments/PAY-1",
             "/api/admin/payment/refunds/RF-1",
             "/api/admin/payment/orders/PAY-1/lifecycle");
@@ -145,6 +150,10 @@ class PaymentRbacEnforcementIntegrationTest {
                 .thenReturn(new PageResponse<PaymentOrderWireResponse>(List.of(), 0L, 0, 20));
         when(paymentClient.listRefunds(any(), anyInt(), anyInt()))
                 .thenReturn(new PageResponse<RefundOrderWireResponse>(List.of(), 0L, 0, 20));
+        when(paymentClient.listPaymentLogs(any(), anyInt(), anyInt()))
+                .thenReturn(new PageResponse<PaymentLogWireResponse>(List.of(), 0L, 0, 20));
+        when(paymentClient.listOperationLogs(any(), anyInt(), anyInt()))
+                .thenReturn(new PageResponse<OperationLogWireResponse>(List.of(), 0L, 0, 20));
         when(paymentClient.getPayment("PAY-1")).thenReturn(
                 new PaymentOrderDetailWireResponse("PAY-1", null, null, "PAID",
                         null, null, null, null, null, null));

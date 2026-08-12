@@ -22,12 +22,16 @@ import org.springframework.data.domain.PageRequest;
 
 import com.aieducenter.admin.payment.application.PaymentManagementAppService;
 import com.aieducenter.admin.payment.application.dto.command.RefundAuditCommand;
+import com.aieducenter.admin.payment.application.dto.query.OperationLogQuery;
+import com.aieducenter.admin.payment.application.dto.query.PaymentLogQuery;
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
 import com.aieducenter.admin.payment.application.dto.response.GatewayHealthResponse;
+import com.aieducenter.admin.payment.application.dto.response.OperationLogSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.response.OperationsAuditResponse;
 import com.aieducenter.admin.payment.application.dto.response.OrderLifecycleResponse;
 import com.aieducenter.admin.payment.application.dto.response.OrderStatusDistributionResponse;
+import com.aieducenter.admin.payment.application.dto.response.PaymentLogSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOverviewResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
@@ -35,9 +39,13 @@ import com.aieducenter.admin.payment.application.dto.response.RefundOrderDetailR
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.wire.AuditRefundWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.GatewayHealthWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OperationLogListWireRequest;
+import com.aieducenter.admin.payment.application.dto.wire.OperationLogWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OperationsAuditWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OrderStatusDistributionWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentLogListWireRequest;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentLogWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
@@ -256,6 +264,194 @@ class PaymentBffIntegrationTest {
                 PageRequest.of(0, 20)))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.NOT_FOUND);
+    }
+
+    // ========== listPaymentLogs · 通道交互日志（PaymentLog）· DTO 映射 + 分页契约 ==========
+
+    @Test
+    void given_paymentLogs_when_listPaymentLogs_then_returnMappedPage() {
+        LocalDateTime now = LocalDateTime.now();
+        when(paymentClient.listPaymentLogs(any(PaymentLogListWireRequest.class), anyInt(), anyInt()))
+                .thenReturn(new PageResponse<>(List.of(
+                        new PaymentLogWireResponse(7001L, "PAY-1", null, "PAYMENT_REQUEST", "ICBC", "ICBC_PAY",
+                                200, "000000", "success", 120L, true, null, now.minusMinutes(5)),
+                        new PaymentLogWireResponse(7002L, null, "RF-1", "REFUND_QUERY", "ICBC", "ICBC_REFUNDQ",
+                                200, "9999", "bank error", 90L, false, "timeout", now.minusMinutes(1))
+                ), 17L, 0, 20));
+
+        var page = paymentAppService.listPaymentLogs(
+                new PaymentLogQuery(null, null, null, null, null, null, null, null),
+                PageRequest.of(0, 20));
+
+        // 分页契约：total/page/size 沿用 payment 回显
+        assertThat(page.total()).isEqualTo(17L);
+        assertThat(page.page()).isEqualTo(0);
+        assertThat(page.size()).isEqualTo(20);
+        // DTO 映射：wire → response 逐字段（含网关诊断字段组）
+        assertThat(page.items()).hasSize(2);
+        PaymentLogSummaryResponse first = page.items().get(0);
+        assertThat(first.id()).isEqualTo(7001L);
+        assertThat(first.paymentOrderNo()).isEqualTo("PAY-1");
+        assertThat(first.refundOrderNo()).isNull();
+        assertThat(first.logType()).isEqualTo("PAYMENT_REQUEST");
+        assertThat(first.bankCode()).isEqualTo("ICBC");
+        assertThat(first.bankInterface()).isEqualTo("ICBC_PAY");
+        assertThat(first.httpStatus()).isEqualTo(200);
+        assertThat(first.returnCode()).isEqualTo("000000");
+        assertThat(first.returnMsg()).isEqualTo("success");
+        assertThat(first.executionTime()).isEqualTo(120L);
+        assertThat(first.success()).isTrue();
+        assertThat(first.errorMessage()).isNull();
+        assertThat(first.createdAt()).isEqualTo(now.minusMinutes(5));
+        PaymentLogSummaryResponse second = page.items().get(1);
+        assertThat(second.id()).isEqualTo(7002L);
+        assertThat(second.refundOrderNo()).isEqualTo("RF-1");
+        assertThat(second.logType()).isEqualTo("REFUND_QUERY");
+        assertThat(second.returnCode()).isEqualTo("9999");
+        assertThat(second.success()).isFalse();
+        assertThat(second.errorMessage()).isEqualTo("timeout");
+    }
+
+    // ========== listPaymentLogs · 筛选映射（含 logType 多选）+ 页码换算 ==========
+
+    @Test
+    void given_paymentLogFiltersAndPageable_when_listPaymentLogs_then_passQueryAndConvertPage() {
+        when(paymentClient.listPaymentLogs(any(PaymentLogListWireRequest.class), anyInt(), anyInt()))
+                .thenReturn(new PageResponse<>(List.of(), 0L, 2, 20));
+
+        // logTypes 多选 + bankInterface/success/returnCode/createdAt 区间
+        PaymentLogQuery query = new PaymentLogQuery(
+                "PAY-1", "RF-1", List.of("PAYMENT_REQUEST", "PAYMENT_QUERY"),
+                "ICBC_PAY", true, "000000",
+                LocalDateTime.of(2026, 8, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
+
+        paymentAppService.listPaymentLogs(query, PageRequest.of(2, 20));
+
+        // query → wire 映射：筛选原样透传（含多选 logTypes）；Spring Pageable 0-based(page=2) → 客户端 1-based(page=3)
+        PaymentLogListWireRequest expectedWire = new PaymentLogListWireRequest(
+                "PAY-1", "RF-1", List.of("PAYMENT_REQUEST", "PAYMENT_QUERY"),
+                "ICBC_PAY", true, "000000",
+                LocalDateTime.of(2026, 8, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
+        verify(paymentClient).listPaymentLogs(eq(expectedWire), eq(3), eq(20));
+    }
+
+    // ========== listPaymentLogs · 错误翻译 ==========
+
+    @Test
+    void given_downstream500_when_listPaymentLogs_then_throwThirdPartyError() {
+        when(paymentClient.listPaymentLogs(any(PaymentLogListWireRequest.class), anyInt(), anyInt()))
+                .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.listPaymentLogs(
+                new PaymentLogQuery(null, null, null, null, null, null, null, null),
+                PageRequest.of(0, 20)))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
+    }
+
+    @Test
+    void given_downstream400_when_listPaymentLogs_then_throwBadRequest() {
+        // payment 400（筛选参数非法，如时间区间倒置）→ admin 400（BAD_REQUEST）
+        when(paymentClient.listPaymentLogs(any(PaymentLogListWireRequest.class), anyInt(), anyInt()))
+                .thenThrow(new OpenApiClientException(400, "{\"message\":\"bad range\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.listPaymentLogs(
+                new PaymentLogQuery(null, null, null, null, null, null, null, null),
+                PageRequest.of(0, 20)))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.BAD_REQUEST);
+    }
+
+    // ========== listOperationLogs · 订单操作记录（OperationLog）· DTO 映射 + 分页契约 ==========
+
+    @Test
+    void given_operationLogs_when_listOperationLogs_then_returnMappedPage() {
+        LocalDateTime now = LocalDateTime.now();
+        when(paymentClient.listOperationLogs(any(OperationLogListWireRequest.class), anyInt(), anyInt()))
+                .thenReturn(new PageResponse<>(List.of(
+                        new OperationLogWireResponse(8001L, "PAYMENT", "PAY-1", "NOTIFY_RESEND",
+                                1001L, "alice", "admin-console", "SUCCESS", "manual resend", now.minusMinutes(3)),
+                        new OperationLogWireResponse(8002L, "REFUND", "RF-1", "AUDIT_REJECT",
+                                null, null, "course-svc", "FAILED", null, now.minusMinutes(1))
+                ), 4L, 0, 20));
+
+        var page = paymentAppService.listOperationLogs(
+                new OperationLogQuery(null, null, null, null, null, null, null, null),
+                PageRequest.of(0, 20));
+
+        // 分页契约：total/page/size 沿用 payment 回显
+        assertThat(page.total()).isEqualTo(4L);
+        assertThat(page.page()).isEqualTo(0);
+        assertThat(page.size()).isEqualTo(20);
+        // DTO 映射：wire → response 逐字段（含操作者/结果字段组）
+        assertThat(page.items()).hasSize(2);
+        OperationLogSummaryResponse first = page.items().get(0);
+        assertThat(first.id()).isEqualTo(8001L);
+        assertThat(first.targetType()).isEqualTo("PAYMENT");
+        assertThat(first.targetNo()).isEqualTo("PAY-1");
+        assertThat(first.operation()).isEqualTo("NOTIFY_RESEND");
+        assertThat(first.operatorId()).isEqualTo(1001L);
+        assertThat(first.operatorName()).isEqualTo("alice");
+        assertThat(first.operatorSystem()).isEqualTo("admin-console");
+        assertThat(first.result()).isEqualTo("SUCCESS");
+        assertThat(first.remark()).isEqualTo("manual resend");
+        assertThat(first.createdAt()).isEqualTo(now.minusMinutes(3));
+        OperationLogSummaryResponse second = page.items().get(1);
+        assertThat(second.targetType()).isEqualTo("REFUND");
+        assertThat(second.operation()).isEqualTo("AUDIT_REJECT");
+        // 系统发起的动作：操作者字段为 null（union 另一半）
+        assertThat(second.operatorId()).isNull();
+        assertThat(second.operatorName()).isNull();
+        assertThat(second.operatorSystem()).isEqualTo("course-svc");
+        assertThat(second.result()).isEqualTo("FAILED");
+        assertThat(second.remark()).isNull();
+    }
+
+    // ========== listOperationLogs · 筛选映射 + 页码换算 ==========
+
+    @Test
+    void given_operationLogFiltersAndPageable_when_listOperationLogs_then_passQueryAndConvertPage() {
+        when(paymentClient.listOperationLogs(any(OperationLogListWireRequest.class), anyInt(), anyInt()))
+                .thenReturn(new PageResponse<>(List.of(), 0L, 2, 20));
+
+        OperationLogQuery query = new OperationLogQuery(
+                "PAYMENT", "PAY-1", "NOTIFY_RESEND", 1001L, "admin-console", "SUCCESS",
+                LocalDateTime.of(2026, 8, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
+
+        paymentAppService.listOperationLogs(query, PageRequest.of(2, 20));
+
+        // query → wire 映射：筛选原样透传；Spring Pageable 0-based(page=2) → 客户端 1-based(page=3)
+        OperationLogListWireRequest expectedWire = new OperationLogListWireRequest(
+                "PAYMENT", "PAY-1", "NOTIFY_RESEND", 1001L, "admin-console", "SUCCESS",
+                LocalDateTime.of(2026, 8, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
+        verify(paymentClient).listOperationLogs(eq(expectedWire), eq(3), eq(20));
+    }
+
+    // ========== listOperationLogs · 错误翻译 ==========
+
+    @Test
+    void given_downstream500_when_listOperationLogs_then_throwThirdPartyError() {
+        when(paymentClient.listOperationLogs(any(OperationLogListWireRequest.class), anyInt(), anyInt()))
+                .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.listOperationLogs(
+                new OperationLogQuery(null, null, null, null, null, null, null, null),
+                PageRequest.of(0, 20)))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
+    }
+
+    @Test
+    void given_downstream400_when_listOperationLogs_then_throwBadRequest() {
+        // payment 400（筛选参数非法，如时间区间倒置）→ admin 400（BAD_REQUEST）
+        when(paymentClient.listOperationLogs(any(OperationLogListWireRequest.class), anyInt(), anyInt()))
+                .thenThrow(new OpenApiClientException(400, "{\"message\":\"bad range\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.listOperationLogs(
+                new OperationLogQuery(null, null, null, null, null, null, null, null),
+                PageRequest.of(0, 20)))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.BAD_REQUEST);
     }
 
     // ========== getPaymentDetail · DTO 映射 ==========

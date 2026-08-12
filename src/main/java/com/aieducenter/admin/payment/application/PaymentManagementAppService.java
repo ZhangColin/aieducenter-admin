@@ -1,12 +1,16 @@
 package com.aieducenter.admin.payment.application;
 
 import com.aieducenter.admin.payment.application.dto.command.RefundAuditCommand;
+import com.aieducenter.admin.payment.application.dto.query.OperationLogQuery;
+import com.aieducenter.admin.payment.application.dto.query.PaymentLogQuery;
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
 import com.aieducenter.admin.payment.application.dto.response.GatewayHealthResponse;
+import com.aieducenter.admin.payment.application.dto.response.OperationLogSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.response.OperationsAuditResponse;
 import com.aieducenter.admin.payment.application.dto.response.OrderLifecycleResponse;
 import com.aieducenter.admin.payment.application.dto.response.OrderStatusDistributionResponse;
+import com.aieducenter.admin.payment.application.dto.response.PaymentLogSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOverviewResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
@@ -14,9 +18,13 @@ import com.aieducenter.admin.payment.application.dto.response.RefundOrderDetailR
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.wire.AuditRefundWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.GatewayHealthWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OperationLogListWireRequest;
+import com.aieducenter.admin.payment.application.dto.wire.OperationLogWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OperationsAuditWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OrderStatusDistributionWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentLogListWireRequest;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentLogWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
@@ -126,6 +134,85 @@ public class PaymentManagementAppService {
                 wire.businessSystemName(), wire.status(), wire.refundAmount(),
                 wire.auditType(), wire.auditorId(), wire.auditorName(),
                 wire.auditedAt(), wire.createdAt());
+    }
+
+    /**
+     * 分页查询通道交互日志（透传 payment）——PaymentLog：与银行/通道网关的机机交互留痕。
+     *
+     * <p>分页形状对齐 admin 现有列表端点（与 {@code /apps}、{@code /payments}、{@code /refunds} 同形）：
+     * {@code Pageable} 0-based 页码 +1 传入客户端（客户端约定 1-based），响应沿用 payment 回显的
+     * {@code total/page/size}。payment 的 {@code PaymentLog} 全字段为基础类型（无枚举语义），admin 原值透传。</p>
+     */
+    public PageResponse<PaymentLogSummaryResponse> listPaymentLogs(PaymentLogQuery query, Pageable pageable) {
+        // query（北向 controller 绑定）→ wire（出站载荷），与 list/listRefunds 把 query 拆成 wire 参数同位
+        var filter = new PaymentLogListWireRequest(
+                query.paymentOrderNo(), query.refundOrderNo(), query.logTypes(),
+                query.bankInterface(), query.success(), query.returnCode(),
+                query.createdAtFrom(), query.createdAtTo());
+        PageResponse<PaymentLogWireResponse> page;
+        try {
+            page = paymentClient.listPaymentLogs(
+                    filter,
+                    pageable.getPageNumber() + 1,   // Spring Pageable 0-based → 客户端 1-based
+                    pageable.getPageSize());
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+
+        var items = page.items().stream()
+                .map(PaymentManagementAppService::toPaymentLogSummary)
+                .toList();
+
+        return new PageResponse<>(items, page.total(), page.page(), page.size());
+    }
+
+    private static PaymentLogSummaryResponse toPaymentLogSummary(PaymentLogWireResponse wire) {
+        return new PaymentLogSummaryResponse(
+                wire.id(), wire.paymentOrderNo(), wire.refundOrderNo(),
+                wire.logType(), wire.bankCode(), wire.bankInterface(),
+                wire.httpStatus(), wire.returnCode(), wire.returnMsg(),
+                wire.executionTime(), wire.success(), wire.errorMessage(),
+                wire.createdAt());
+    }
+
+    /**
+     * 分页查询订单操作记录（透传 payment）——OperationLog：行为者对订单的操作留痕。
+     *
+     * <p>分页形状对齐 admin 现有列表端点（与 {@code /apps}、{@code /payments}、{@code /refunds} 同形）：
+     * {@code Pageable} 0-based 页码 +1 传入客户端（客户端约定 1-based），响应沿用 payment 回显的
+     * {@code total/page/size}。</p>
+     */
+    public PageResponse<OperationLogSummaryResponse> listOperationLogs(OperationLogQuery query, Pageable pageable) {
+        // query（北向 controller 绑定）→ wire（出站载荷），与 list/listRefunds 把 query 拆成 wire 参数同位。
+        // 注意时间区间字段名映射：北向 query 用 createdAtFrom/To（admin 统一命名），wire 用 createdAtStart/End
+        // （对齐 payment OperationLogQuery 的参数名特例，见 OperationLogListWireRequest javadoc）。
+        var filter = new OperationLogListWireRequest(
+                query.targetType(), query.targetNo(), query.operation(),
+                query.operatorId(), query.operatorSystem(), query.result(),
+                query.createdAtFrom(), query.createdAtTo());
+        PageResponse<OperationLogWireResponse> page;
+        try {
+            page = paymentClient.listOperationLogs(
+                    filter,
+                    pageable.getPageNumber() + 1,   // Spring Pageable 0-based → 客户端 1-based
+                    pageable.getPageSize());
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+
+        var items = page.items().stream()
+                .map(PaymentManagementAppService::toOperationLogSummary)
+                .toList();
+
+        return new PageResponse<>(items, page.total(), page.page(), page.size());
+    }
+
+    private static OperationLogSummaryResponse toOperationLogSummary(OperationLogWireResponse wire) {
+        return new OperationLogSummaryResponse(
+                wire.id(), wire.targetType(), wire.targetNo(),
+                wire.operation(), wire.operatorId(), wire.operatorName(),
+                wire.operatorSystem(), wire.result(), wire.remark(),
+                wire.createdAt());
     }
 
     /**

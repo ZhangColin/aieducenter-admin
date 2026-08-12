@@ -2,9 +2,13 @@ package com.aieducenter.admin.payment.infrastructure;
 
 import com.aieducenter.admin.payment.application.dto.wire.AuditRefundWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.GatewayHealthWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OperationLogListWireRequest;
+import com.aieducenter.admin.payment.application.dto.wire.OperationLogWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OperationsAuditWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OrderStatusDistributionWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentLogListWireRequest;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentLogWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
@@ -41,6 +45,12 @@ public class PaymentClient {
             new TypeReference<>() {};
 
     private static final TypeReference<PageResponse<RefundOrderWireResponse>> REFUND_PAGE_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<PageResponse<PaymentLogWireResponse>> PAYMENT_LOG_PAGE_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<PageResponse<OperationLogWireResponse>> OPERATION_LOG_PAGE_TYPEREF =
             new TypeReference<>() {};
 
     private static final TypeReference<ApiResponse<PaymentOrderDetailWireResponse>> PAYMENT_DETAIL_TYPEREF =
@@ -139,6 +149,63 @@ public class PaymentClient {
         appendParam(url, "createdAtTo", filter.createdAtTo());
         log.debug("PaymentClient.listRefunds: {}", url);
         return openApiClient.get(url.toString(), REFUND_PAGE_TYPEREF);
+    }
+
+    /**
+     * 分页查询通道交互日志（透传 payment）——PaymentLog：与银行/通道网关的机机交互留痕。
+     *
+     * @param filter wire 层过滤参数（由应用层从 {@code PaymentLogQuery} 映射而来）
+     * @param page   页码，<strong>1-based</strong>（应用层由 Spring {@code Pageable} 的 0-based 页码 +1 传入；
+     *               此处 {@code page - 1} 还原为 payment 端 Spring {@code Pageable} 的 0-based）
+     * @param size   每页大小
+     * @return payment 返回的分页结果
+     */
+    public PageResponse<PaymentLogWireResponse> listPaymentLogs(PaymentLogListWireRequest filter, int page, int size) {
+        // 入参 page 为 1-based，payment 端用 Spring Pageable 的 0-based，故 -1（与 listPayments/listRefunds 一致）。
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/v1/payment-logs?page=").append(page - 1)
+                .append("&size=").append(size);
+        appendParam(url, "paymentOrderNo", filter.paymentOrderNo());
+        appendParam(url, "refundOrderNo", filter.refundOrderNo());
+        if (filter.logTypes() != null && !filter.logTypes().isEmpty()) {
+            for (String logType : filter.logTypes()) {
+                appendParam(url, "logType", logType);
+            }
+        }
+        appendParam(url, "bankInterface", filter.bankInterface());
+        appendParam(url, "success", filter.success());
+        appendParam(url, "returnCode", filter.returnCode());
+        appendParam(url, "createdAtFrom", filter.createdAtFrom());
+        appendParam(url, "createdAtTo", filter.createdAtTo());
+        log.debug("PaymentClient.listPaymentLogs: {}", url);
+        return openApiClient.get(url.toString(), PAYMENT_LOG_PAGE_TYPEREF);
+    }
+
+    /**
+     * 分页查询订单操作记录（透传 payment）——OperationLog：行为者对订单的操作留痕。
+     *
+     * @param filter wire 层过滤参数（由应用层从 {@code OperationLogQuery} 映射而来）
+     * @param page   页码，<strong>1-based</strong>（应用层由 Spring {@code Pageable} 的 0-based 页码 +1 传入；
+     *               此处 {@code page - 1} 还原为 payment 端 Spring {@code Pageable} 的 0-based）
+     * @param size   每页大小
+     * @return payment 返回的分页结果
+     */
+    public PageResponse<OperationLogWireResponse> listOperationLogs(OperationLogListWireRequest filter, int page, int size) {
+        // 入参 page 为 1-based，payment 端用 Spring Pageable 的 0-based，故 -1（与 listPayments/listRefunds 一致）。
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/v1/operation-logs?page=").append(page - 1)
+                .append("&size=").append(size);
+        appendParam(url, "targetType", filter.targetType());
+        appendParam(url, "targetNo", filter.targetNo());
+        appendParam(url, "operation", filter.operation());
+        appendParam(url, "operatorId", filter.operatorId());
+        appendParam(url, "operatorSystem", filter.operatorSystem());
+        appendParam(url, "result", filter.result());
+        // payment OperationLogQuery 的时间区间参数名为 createdAtStart/End（非 From/To），按组件名绑定，须对齐
+        appendParam(url, "createdAtStart", filter.createdAtStart());
+        appendParam(url, "createdAtEnd", filter.createdAtEnd());
+        log.debug("PaymentClient.listOperationLogs: {}", url);
+        return openApiClient.get(url.toString(), OPERATION_LOG_PAGE_TYPEREF);
     }
 
     /**

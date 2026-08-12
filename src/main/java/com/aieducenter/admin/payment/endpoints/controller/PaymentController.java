@@ -3,12 +3,16 @@ package com.aieducenter.admin.payment.endpoints.controller;
 import com.aieducenter.admin.constants.AdminScopes;
 import com.aieducenter.admin.payment.application.PaymentManagementAppService;
 import com.aieducenter.admin.payment.application.dto.command.RefundAuditCommand;
+import com.aieducenter.admin.payment.application.dto.query.OperationLogQuery;
+import com.aieducenter.admin.payment.application.dto.query.PaymentLogQuery;
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
 import com.aieducenter.admin.payment.application.dto.response.GatewayHealthResponse;
+import com.aieducenter.admin.payment.application.dto.response.OperationLogSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.response.OperationsAuditResponse;
 import com.aieducenter.admin.payment.application.dto.response.OrderLifecycleResponse;
 import com.aieducenter.admin.payment.application.dto.response.OrderStatusDistributionResponse;
+import com.aieducenter.admin.payment.application.dto.response.PaymentLogSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOverviewResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
@@ -75,6 +79,34 @@ public class PaymentController {
             RefundOrderQuery query,
             @PageableDefault(size = 20) Pageable pageable) {
         return ApiResponse.ok(paymentAppService.listRefunds(query, pageable));
+    }
+
+    @GetMapping("/payment-logs")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:read",
+            name = "支付管理 / 查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "分页查询通道交互日志（PaymentLog：与银行/通道网关的机机交互留痕）")
+    public ApiResponse<PageResponse<PaymentLogSummaryResponse>> listPaymentLogs(
+            PaymentLogQuery query,
+            @PageableDefault(size = 20) Pageable pageable) {
+        return ApiResponse.ok(paymentAppService.listPaymentLogs(query, pageable));
+    }
+
+    @GetMapping("/operation-logs")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:read",
+            name = "支付管理 / 查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "分页查询订单操作记录（OperationLog：行为者对订单的操作留痕）")
+    public ApiResponse<PageResponse<OperationLogSummaryResponse>> listOperationLogs(
+            OperationLogQuery query,
+            @PageableDefault(size = 20) Pageable pageable) {
+        return ApiResponse.ok(paymentAppService.listOperationLogs(query, pageable));
     }
 
     @GetMapping("/payments/{paymentOrderNo}")
