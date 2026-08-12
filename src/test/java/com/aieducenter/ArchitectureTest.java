@@ -1,14 +1,15 @@
 package com.aieducenter;
 
-import com.cartisan.core.stereotype.Adapter;
-import com.cartisan.core.stereotype.Port;
-import com.cartisan.test.archunit.CartisanLayeringRules;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
 import com.tngtech.archunit.lang.ArchRule;
 
 import org.springframework.stereotype.Component;
+
+import com.cartisan.core.stereotype.Adapter;
+import com.cartisan.core.stereotype.Port;
+import com.cartisan.test.archunit.CartisanLayeringRules;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 
@@ -43,7 +44,9 @@ public class ArchitectureTest extends CartisanLayeringRules {
      * <p>{@code @Port}/{@code @Adapter} 是<strong>业务服务</strong>南向端口的 DDD 规范（Domain 定义 Port、
      * Infra 实现 Adapter，如 {@code PasswordEncoder}）；admin 是 BFF（调接口 + DTO 转换 + 聚合），
      * 出站 HTTP 客户端（{@code PaymentClient} / {@code AppRegistryClient}）为裸 {@code @Component}、
-     * 应用层直接注入。匹配 {@code "Client"} 后缀以避开 {@code BCryptPasswordEncoderAdapter} 等真端口适配器。</p>
+     * 应用层直接注入。匹配 {@code "Client"} 后缀以避开 {@code BCryptPasswordEncoderAdapter} 等真端口适配器；
+     * <strong>新增出站客户端须沿用 {@code *Client} 后缀</strong>——本规则按后缀匹配，非此后缀者不会被捕获
+     * （命名约定见 ADR-0007「后果」）。</p>
      */
     @ArchTest
     static final ArchRule outboundServiceClientsShouldBeComponents =
