@@ -51,6 +51,9 @@ admin:
   # payment 能力域地址（联调前默认值占位，真实部署经 PAYMENT_SERVICE_URL 覆盖）
   payment:
     base-url: ${PAYMENT_SERVICE_URL:http://localhost:8082}
+  # identity 能力域地址（联调前默认值占位，真实部署经 IDENTITY_SERVICE_URL 覆盖）
+  identity:
+    base-url: ${IDENTITY_SERVICE_URL:http://localhost:8083}
 
 management:
   endpoints:
