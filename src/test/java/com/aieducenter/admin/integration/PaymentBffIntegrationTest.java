@@ -53,6 +53,7 @@ import com.aieducenter.admin.payment.application.dto.wire.PaymentOverviewWireRes
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.ResendNotificationWireRequest;
 import com.aieducenter.admin.payment.infrastructure.PaymentClient;
 import com.cartisan.core.exception.BaseCodeMessage;
 import com.cartisan.core.exception.DomainException;
@@ -724,6 +725,87 @@ class PaymentBffIntegrationTest {
                 .thenThrow(new OpenApiClientException(500, "{\"message\":\"bank unreachable\"}"));
 
         assertThatThrownBy(() -> paymentAppService.queryPayment("PAY-1"))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
+    }
+
+    // ========== resendPaymentNotification · 操作者身份透传 + 不改订单状态（复用 T4 范式） ==========
+
+    @Test
+    void given_paymentNotificationResent_when_resendPaymentNotification_then_wireRequestCarriesOperatorAndReturnsMappedDetail() {
+        LocalDateTime now = LocalDateTime.now();
+        // payment 返回当前支付单聚合（状态未变——PAID），证明通知重发不改订单状态（payment ADR-0001）：
+        // admin 只透传 payment 的回显，admin 侧无从、也无需施加状态。
+        when(paymentClient.resendPaymentNotification(eq("PAY-1"), any(ResendNotificationWireRequest.class)))
+                .thenReturn(new PaymentOrderDetailWireResponse("PAY-1", "BIZ-1", "course-svc", "PAID",
+                        new BigDecimal("99.00"), "WECHAT", "WEB", "WECHAT_NATIVE",
+                        now, now.minusMinutes(5)));
+
+        PaymentOrderDetailResponse detail = paymentAppService.resendPaymentNotification("PAY-1", 1001L, "alice");
+
+        // 出站 wire 请求体：仅承载操作者身份（operatorId/operatorName），无前端决策字段（重发无 agreed）
+        ArgumentCaptor<ResendNotificationWireRequest> captor =
+                ArgumentCaptor.forClass(ResendNotificationWireRequest.class);
+        verify(paymentClient).resendPaymentNotification(eq("PAY-1"), captor.capture());
+        ResendNotificationWireRequest wire = captor.getValue();
+        assertThat(wire.operatorId()).isEqualTo(1001L);
+        assertThat(wire.operatorName()).isEqualTo("alice");
+
+        // 响应映射：当前支付单聚合（状态未变 PAID），复用 toPaymentDetail
+        assertThat(detail.paymentOrderNo()).isEqualTo("PAY-1");
+        assertThat(detail.status()).isEqualTo("PAID");
+        assertThat(detail.amount()).isEqualByComparingTo("99.00");
+        assertThat(detail.payMode()).isEqualTo("WECHAT");
+        assertThat(detail.paidAt()).isEqualTo(now);
+    }
+
+    // ========== resendRefundNotification · 操作者身份透传 + 不改订单状态 ==========
+
+    @Test
+    void given_refundNotificationResent_when_resendRefundNotification_then_wireRequestCarriesOperatorAndReturnsMappedDetail() {
+        LocalDateTime now = LocalDateTime.now();
+        // payment 返回当前退款单聚合（状态未变——SUCCESS），证明通知重发不改订单状态
+        when(paymentClient.resendRefundNotification(eq("RF-1"), any(ResendNotificationWireRequest.class)))
+                .thenReturn(new RefundOrderDetailWireResponse("RF-1", "PAY-1", "BIZ-1", "course-svc", "SUCCESS",
+                        new BigDecimal("99.00"), "MANUAL", 1001L, "alice",
+                        now.minusMinutes(3), now.minusMinutes(10)));
+
+        RefundOrderDetailResponse detail = paymentAppService.resendRefundNotification("RF-1", 2002L, "bob");
+
+        ArgumentCaptor<ResendNotificationWireRequest> captor =
+                ArgumentCaptor.forClass(ResendNotificationWireRequest.class);
+        verify(paymentClient).resendRefundNotification(eq("RF-1"), captor.capture());
+        ResendNotificationWireRequest wire = captor.getValue();
+        assertThat(wire.operatorId()).isEqualTo(2002L);
+        assertThat(wire.operatorName()).isEqualTo("bob");
+
+        // 响应映射：当前退款单聚合（状态未变 SUCCESS），复用 toRefundDetail
+        assertThat(detail.refundOrderNo()).isEqualTo("RF-1");
+        assertThat(detail.status()).isEqualTo("SUCCESS");
+        assertThat(detail.refundAmount()).isEqualByComparingTo("99.00");
+        assertThat(detail.auditType()).isEqualTo("MANUAL");
+    }
+
+    // ========== 通知重发 · 错误翻译 ==========
+
+    @Test
+    void given_downstream404_when_resendPaymentNotification_then_throwNotFound() {
+        // payment 404（订单不存在）→ admin 404
+        when(paymentClient.resendPaymentNotification(eq("NOPE"), any(ResendNotificationWireRequest.class)))
+                .thenThrow(new OpenApiClientException(404, "{\"message\":\"not found\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.resendPaymentNotification("NOPE", 1001L, "alice"))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.NOT_FOUND);
+    }
+
+    @Test
+    void given_downstream500_when_resendRefundNotification_then_throwThirdPartyError() {
+        // payment 5xx（业务系统不可达）→ 统一对外 THIRD_PARTY_ERROR（运营侧已认证，下游故障为第三方错误）
+        when(paymentClient.resendRefundNotification(eq("RF-1"), any(ResendNotificationWireRequest.class)))
+                .thenThrow(new OpenApiClientException(500, "{\"message\":\"biz system unreachable\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.resendRefundNotification("RF-1", 1001L, "alice"))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
     }

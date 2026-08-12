@@ -44,6 +44,7 @@ import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWire
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.ResendNotificationWireRequest;
 import com.aieducenter.admin.payment.infrastructure.PaymentClient;
 import com.cartisan.web.response.PageResponse;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -75,6 +76,7 @@ class PaymentRbacEnforcementIntegrationTest {
     private static final String PERMISSION_CODE = "admin:payment:read";
     private static final String AUDIT_PERMISSION_CODE = "admin:payment:refund:audit";
     private static final String BANK_QUERY_PERMISSION_CODE = "admin:payment:bank:query";
+    private static final String NOTIFICATION_RESEND_PERMISSION_CODE = "admin:payment:notification:resend";
 
     /** 挂 {@code admin:payment:read} 的全部端点（列表 + 详情 + 生命周期 + 日志）——逐一验证三态。 */
     private static final List<String> ENDPOINTS = List.of(
@@ -103,8 +105,11 @@ class PaymentRbacEnforcementIntegrationTest {
     private String usernameWithoutPermission;
     private String usernameWithAuditPermission;
     private String usernameWithBankQueryPermission;
+    private String usernameWithNotificationPermission;
     private Long auditUserId;
     private String auditUserNickname;
+    private Long notificationUserId;
+    private String notificationUserNickname;
 
     @Autowired
     PaymentRbacEnforcementIntegrationTest(
@@ -127,6 +132,7 @@ class PaymentRbacEnforcementIntegrationTest {
         usernameWithoutPermission = "paynone" + suffix;
         usernameWithAuditPermission = "payauditor" + suffix;
         usernameWithBankQueryPermission = "paybankq" + suffix;
+        usernameWithNotificationPermission = "paynotify" + suffix;
 
         Long roleId = roleAppService.create(
                 new CreateRoleCommand("支付运营_" + suffix, "PAYOP_" + suffix, "仅有支付查看权限", 20, null));
@@ -156,6 +162,16 @@ class PaymentRbacEnforcementIntegrationTest {
                 new CreateAdminUserCommand(usernameWithBankQueryPermission, PASSWORD, "查行运营_" + suffix, null, null, null));
         userAppService.assignRoles(bankQueryUserId, new AssignRolesCommand(List.of(bankQueryRoleId)));
 
+        // 通知重发专用运营（仅有 admin:payment:notification:resend）——身份透传 200 用例用其 id/昵称做断言
+        Long notificationRoleId = roleAppService.create(
+                new CreateRoleCommand("通知重发_" + suffix, "PAYNOTIFY_" + suffix, "仅有通知重发权限", 50, null));
+        roleAppService.assignPermissions(notificationRoleId,
+                new AssignPermissionsCommand(List.of(NOTIFICATION_RESEND_PERMISSION_CODE)));
+        notificationUserNickname = "通知重发员_" + suffix;
+        notificationUserId = userAppService.create(
+                new CreateAdminUserCommand(usernameWithNotificationPermission, PASSWORD, notificationUserNickname, null, null, null));
+        userAppService.assignRoles(notificationUserId, new AssignRolesCommand(List.of(notificationRoleId)));
+
         // 200 用例：payment 下游 mock 为空页/空时间线，证明通路接通（不依赖真实 payment 服务）
         when(paymentClient.listPayments(any(), anyInt(), anyInt()))
                 .thenReturn(new PageResponse<PaymentOrderWireResponse>(List.of(), 0L, 0, 20));
@@ -180,6 +196,13 @@ class PaymentRbacEnforcementIntegrationTest {
         // 主动查行 200 用例：mock 返回查询后支付单（与详情同形），证明写通路接通
         when(paymentClient.queryPayment("PAY-1")).thenReturn(
                 new PaymentOrderDetailWireResponse("PAY-1", null, null, "PAID",
+                        null, null, null, null, null, null));
+        // 通知重发 200 用例：mock 返回当前订单聚合（状态未变），证明写通路接通；出站 wire 请求体由 ArgumentCaptor 抓取
+        when(paymentClient.resendPaymentNotification(eq("PAY-1"), any(ResendNotificationWireRequest.class))).thenReturn(
+                new PaymentOrderDetailWireResponse("PAY-1", null, null, "PAID",
+                        null, null, null, null, null, null));
+        when(paymentClient.resendRefundNotification(eq("RF-1"), any(ResendNotificationWireRequest.class))).thenReturn(
+                new RefundOrderDetailWireResponse("RF-1", null, null, null, "SUCCESS",
                         null, null, null, null, null, null));
     }
 
@@ -281,6 +304,73 @@ class PaymentRbacEnforcementIntegrationTest {
         ResponseEntity<String> response = postWithToken(
                 "/api/admin/payment/payments/PAY-1/query", null, "");
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    // ========== 通知重发（POST /payments/{no}/notifications/resend、/refunds/{no}/notifications/resend）· 权限三态 + 操作者身份透传 ==========
+
+    @Test
+    @DisplayName("非超管且拥有 admin:payment:notification:resend：重发支付通知返回 200，且出站请求体含登录用户身份")
+    void given_nonSuperAdminWithNotificationPermission_when_resendPayment_then_200_andWireRequestCarriesRequestContextIdentity() {
+        String token = login(usernameWithNotificationPermission);
+        ResponseEntity<String> response = postWithToken(
+                "/api/admin/payment/payments/PAY-1/notifications/resend", token, "");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // 操作者身份从 RequestContext 透传到 payment 请求体（零 Sa-Token/零 DB/零新注解）：
+        // operatorId == 登录用户 id，operatorName == 登录用户昵称（重发无前端决策，body 仅承载服务端注入的身份）。
+        ArgumentCaptor<ResendNotificationWireRequest> captor =
+                ArgumentCaptor.forClass(ResendNotificationWireRequest.class);
+        verify(paymentClient).resendPaymentNotification(eq("PAY-1"), captor.capture());
+        ResendNotificationWireRequest wire = captor.getValue();
+        assertThat(wire.operatorId()).isEqualTo(notificationUserId);
+        assertThat(wire.operatorName()).isEqualTo(notificationUserNickname);
+    }
+
+    @Test
+    @DisplayName("非超管且拥有 admin:payment:notification:resend：重发退款通知返回 200，且出站请求体含登录用户身份")
+    void given_nonSuperAdminWithNotificationPermission_when_resendRefund_then_200_andWireRequestCarriesRequestContextIdentity() {
+        String token = login(usernameWithNotificationPermission);
+        ResponseEntity<String> response = postWithToken(
+                "/api/admin/payment/refunds/RF-1/notifications/resend", token, "");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        ArgumentCaptor<ResendNotificationWireRequest> captor =
+                ArgumentCaptor.forClass(ResendNotificationWireRequest.class);
+        verify(paymentClient).resendRefundNotification(eq("RF-1"), captor.capture());
+        ResendNotificationWireRequest wire = captor.getValue();
+        assertThat(wire.operatorId()).isEqualTo(notificationUserId);
+        assertThat(wire.operatorName()).isEqualTo(notificationUserNickname);
+    }
+
+    @Test
+    @DisplayName("仅有 admin:payment:read（无 notification:resend）→ 重发支付通知 403（read ≠ notification:resend）")
+    void given_nonSuperAdminWithReadOnly_when_resendPayment_then_403() {
+        String token = login(usernameWithPermission);
+        ResponseEntity<String> response = postWithToken(
+                "/api/admin/payment/payments/PAY-1/notifications/resend", token, "");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("仅有 admin:payment:read（无 notification:resend）→ 重发退款通知 403")
+    void given_nonSuperAdminWithReadOnly_when_resendRefund_then_403() {
+        String token = login(usernameWithPermission);
+        ResponseEntity<String> response = postWithToken(
+                "/api/admin/payment/refunds/RF-1/notifications/resend", token, "");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("未登录重发通知返回 401")
+    void given_unauthenticated_when_resend_then_401() {
+        ResponseEntity<String> paymentResponse = postWithToken(
+                "/api/admin/payment/payments/PAY-1/notifications/resend", null, "");
+        ResponseEntity<String> refundResponse = postWithToken(
+                "/api/admin/payment/refunds/RF-1/notifications/resend", null, "");
+        assertThat(paymentResponse.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(refundResponse.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     private String login(String username) {

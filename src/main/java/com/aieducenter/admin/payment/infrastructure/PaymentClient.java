@@ -16,6 +16,7 @@ import com.aieducenter.admin.payment.application.dto.wire.PaymentOverviewWireRes
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.ResendNotificationWireRequest;
 import com.cartisan.openapi.client.OpenApiClient;
 import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
@@ -273,6 +274,48 @@ public class PaymentClient {
         log.debug("PaymentClient.queryPayment: {}", url);
         // 无请求体：框架 OpenApiClient.post 对 null body 发空 body（POST 仍带 application/json），payment 端只读路径参数
         ApiResponse<PaymentOrderDetailWireResponse> resp = openApiClient.post(url, null, PAYMENT_DETAIL_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 重发支付结果通知（透传 payment）——补发漏投的结果通知到业务系统，<strong>不改订单状态</strong>。
+     *
+     * <p>payment {@code POST /api/v1/payments/{paymentOrderNo}/notifications/resend} 取路径参数 + 操作者身份
+     * （{@link ResendNotificationWireRequest}，由应用层从 {@code RequestContext} 注入），重发投递并落
+     * {@code OperationLog}（{@code operation=NOTIFY_RESEND}）；返回当前支付单聚合（与 {@link #getPayment}
+     * 详情同形 {@code PaymentOrderResponse}，状态未变）。频控/投递重试/审计归属 payment 侧。</p>
+     *
+     * @param paymentOrderNo 支付订单号
+     * @param request        wire 层操作者身份载荷（operatorId/operatorName）
+     * @return payment 返回的当前支付单聚合（与详情同形，状态未变）
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 404（订单不存在）、5xx（业务系统不可达）等透传，由应用层翻译
+     */
+    public PaymentOrderDetailWireResponse resendPaymentNotification(
+            String paymentOrderNo, ResendNotificationWireRequest request) {
+        String url = baseUrl + "/api/v1/payments/" + encode(paymentOrderNo) + "/notifications/resend";
+        log.debug("PaymentClient.resendPaymentNotification: {}", url);
+        ApiResponse<PaymentOrderDetailWireResponse> resp = openApiClient.post(url, request, PAYMENT_DETAIL_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 重发退款结果通知（透传 payment）——补发漏投的结果通知到业务系统，<strong>不改订单状态</strong>。
+     *
+     * <p>payment {@code POST /api/v1/refunds/{refundOrderNo}/notifications/resend} 取路径参数 + 操作者身份
+     * （{@link ResendNotificationWireRequest}，由应用层从 {@code RequestContext} 注入），重发投递并落
+     * {@code OperationLog}（{@code operation=NOTIFY_RESEND}）；返回当前退款单聚合（与 {@link #getRefund}
+     * 详情同形，状态未变）。频控/投递重试/审计归属 payment 侧。</p>
+     *
+     * @param refundOrderNo 退款订单号
+     * @param request       wire 层操作者身份载荷（operatorId/operatorName）
+     * @return payment 返回的当前退款单聚合（与详情同形，状态未变）
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 404（订单不存在）、5xx（业务系统不可达）等透传，由应用层翻译
+     */
+    public RefundOrderDetailWireResponse resendRefundNotification(
+            String refundOrderNo, ResendNotificationWireRequest request) {
+        String url = baseUrl + "/api/v1/refunds/" + encode(refundOrderNo) + "/notifications/resend";
+        log.debug("PaymentClient.resendRefundNotification: {}", url);
+        ApiResponse<RefundOrderDetailWireResponse> resp = openApiClient.post(url, request, REFUND_DETAIL_TYPEREF);
         return resp.data();
     }
 

@@ -227,4 +227,37 @@ public class PaymentController {
         // 触发银行查询 + 本地状态对齐（频控/审计归 payment）。admin 仅按本权限码放行。
         return ApiResponse.ok(paymentAppService.queryPayment(paymentOrderNo));
     }
+
+    @PostMapping("/payments/{paymentOrderNo}/notifications/resend")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:notification:resend",
+            name = "支付管理 / 通知重发",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "重发支付结果通知——补发漏投到业务系统，不改订单状态；操作者身份从 RequestContext 透传")
+    public ApiResponse<PaymentOrderDetailResponse> resendPaymentNotification(
+            @PathVariable String paymentOrderNo) {
+        // 复用 T4 操作者身份透传范式：前端不发请求体（重发无决策意图），操作者身份由服务端从
+        // RequestContext 注入（operatorId/operatorName 不可伪造）；payment 落 OperationLog（NOTIFY_RESEND），
+        // 不改订单状态（补发投递，非施加状态——payment ADR-0001）。
+        return ApiResponse.ok(paymentAppService.resendPaymentNotification(
+                paymentOrderNo, RequestContext.getUserId(), RequestContext.getUserName()));
+    }
+
+    @PostMapping("/refunds/{refundOrderNo}/notifications/resend")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:notification:resend",
+            name = "支付管理 / 通知重发",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "重发退款结果通知——补发漏投到业务系统，不改订单状态；操作者身份从 RequestContext 透传")
+    public ApiResponse<RefundOrderDetailResponse> resendRefundNotification(
+            @PathVariable String refundOrderNo) {
+        // 复用 T4 操作者身份透传范式：操作者身份由服务端从 RequestContext 注入；payment 落
+        // OperationLog（NOTIFY_RESEND），不改订单状态。两个重发端点共用同一权限码。
+        return ApiResponse.ok(paymentAppService.resendRefundNotification(
+                refundOrderNo, RequestContext.getUserId(), RequestContext.getUserName()));
+    }
 }

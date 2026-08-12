@@ -32,6 +32,7 @@ import com.aieducenter.admin.payment.application.dto.wire.PaymentOverviewWireRes
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.ResendNotificationWireRequest;
 import com.aieducenter.admin.payment.infrastructure.PaymentClient;
 import com.cartisan.core.exception.BaseCodeMessage;
 import com.cartisan.core.exception.DomainException;
@@ -315,6 +316,65 @@ public class PaymentManagementAppService {
             throw translatePaymentError(e);
         }
         return toPaymentDetail(wire);
+    }
+
+    /**
+     * 重发支付结果通知（透传 payment）——补发漏投的结果通知到业务系统，<strong>不改订单状态</strong>（payment ADR-0001）。
+     *
+     * <p>复用 T4 退款审核的操作者身份透传范式：操作者身份（{@code operatorId} / {@code operatorName}）由 controller
+     * 从 {@code RequestContext} 读取后显式传入——admin 应用层<strong>不</strong>读 {@code RequestContext}、不触 Sa-Token/DB，
+     * 身份来源对方法签名可见、可测（零 Sa-Token/零 DB/零新注解）。前端<strong>不</strong>发送请求体（重发无决策意图，
+     * 不像退款审核带 {@code agreed}），仅服务端把身份拼成 payment 的 wire 载荷。payment 据此落 {@code OperationLog}
+     * （{@code operation=NOTIFY_RESEND}），admin 不本地记账。</p>
+     *
+     * <p>错误翻译（复用 {@link #translatePaymentError}）：payment 404（订单不存在）⟹
+     * {@link BaseCodeMessage#NOT_FOUND}；payment 5xx（业务系统不可达）⟹
+     * {@link BaseCodeMessage#THIRD_PARTY_ERROR}。</p>
+     *
+     * @param paymentOrderNo 支付订单号
+     * @param operatorId     操作者 ID（RequestContext.getUserId()）
+     * @param operatorName   操作者姓名（RequestContext.getUserName()）
+     * @return payment 返回的当前支付单聚合（与详情同形，状态未变）
+     */
+    public PaymentOrderDetailResponse resendPaymentNotification(String paymentOrderNo,
+                                                                 Long operatorId, String operatorName) {
+        // 操作者身份来自 RequestContext——拼成 payment 的 wire 载荷（无前端决策，body 仅承载身份）
+        var wireRequest = new ResendNotificationWireRequest(operatorId, operatorName);
+        PaymentOrderDetailWireResponse wire;
+        try {
+            wire = paymentClient.resendPaymentNotification(paymentOrderNo, wireRequest);
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+        return toPaymentDetail(wire);
+    }
+
+    /**
+     * 重发退款结果通知（透传 payment）——补发漏投的结果通知到业务系统，<strong>不改订单状态</strong>（payment ADR-0001）。
+     *
+     * <p>复用 T4 退款审核的操作者身份透传范式：操作者身份（{@code operatorId} / {@code operatorName}）由 controller
+     * 从 {@code RequestContext} 读取后显式传入（零 Sa-Token/零 DB/零新注解）。前端不发送请求体，仅服务端把身份拼成
+     * payment 的 wire 载荷。payment 据此落 {@code OperationLog}（{@code operation=NOTIFY_RESEND}），admin 不本地记账。</p>
+     *
+     * <p>错误翻译（复用 {@link #translatePaymentError}）：payment 404（订单不存在）⟹
+     * {@link BaseCodeMessage#NOT_FOUND}；payment 5xx（业务系统不可达）⟹
+     * {@link BaseCodeMessage#THIRD_PARTY_ERROR}。</p>
+     *
+     * @param refundOrderNo 退款订单号
+     * @param operatorId    操作者 ID（RequestContext.getUserId()）
+     * @param operatorName  操作者姓名（RequestContext.getUserName()）
+     * @return payment 返回的当前退款单聚合（与详情同形，状态未变）
+     */
+    public RefundOrderDetailResponse resendRefundNotification(String refundOrderNo,
+                                                               Long operatorId, String operatorName) {
+        var wireRequest = new ResendNotificationWireRequest(operatorId, operatorName);
+        RefundOrderDetailWireResponse wire;
+        try {
+            wire = paymentClient.resendRefundNotification(refundOrderNo, wireRequest);
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+        return toRefundDetail(wire);
     }
 
     /**
