@@ -24,16 +24,24 @@ import com.aieducenter.admin.payment.application.PaymentManagementAppService;
 import com.aieducenter.admin.payment.application.dto.command.RefundAuditCommand;
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
+import com.aieducenter.admin.payment.application.dto.response.GatewayHealthResponse;
+import com.aieducenter.admin.payment.application.dto.response.OperationsAuditResponse;
 import com.aieducenter.admin.payment.application.dto.response.OrderLifecycleResponse;
+import com.aieducenter.admin.payment.application.dto.response.OrderStatusDistributionResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderDetailResponse;
+import com.aieducenter.admin.payment.application.dto.response.PaymentOverviewResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.wire.AuditRefundWireRequest;
+import com.aieducenter.admin.payment.application.dto.wire.GatewayHealthWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OperationsAuditWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OrderStatusDistributionWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentOverviewWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
@@ -472,5 +480,178 @@ class PaymentBffIntegrationTest {
                 "RF-DONE", new RefundAuditCommand(true, null), 1001L, "alice"))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.BAD_REQUEST);
+    }
+
+    // ========== getPaymentOverview · tier-1 统计透传契约（顶层 + 趋势分桶映射、不改序） ==========
+
+    @Test
+    void given_overviewWithTrend_when_getPaymentOverview_then_mapTopLevelAndBucketsPreserveOrder() {
+        LocalDateTime b1 = LocalDateTime.of(2026, 8, 11, 0, 0);
+        LocalDateTime b2 = LocalDateTime.of(2026, 8, 12, 0, 0);
+        // 故意让 payment 回传顺序与时间序相反（b2 在前、b1 在后）——证明 admin 透传不重排：
+        // 聚合/排序归 payment（spec「仪表盘」），admin 只 map 不 sort。
+        when(paymentClient.getPaymentOverview()).thenReturn(new PaymentOverviewWireResponse(
+                1200L, new BigDecimal("98000.00"),
+                30L, new BigDecimal("2400.00"),
+                new BigDecimal("0.9850"), new BigDecimal("95600.00"),
+                List.of(
+                        new PaymentOverviewWireResponse.TrendBucketWireResponse(
+                                b2, 20L, new BigDecimal("1600.00"), 1L, new BigDecimal("80.00")),
+                        new PaymentOverviewWireResponse.TrendBucketWireResponse(
+                                b1, 18L, new BigDecimal("1440.00"), 0L, new BigDecimal("0.00")))));
+
+        PaymentOverviewResponse overview = paymentAppService.getPaymentOverview();
+
+        // 顶层快照逐字段映射
+        assertThat(overview.paymentCount()).isEqualTo(1200L);
+        assertThat(overview.paymentAmount()).isEqualByComparingTo("98000.00");
+        assertThat(overview.refundCount()).isEqualTo(30L);
+        assertThat(overview.refundAmount()).isEqualByComparingTo("2400.00");
+        assertThat(overview.successRate()).isEqualByComparingTo("0.9850");
+        assertThat(overview.netAmount()).isEqualByComparingTo("95600.00");
+        // 趋势分桶顺序原样保留（payment 给 b2→b1，admin 不重排为 b1→b2）
+        assertThat(overview.trend()).hasSize(2);
+        assertThat(overview.trend().get(0).bucket()).isEqualTo(b2);
+        assertThat(overview.trend().get(0).paymentCount()).isEqualTo(20L);
+        assertThat(overview.trend().get(0).refundAmount()).isEqualByComparingTo("80.00");
+        assertThat(overview.trend().get(1).bucket()).isEqualTo(b1);
+        assertThat(overview.trend().get(1).refundCount()).isZero();
+    }
+
+    @Test
+    void given_overviewDownstream500_when_getPaymentOverview_then_throwThirdPartyError() {
+        // payment 5xx（内部错误）→ 统一对外 THIRD_PARTY_ERROR（运营侧已认证，下游故障为第三方错误）
+        when(paymentClient.getPaymentOverview())
+                .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.getPaymentOverview())
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
+    }
+
+    // ========== getOrderStatusDistribution · tier-1 统计透传契约 ==========
+
+    @Test
+    void given_statusDistribution_when_getOrderStatusDistribution_then_mapBucketsAndBacklog() {
+        when(paymentClient.getOrderStatusDistribution()).thenReturn(new OrderStatusDistributionWireResponse(
+                List.of(new OrderStatusDistributionWireResponse.StatusBucketWireResponse(
+                                "PAID", 800L, new BigDecimal("64000.00")),
+                        new OrderStatusDistributionWireResponse.StatusBucketWireResponse(
+                                "PENDING", 50L, new BigDecimal("4000.00"))),
+                List.of(new OrderStatusDistributionWireResponse.StatusBucketWireResponse(
+                                "SUCCESS", 25L, new BigDecimal("2000.00")),
+                        new OrderStatusDistributionWireResponse.StatusBucketWireResponse(
+                                "PENDING", 5L, new BigDecimal("400.00"))),
+                5L));
+
+        OrderStatusDistributionResponse dist = paymentAppService.getOrderStatusDistribution();
+
+        // 支付状态分布映射 + 顺序保留
+        assertThat(dist.paymentStatuses()).hasSize(2);
+        assertThat(dist.paymentStatuses().get(0).status()).isEqualTo("PAID");
+        assertThat(dist.paymentStatuses().get(0).count()).isEqualTo(800L);
+        assertThat(dist.paymentStatuses().get(0).amount()).isEqualByComparingTo("64000.00");
+        assertThat(dist.paymentStatuses().get(1).status()).isEqualTo("PENDING");
+        // 退款状态分布映射
+        assertThat(dist.refundStatuses()).hasSize(2);
+        assertThat(dist.refundStatuses().get(0).status()).isEqualTo("SUCCESS");
+        assertThat(dist.refundStatuses().get(1).status()).isEqualTo("PENDING");
+        assertThat(dist.refundStatuses().get(1).amount()).isEqualByComparingTo("400.00");
+        // 退款待审核积压（运营关注的积压 KPI，单独 roll-up）
+        assertThat(dist.refundPendingAuditCount()).isEqualTo(5L);
+    }
+
+    @Test
+    void given_statusDistributionDownstream400_when_getOrderStatusDistribution_then_throwBadRequest() {
+        // payment 400（统计窗口参数非法）→ admin 400（BAD_REQUEST）
+        when(paymentClient.getOrderStatusDistribution())
+                .thenThrow(new OpenApiClientException(400, "{\"message\":\"bad window\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.getOrderStatusDistribution())
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.BAD_REQUEST);
+    }
+
+    // ========== getGatewayHealth · tier-1 统计透传契约（银行接口 + 返回码分布） ==========
+
+    @Test
+    void given_gatewayHealth_when_getGatewayHealth_then_mapBankInterfacesAndReturnCodes() {
+        when(paymentClient.getGatewayHealth()).thenReturn(new GatewayHealthWireResponse(List.of(
+                new GatewayHealthWireResponse.BankInterfaceStatWireResponse(
+                        "ICBC_PAY", 1000L, 980L, new BigDecimal("0.98"), 120L,
+                        List.of(
+                                new GatewayHealthWireResponse.BankInterfaceStatWireResponse.ReturnCodeStatWireResponse(
+                                        "000000", 980L),
+                                new GatewayHealthWireResponse.BankInterfaceStatWireResponse.ReturnCodeStatWireResponse(
+                                        "9999", 20L))),
+                new GatewayHealthWireResponse.BankInterfaceStatWireResponse(
+                        "WECHAT_QUERY", 500L, 495L, new BigDecimal("0.99"), 80L,
+                        List.of()))));
+
+        GatewayHealthResponse health = paymentAppService.getGatewayHealth();
+
+        assertThat(health.bankInterfaces()).hasSize(2);
+        GatewayHealthResponse.BankInterfaceStat first = health.bankInterfaces().get(0);
+        assertThat(first.bankInterface()).isEqualTo("ICBC_PAY");
+        assertThat(first.callCount()).isEqualTo(1000L);
+        assertThat(first.successCount()).isEqualTo(980L);
+        assertThat(first.successRate()).isEqualByComparingTo("0.98");
+        assertThat(first.avgExecutionTime()).isEqualTo(120L);
+        // 返回码分布映射 + 顺序保留
+        assertThat(first.returnCodes()).hasSize(2);
+        assertThat(first.returnCodes().get(0).returnCode()).isEqualTo("000000");
+        assertThat(first.returnCodes().get(0).count()).isEqualTo(980L);
+        assertThat(first.returnCodes().get(1).returnCode()).isEqualTo("9999");
+        // 第二个接口返回码为空列表（admin 透传空、非 null）
+        assertThat(health.bankInterfaces().get(1).bankInterface()).isEqualTo("WECHAT_QUERY");
+        assertThat(health.bankInterfaces().get(1).returnCodes()).isEmpty();
+    }
+
+    @Test
+    void given_gatewayHealthDownstream500_when_getGatewayHealth_then_throwThirdPartyError() {
+        when(paymentClient.getGatewayHealth())
+                .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.getGatewayHealth())
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
+    }
+
+    // ========== getOperationsAudit · tier-1 统计透传契约（顶层 + 按审核人聚合） ==========
+
+    @Test
+    void given_operationsAudit_when_getOperationsAudit_then_mapTopLevelAndAuditors() {
+        when(paymentClient.getOperationsAudit()).thenReturn(new OperationsAuditWireResponse(
+                60L, new BigDecimal("0.90"), 1800L,
+                List.of(
+                        new OperationsAuditWireResponse.AuditorStatWireResponse(
+                                1001L, "alice", 40L, 38L, new BigDecimal("0.95"), 1500L),
+                        new OperationsAuditWireResponse.AuditorStatWireResponse(
+                                2002L, "bob", 20L, 16L, new BigDecimal("0.80"), 2100L))));
+
+        OperationsAuditResponse audit = paymentAppService.getOperationsAudit();
+
+        // 顶层映射
+        assertThat(audit.auditCount()).isEqualTo(60L);
+        assertThat(audit.approvalRate()).isEqualByComparingTo("0.90");
+        assertThat(audit.avgAuditDurationSeconds()).isEqualTo(1800L);
+        // 按审核人聚合映射 + 顺序保留
+        assertThat(audit.auditors()).hasSize(2);
+        assertThat(audit.auditors().get(0).auditorId()).isEqualTo(1001L);
+        assertThat(audit.auditors().get(0).auditorName()).isEqualTo("alice");
+        assertThat(audit.auditors().get(0).approvedCount()).isEqualTo(38L);
+        assertThat(audit.auditors().get(0).approvalRate()).isEqualByComparingTo("0.95");
+        assertThat(audit.auditors().get(1).auditorName()).isEqualTo("bob");
+        assertThat(audit.auditors().get(1).approvalRate()).isEqualByComparingTo("0.80");
+    }
+
+    @Test
+    void given_operationsAuditDownstream500_when_getOperationsAudit_then_throwThirdPartyError() {
+        when(paymentClient.getOperationsAudit())
+                .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.getOperationsAudit())
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
     }
 }

@@ -5,8 +5,12 @@ import com.aieducenter.admin.payment.application.PaymentManagementAppService;
 import com.aieducenter.admin.payment.application.dto.command.RefundAuditCommand;
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
+import com.aieducenter.admin.payment.application.dto.response.GatewayHealthResponse;
+import com.aieducenter.admin.payment.application.dto.response.OperationsAuditResponse;
 import com.aieducenter.admin.payment.application.dto.response.OrderLifecycleResponse;
+import com.aieducenter.admin.payment.application.dto.response.OrderStatusDistributionResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderDetailResponse;
+import com.aieducenter.admin.payment.application.dto.response.PaymentOverviewResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummaryResponse;
@@ -110,6 +114,54 @@ public class PaymentController {
     public ApiResponse<OrderLifecycleResponse> getLifecycle(
             @PathVariable String orderNo) {
         return ApiResponse.ok(paymentAppService.getLifecycle(orderNo));
+    }
+
+    @GetMapping("/stats/payments/overview")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:read",
+            name = "支付管理 / 查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "支付总览统计（tier-1）——透传 payment：笔数·金额·成功率·净额 + 趋势")
+    public ApiResponse<PaymentOverviewResponse> getPaymentOverview() {
+        return ApiResponse.ok(paymentAppService.getPaymentOverview());
+    }
+
+    @GetMapping("/stats/orders/status-distribution")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:read",
+            name = "支付管理 / 查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "订单状态分布统计（tier-1）——透传 payment：各状态在途笔数·金额 + 退款待审核积压")
+    public ApiResponse<OrderStatusDistributionResponse> getOrderStatusDistribution() {
+        return ApiResponse.ok(paymentAppService.getOrderStatusDistribution());
+    }
+
+    @GetMapping("/stats/gateway/health")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:read",
+            name = "支付管理 / 查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "通道健康统计（tier-1）——透传 payment：各银行接口调用次数·成功率·平均耗时·返回码分布")
+    public ApiResponse<GatewayHealthResponse> getGatewayHealth() {
+        return ApiResponse.ok(paymentAppService.getGatewayHealth());
+    }
+
+    @GetMapping("/stats/operations/audit")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:read",
+            name = "支付管理 / 查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "审核统计（tier-1）——透传 payment：审核笔数·通过率·平均审核时长 + 按审核人聚合")
+    public ApiResponse<OperationsAuditResponse> getOperationsAudit() {
+        return ApiResponse.ok(paymentAppService.getOperationsAudit());
     }
 
     @PostMapping("/refunds/{refundOrderNo}/audit")

@@ -1,10 +1,14 @@
 package com.aieducenter.admin.payment.infrastructure;
 
 import com.aieducenter.admin.payment.application.dto.wire.AuditRefundWireRequest;
+import com.aieducenter.admin.payment.application.dto.wire.GatewayHealthWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OperationsAuditWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OrderStatusDistributionWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentOverviewWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
@@ -46,6 +50,18 @@ public class PaymentClient {
             new TypeReference<>() {};
 
     private static final TypeReference<ApiResponse<OrderLifecycleWireResponse>> LIFECYCLE_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<PaymentOverviewWireResponse>> PAYMENT_OVERVIEW_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<OrderStatusDistributionWireResponse>> STATUS_DISTRIBUTION_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<GatewayHealthWireResponse>> GATEWAY_HEALTH_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<OperationsAuditWireResponse>> OPERATIONS_AUDIT_TYPEREF =
             new TypeReference<>() {};
 
     private final OpenApiClient openApiClient;
@@ -187,6 +203,66 @@ public class PaymentClient {
         String url = baseUrl + "/api/v1/orders/" + encode(orderNo) + "/lifecycle";
         log.debug("PaymentClient.getLifecycle: {}", url);
         ApiResponse<OrderLifecycleWireResponse> resp = openApiClient.get(url, LIFECYCLE_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 查询支付总览统计（透传 payment）——支付/退款笔数·金额·成功率·净额 + 按时间分桶趋势。
+     *
+     * <p>一档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     *
+     * @return payment 返回的支付总览统计
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
+     */
+    public PaymentOverviewWireResponse getPaymentOverview() {
+        String url = baseUrl + "/api/v1/stats/payments/overview";
+        log.debug("PaymentClient.getPaymentOverview: {}", url);
+        ApiResponse<PaymentOverviewWireResponse> resp = openApiClient.get(url, PAYMENT_OVERVIEW_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 查询订单状态分布统计（透传 payment）——各状态在途笔数·金额 + 退款待审核积压。
+     *
+     * <p>一档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     *
+     * @return payment 返回的订单状态分布统计
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
+     */
+    public OrderStatusDistributionWireResponse getOrderStatusDistribution() {
+        String url = baseUrl + "/api/v1/stats/orders/status-distribution";
+        log.debug("PaymentClient.getOrderStatusDistribution: {}", url);
+        ApiResponse<OrderStatusDistributionWireResponse> resp = openApiClient.get(url, STATUS_DISTRIBUTION_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 查询通道健康统计（透传 payment）——各银行接口调用次数·成功率·平均耗时·返回码分布。
+     *
+     * <p>一档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     *
+     * @return payment 返回的通道健康统计
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
+     */
+    public GatewayHealthWireResponse getGatewayHealth() {
+        String url = baseUrl + "/api/v1/stats/gateway/health";
+        log.debug("PaymentClient.getGatewayHealth: {}", url);
+        ApiResponse<GatewayHealthWireResponse> resp = openApiClient.get(url, GATEWAY_HEALTH_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 查询审核统计（透传 payment）——审核笔数·通过率·平均审核时长 + 按审核人聚合。
+     *
+     * <p>一档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     *
+     * @return payment 返回的审核统计
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
+     */
+    public OperationsAuditWireResponse getOperationsAudit() {
+        String url = baseUrl + "/api/v1/stats/operations/audit";
+        log.debug("PaymentClient.getOperationsAudit: {}", url);
+        ApiResponse<OperationsAuditWireResponse> resp = openApiClient.get(url, OPERATIONS_AUDIT_TYPEREF);
         return resp.data();
     }
 

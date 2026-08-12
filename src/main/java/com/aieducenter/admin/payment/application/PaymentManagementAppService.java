@@ -3,16 +3,24 @@ package com.aieducenter.admin.payment.application;
 import com.aieducenter.admin.payment.application.dto.command.RefundAuditCommand;
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
+import com.aieducenter.admin.payment.application.dto.response.GatewayHealthResponse;
+import com.aieducenter.admin.payment.application.dto.response.OperationsAuditResponse;
 import com.aieducenter.admin.payment.application.dto.response.OrderLifecycleResponse;
+import com.aieducenter.admin.payment.application.dto.response.OrderStatusDistributionResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderDetailResponse;
+import com.aieducenter.admin.payment.application.dto.response.PaymentOverviewResponse;
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.wire.AuditRefundWireRequest;
+import com.aieducenter.admin.payment.application.dto.wire.GatewayHealthWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OperationsAuditWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OrderStatusDistributionWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.PaymentOrderWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.PaymentOverviewWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderDetailWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.RefundOrderWireResponse;
@@ -227,6 +235,139 @@ public class PaymentManagementAppService {
                 wire.targetType(), wire.targetNo(), wire.operation(),
                 wire.operatorId(), wire.operatorName(), wire.operatorSystem(),
                 wire.result(), wire.remark());
+    }
+
+    /**
+     * 查询支付总览统计（透传 payment）——运营看板 tier-1。
+     *
+     * <p>支付/退款笔数·金额·成功率·净额 + 按时间分桶趋势，聚合归 payment（一档统计，issue #37）。
+     * admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     */
+    public PaymentOverviewResponse getPaymentOverview() {
+        PaymentOverviewWireResponse wire;
+        try {
+            wire = paymentClient.getPaymentOverview();
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+        return toPaymentOverview(wire);
+    }
+
+    private static PaymentOverviewResponse toPaymentOverview(PaymentOverviewWireResponse wire) {
+        List<PaymentOverviewResponse.TrendBucket> trend =
+                wire.trend() == null ? List.of()
+                        : wire.trend().stream().map(PaymentManagementAppService::toTrendBucket).toList();
+        return new PaymentOverviewResponse(
+                wire.paymentCount(), wire.paymentAmount(),
+                wire.refundCount(), wire.refundAmount(),
+                wire.successRate(), wire.netAmount(), trend);
+    }
+
+    private static PaymentOverviewResponse.TrendBucket toTrendBucket(PaymentOverviewWireResponse.TrendBucketWireResponse wire) {
+        return new PaymentOverviewResponse.TrendBucket(
+                wire.bucket(), wire.paymentCount(), wire.paymentAmount(),
+                wire.refundCount(), wire.refundAmount());
+    }
+
+    /**
+     * 查询订单状态分布统计（透传 payment）——运营看板 tier-1。
+     *
+     * <p>各状态在途笔数·金额（支付 + 退款两列）+ 退款待审核积压，聚合归 payment（一档统计，issue #37）。
+     * admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     */
+    public OrderStatusDistributionResponse getOrderStatusDistribution() {
+        OrderStatusDistributionWireResponse wire;
+        try {
+            wire = paymentClient.getOrderStatusDistribution();
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+        return toOrderStatusDistribution(wire);
+    }
+
+    private static OrderStatusDistributionResponse toOrderStatusDistribution(OrderStatusDistributionWireResponse wire) {
+        List<OrderStatusDistributionResponse.StatusBucket> paymentStatuses =
+                wire.paymentStatuses() == null ? List.of()
+                        : wire.paymentStatuses().stream().map(PaymentManagementAppService::toStatusBucket).toList();
+        List<OrderStatusDistributionResponse.StatusBucket> refundStatuses =
+                wire.refundStatuses() == null ? List.of()
+                        : wire.refundStatuses().stream().map(PaymentManagementAppService::toStatusBucket).toList();
+        return new OrderStatusDistributionResponse(
+                paymentStatuses, refundStatuses, wire.refundPendingAuditCount());
+    }
+
+    private static OrderStatusDistributionResponse.StatusBucket toStatusBucket(
+            OrderStatusDistributionWireResponse.StatusBucketWireResponse wire) {
+        return new OrderStatusDistributionResponse.StatusBucket(wire.status(), wire.count(), wire.amount());
+    }
+
+    /**
+     * 查询通道健康统计（透传 payment）——运营看板 tier-1。
+     *
+     * <p>各银行接口调用次数·成功率·平均耗时·返回码分布，聚合归 payment（一档统计，issue #37）。
+     * admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     */
+    public GatewayHealthResponse getGatewayHealth() {
+        GatewayHealthWireResponse wire;
+        try {
+            wire = paymentClient.getGatewayHealth();
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+        return toGatewayHealth(wire);
+    }
+
+    private static GatewayHealthResponse toGatewayHealth(GatewayHealthWireResponse wire) {
+        List<GatewayHealthResponse.BankInterfaceStat> bankInterfaces =
+                wire.bankInterfaces() == null ? List.of()
+                        : wire.bankInterfaces().stream().map(PaymentManagementAppService::toBankInterfaceStat).toList();
+        return new GatewayHealthResponse(bankInterfaces);
+    }
+
+    private static GatewayHealthResponse.BankInterfaceStat toBankInterfaceStat(
+            GatewayHealthWireResponse.BankInterfaceStatWireResponse wire) {
+        List<GatewayHealthResponse.BankInterfaceStat.ReturnCodeStat> returnCodes =
+                wire.returnCodes() == null ? List.of()
+                        : wire.returnCodes().stream().map(PaymentManagementAppService::toReturnCodeStat).toList();
+        return new GatewayHealthResponse.BankInterfaceStat(
+                wire.bankInterface(), wire.callCount(), wire.successCount(),
+                wire.successRate(), wire.avgExecutionTime(), returnCodes);
+    }
+
+    private static GatewayHealthResponse.BankInterfaceStat.ReturnCodeStat toReturnCodeStat(
+            GatewayHealthWireResponse.BankInterfaceStatWireResponse.ReturnCodeStatWireResponse wire) {
+        return new GatewayHealthResponse.BankInterfaceStat.ReturnCodeStat(wire.returnCode(), wire.count());
+    }
+
+    /**
+     * 查询审核统计（透传 payment）——运营看板 tier-1。
+     *
+     * <p>审核笔数·通过率·平均审核时长 + 按审核人聚合，聚合归 payment（一档统计，issue #37）。
+     * admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     */
+    public OperationsAuditResponse getOperationsAudit() {
+        OperationsAuditWireResponse wire;
+        try {
+            wire = paymentClient.getOperationsAudit();
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+        return toOperationsAudit(wire);
+    }
+
+    private static OperationsAuditResponse toOperationsAudit(OperationsAuditWireResponse wire) {
+        List<OperationsAuditResponse.AuditorStat> auditors =
+                wire.auditors() == null ? List.of()
+                        : wire.auditors().stream().map(PaymentManagementAppService::toAuditorStat).toList();
+        return new OperationsAuditResponse(
+                wire.auditCount(), wire.approvalRate(), wire.avgAuditDurationSeconds(), auditors);
+    }
+
+    private static OperationsAuditResponse.AuditorStat toAuditorStat(
+            OperationsAuditWireResponse.AuditorStatWireResponse wire) {
+        return new OperationsAuditResponse.AuditorStat(
+                wire.auditorId(), wire.auditorName(), wire.auditCount(),
+                wire.approvedCount(), wire.approvalRate(), wire.avgAuditDurationSeconds());
     }
 
     /**
