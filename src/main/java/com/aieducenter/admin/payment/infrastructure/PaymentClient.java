@@ -1,9 +1,13 @@
 package com.aieducenter.admin.payment.infrastructure;
 
+import com.aieducenter.admin.payment.application.dto.wire.AnomaliesWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.AuditRefundWireRequest;
+import com.aieducenter.admin.payment.application.dto.wire.BusinessSystemStatsWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.ChannelStatsWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.GatewayHealthWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OperationLogListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.OperationLogWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OperationsActivityWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OperationsAuditWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OrderStatusDistributionWireResponse;
@@ -73,6 +77,18 @@ public class PaymentClient {
             new TypeReference<>() {};
 
     private static final TypeReference<ApiResponse<OperationsAuditWireResponse>> OPERATIONS_AUDIT_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<BusinessSystemStatsWireResponse>> BUSINESS_SYSTEM_STATS_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<ChannelStatsWireResponse>> CHANNEL_STATS_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<AnomaliesWireResponse>> ANOMALIES_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<OperationsActivityWireResponse>> OPERATIONS_ACTIVITY_TYPEREF =
             new TypeReference<>() {};
 
     private final OpenApiClient openApiClient;
@@ -393,6 +409,67 @@ public class PaymentClient {
         String url = baseUrl + "/api/v1/stats/operations/audit";
         log.debug("PaymentClient.getOperationsAudit: {}", url);
         ApiResponse<OperationsAuditWireResponse> resp = openApiClient.get(url, OPERATIONS_AUDIT_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 查询按业务系统细分的统计（透传 payment）——各业务系统支付/退款笔数·金额·成功率·退款率。
+     *
+     * <p>二档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     *
+     * @return payment 返回的按业务系统细分统计
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
+     */
+    public BusinessSystemStatsWireResponse getByBusinessSystem() {
+        String url = baseUrl + "/api/v1/stats/by-business-system";
+        log.debug("PaymentClient.getByBusinessSystem: {}", url);
+        ApiResponse<BusinessSystemStatsWireResponse> resp = openApiClient.get(url, BUSINESS_SYSTEM_STATS_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 查询按通道细分的统计（透传 payment）——按 payMode / accessType 聚合的支付笔数·金额·成功率。
+     *
+     * <p>二档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     *
+     * @return payment 返回的按通道细分统计
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
+     */
+    public ChannelStatsWireResponse getByChannel() {
+        String url = baseUrl + "/api/v1/stats/by-channel";
+        log.debug("PaymentClient.getByChannel: {}", url);
+        ApiResponse<ChannelStatsWireResponse> resp = openApiClient.get(url, CHANNEL_STATS_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 查询异常监控统计（透传 payment）——长时滞留 PENDING/REFUNDING 订单 + 近期失败计数。
+     *
+     * <p>二档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。
+     * 滞留阈值 / 失败窗口由 payment 决定。</p>
+     *
+     * @return payment 返回的异常监控统计
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
+     */
+    public AnomaliesWireResponse getAnomalies() {
+        String url = baseUrl + "/api/v1/stats/anomalies";
+        log.debug("PaymentClient.getAnomalies: {}", url);
+        ApiResponse<AnomaliesWireResponse> resp = openApiClient.get(url, ANOMALIES_TYPEREF);
+        return resp.data();
+    }
+
+    /**
+     * 查询操作员活动统计（透传 payment）——各操作员操作类型·笔数 + 通知重发次数。
+     *
+     * <p>二档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     *
+     * @return payment 返回的操作员活动统计
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
+     */
+    public OperationsActivityWireResponse getOperationsActivity() {
+        String url = baseUrl + "/api/v1/stats/operations/activity";
+        log.debug("PaymentClient.getOperationsActivity: {}", url);
+        ApiResponse<OperationsActivityWireResponse> resp = openApiClient.get(url, OPERATIONS_ACTIVITY_TYPEREF);
         return resp.data();
     }
 

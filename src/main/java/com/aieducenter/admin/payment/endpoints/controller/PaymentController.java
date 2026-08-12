@@ -7,8 +7,12 @@ import com.aieducenter.admin.payment.application.dto.query.OperationLogQuery;
 import com.aieducenter.admin.payment.application.dto.query.PaymentLogQuery;
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
+import com.aieducenter.admin.payment.application.dto.response.AnomaliesResponse;
+import com.aieducenter.admin.payment.application.dto.response.BusinessSystemStatsResponse;
+import com.aieducenter.admin.payment.application.dto.response.ChannelStatsResponse;
 import com.aieducenter.admin.payment.application.dto.response.GatewayHealthResponse;
 import com.aieducenter.admin.payment.application.dto.response.OperationLogSummaryResponse;
+import com.aieducenter.admin.payment.application.dto.response.OperationsActivityResponse;
 import com.aieducenter.admin.payment.application.dto.response.OperationsAuditResponse;
 import com.aieducenter.admin.payment.application.dto.response.OrderLifecycleResponse;
 import com.aieducenter.admin.payment.application.dto.response.OrderStatusDistributionResponse;
@@ -194,6 +198,54 @@ public class PaymentController {
     @Operation(summary = "审核统计（tier-1）——透传 payment：审核笔数·通过率·平均审核时长 + 按审核人聚合")
     public ApiResponse<OperationsAuditResponse> getOperationsAudit() {
         return ApiResponse.ok(paymentAppService.getOperationsAudit());
+    }
+
+    @GetMapping("/stats/by-business-system")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:read",
+            name = "支付管理 / 查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "按业务系统细分统计（tier-2）——透传 payment：各业务系统支付/退款笔数·金额·成功率·退款率")
+    public ApiResponse<BusinessSystemStatsResponse> getByBusinessSystem() {
+        return ApiResponse.ok(paymentAppService.getByBusinessSystem());
+    }
+
+    @GetMapping("/stats/by-channel")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:read",
+            name = "支付管理 / 查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "按通道细分统计（tier-2）——透传 payment：按 payMode / accessType 聚合的支付笔数·金额·成功率")
+    public ApiResponse<ChannelStatsResponse> getByChannel() {
+        return ApiResponse.ok(paymentAppService.getByChannel());
+    }
+
+    @GetMapping("/stats/anomalies")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:read",
+            name = "支付管理 / 查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "异常监控统计（tier-2）——透传 payment：长时滞留 PENDING/REFUNDING 订单 + 近期失败计数")
+    public ApiResponse<AnomaliesResponse> getAnomalies() {
+        return ApiResponse.ok(paymentAppService.getAnomalies());
+    }
+
+    @GetMapping("/stats/operations/activity")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:read",
+            name = "支付管理 / 查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "操作员活动统计（tier-2）——透传 payment：各操作员操作类型·笔数 + 通知重发次数")
+    public ApiResponse<OperationsActivityResponse> getOperationsActivity() {
+        return ApiResponse.ok(paymentAppService.getOperationsActivity());
     }
 
     @PostMapping("/refunds/{refundOrderNo}/audit")

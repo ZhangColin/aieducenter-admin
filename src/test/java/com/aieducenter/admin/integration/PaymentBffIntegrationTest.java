@@ -26,8 +26,12 @@ import com.aieducenter.admin.payment.application.dto.query.OperationLogQuery;
 import com.aieducenter.admin.payment.application.dto.query.PaymentLogQuery;
 import com.aieducenter.admin.payment.application.dto.query.PaymentOrderQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
+import com.aieducenter.admin.payment.application.dto.response.AnomaliesResponse;
+import com.aieducenter.admin.payment.application.dto.response.BusinessSystemStatsResponse;
+import com.aieducenter.admin.payment.application.dto.response.ChannelStatsResponse;
 import com.aieducenter.admin.payment.application.dto.response.GatewayHealthResponse;
 import com.aieducenter.admin.payment.application.dto.response.OperationLogSummaryResponse;
+import com.aieducenter.admin.payment.application.dto.response.OperationsActivityResponse;
 import com.aieducenter.admin.payment.application.dto.response.OperationsAuditResponse;
 import com.aieducenter.admin.payment.application.dto.response.OrderLifecycleResponse;
 import com.aieducenter.admin.payment.application.dto.response.OrderStatusDistributionResponse;
@@ -37,10 +41,14 @@ import com.aieducenter.admin.payment.application.dto.response.PaymentOverviewRes
 import com.aieducenter.admin.payment.application.dto.response.PaymentOrderSummaryResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderDetailResponse;
 import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummaryResponse;
+import com.aieducenter.admin.payment.application.dto.wire.AnomaliesWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.AuditRefundWireRequest;
+import com.aieducenter.admin.payment.application.dto.wire.BusinessSystemStatsWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.ChannelStatsWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.GatewayHealthWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OperationLogListWireRequest;
 import com.aieducenter.admin.payment.application.dto.wire.OperationLogWireResponse;
+import com.aieducenter.admin.payment.application.dto.wire.OperationsActivityWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OperationsAuditWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OrderLifecycleWireResponse;
 import com.aieducenter.admin.payment.application.dto.wire.OrderStatusDistributionWireResponse;
@@ -979,6 +987,155 @@ class PaymentBffIntegrationTest {
                 .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
 
         assertThatThrownBy(() -> paymentAppService.getOperationsAudit())
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
+    }
+
+    // ========== getByBusinessSystem · tier-2 统计透传契约（按业务系统聚合·不改序） ==========
+
+    @Test
+    void given_businessSystemStats_when_getByBusinessSystem_then_mapSystemsAndPreserveOrder() {
+        when(paymentClient.getByBusinessSystem()).thenReturn(new BusinessSystemStatsWireResponse(List.of(
+                new BusinessSystemStatsWireResponse.BusinessSystemStatWireResponse(
+                        "course-svc", 800L, new BigDecimal("64000.00"),
+                        20L, new BigDecimal("1600.00"),
+                        new BigDecimal("0.98"), new BigDecimal("0.025")),
+                new BusinessSystemStatsWireResponse.BusinessSystemStatWireResponse(
+                        "membership-svc", 400L, new BigDecimal("32000.00"),
+                        10L, new BigDecimal("800.00"),
+                        new BigDecimal("0.95"), new BigDecimal("0.025")))));
+
+        BusinessSystemStatsResponse stats = paymentAppService.getByBusinessSystem();
+
+        // 按业务系统聚合映射 + 顺序保留
+        assertThat(stats.systems()).hasSize(2);
+        BusinessSystemStatsResponse.BusinessSystemStat first = stats.systems().get(0);
+        assertThat(first.businessSystemName()).isEqualTo("course-svc");
+        assertThat(first.paymentCount()).isEqualTo(800L);
+        assertThat(first.paymentAmount()).isEqualByComparingTo("64000.00");
+        assertThat(first.refundCount()).isEqualTo(20L);
+        assertThat(first.refundAmount()).isEqualByComparingTo("1600.00");
+        assertThat(first.successRate()).isEqualByComparingTo("0.98");
+        assertThat(first.refundRate()).isEqualByComparingTo("0.025");
+        assertThat(stats.systems().get(1).businessSystemName()).isEqualTo("membership-svc");
+    }
+
+    @Test
+    void given_businessSystemStatsDownstream500_when_getByBusinessSystem_then_throwThirdPartyError() {
+        // payment 5xx（内部错误）→ 统一对外 THIRD_PARTY_ERROR（运营侧已认证，下游故障为第三方错误）
+        when(paymentClient.getByBusinessSystem())
+                .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.getByBusinessSystem())
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
+    }
+
+    // ========== getByChannel · tier-2 统计透传契约（payMode / accessType 双维度·不改序） ==========
+
+    @Test
+    void given_channelStats_when_getByChannel_then_mapBothDimensionsAndPreserveOrder() {
+        when(paymentClient.getByChannel()).thenReturn(new ChannelStatsWireResponse(
+                List.of(new ChannelStatsWireResponse.PayModeStatWireResponse(
+                                "WECHAT", 600L, new BigDecimal("48000.00"), new BigDecimal("0.98")),
+                        new ChannelStatsWireResponse.PayModeStatWireResponse(
+                                "ALIPAY", 400L, new BigDecimal("32000.00"), new BigDecimal("0.96"))),
+                List.of(new ChannelStatsWireResponse.AccessTypeStatWireResponse(
+                        "WEB", 700L, new BigDecimal("56000.00"), new BigDecimal("0.97")))));
+
+        ChannelStatsResponse stats = paymentAppService.getByChannel();
+
+        // payMode 维度映射 + 顺序保留
+        assertThat(stats.byPayMode()).hasSize(2);
+        assertThat(stats.byPayMode().get(0).payMode()).isEqualTo("WECHAT");
+        assertThat(stats.byPayMode().get(0).paymentCount()).isEqualTo(600L);
+        assertThat(stats.byPayMode().get(0).paymentAmount()).isEqualByComparingTo("48000.00");
+        assertThat(stats.byPayMode().get(0).successRate()).isEqualByComparingTo("0.98");
+        assertThat(stats.byPayMode().get(1).payMode()).isEqualTo("ALIPAY");
+        // accessType 维度映射
+        assertThat(stats.byAccessType()).hasSize(1);
+        assertThat(stats.byAccessType().get(0).accessType()).isEqualTo("WEB");
+        assertThat(stats.byAccessType().get(0).paymentAmount()).isEqualByComparingTo("56000.00");
+        assertThat(stats.byAccessType().get(0).successRate()).isEqualByComparingTo("0.97");
+    }
+
+    @Test
+    void given_channelStatsDownstream400_when_getByChannel_then_throwBadRequest() {
+        // payment 400（统计窗口参数非法）→ admin 400（BAD_REQUEST）
+        when(paymentClient.getByChannel())
+                .thenThrow(new OpenApiClientException(400, "{\"message\":\"bad window\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.getByChannel())
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.BAD_REQUEST);
+    }
+
+    // ========== getAnomalies · tier-2 统计透传契约（异常计数） ==========
+
+    @Test
+    void given_anomalies_when_getAnomalies_then_mapCounts() {
+        when(paymentClient.getAnomalies()).thenReturn(
+                new AnomaliesWireResponse(12L, 3L, 8L));
+
+        AnomaliesResponse anomalies = paymentAppService.getAnomalies();
+
+        // 长时滞留 + 近期失败计数逐字段映射
+        assertThat(anomalies.longPendingCount()).isEqualTo(12L);
+        assertThat(anomalies.longRefundingCount()).isEqualTo(3L);
+        assertThat(anomalies.recentFailureCount()).isEqualTo(8L);
+    }
+
+    @Test
+    void given_anomaliesDownstream500_when_getAnomalies_then_throwThirdPartyError() {
+        when(paymentClient.getAnomalies())
+                .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.getAnomalies())
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
+    }
+
+    // ========== getOperationsActivity · tier-2 统计透传契约（操作员活动 + 操作类型明细·不改序） ==========
+
+    @Test
+    void given_operationsActivity_when_getOperationsActivity_then_mapOperatorsAndOperationCountsPreserveOrder() {
+        when(paymentClient.getOperationsActivity()).thenReturn(new OperationsActivityWireResponse(List.of(
+                new OperationsActivityWireResponse.OperatorActivityStatWireResponse(
+                        1001L, "alice",
+                        List.of(new OperationsActivityWireResponse.OperationCountWireResponse("AUDIT_APPROVE", 38L),
+                                new OperationsActivityWireResponse.OperationCountWireResponse("AUDIT_REJECT", 2L)),
+                        5L),
+                new OperationsActivityWireResponse.OperatorActivityStatWireResponse(
+                        2002L, "bob",
+                        List.of(new OperationsActivityWireResponse.OperationCountWireResponse("NOTIFY_RESEND", 3L)),
+                        3L))));
+
+        OperationsActivityResponse activity = paymentAppService.getOperationsActivity();
+
+        // 按操作员聚合映射 + 顺序保留
+        assertThat(activity.operators()).hasSize(2);
+        OperationsActivityResponse.OperatorActivityStat first = activity.operators().get(0);
+        assertThat(first.operatorId()).isEqualTo(1001L);
+        assertThat(first.operatorName()).isEqualTo("alice");
+        assertThat(first.notificationResendCount()).isEqualTo(5L);
+        // 操作类型·笔数明细映射 + 顺序保留
+        assertThat(first.operations()).hasSize(2);
+        assertThat(first.operations().get(0).operation()).isEqualTo("AUDIT_APPROVE");
+        assertThat(first.operations().get(0).count()).isEqualTo(38L);
+        assertThat(first.operations().get(1).operation()).isEqualTo("AUDIT_REJECT");
+        OperationsActivityResponse.OperatorActivityStat second = activity.operators().get(1);
+        assertThat(second.operatorName()).isEqualTo("bob");
+        assertThat(second.operations()).hasSize(1);
+        assertThat(second.operations().get(0).operation()).isEqualTo("NOTIFY_RESEND");
+        assertThat(second.notificationResendCount()).isEqualTo(3L);
+    }
+
+    @Test
+    void given_operationsActivityDownstream500_when_getOperationsActivity_then_throwThirdPartyError() {
+        when(paymentClient.getOperationsActivity())
+                .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.getOperationsActivity())
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
     }
