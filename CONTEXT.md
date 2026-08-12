@@ -12,6 +12,10 @@
 后台内部员工（非跨应用共享的平台身份）。**认证 + 角色/部门/岗位/RBAC 归本应用自有**，凭据留本应用（用 cartisan-security），不进用户域/IdP。本地登录即可（统一后台是唯一内部应用，**不做 Operator SSO**，等第二个内部应用出现再考虑）。
 _Avoid_: 把 Operator 塞进用户域/IdP；把 Operator 与终端用户(Account)混在一张表。
 
+**平台账号 (Account)**:
+平台统一身份（identity 域）下的**终端用户**账号——跨应用共享的最终用户身份。identity 以 `userId` 标识；一个 Account 可经多个对接应用登录。**与 Operator 严格区分**：Operator 是本应用自有的后台内部员工（凭据留本应用、cartisan-security），Account 是被管理的终端用户（凭据在 identity 域）；两者不共表、不混概念。
+_Avoid_: 把 Account 与 Operator 混在一张表/一个概念；把 Account 当成本应用实体。
+
 **RBAC（已有，真金白银）**:
 `AdminUser` / `AdminRole` / `AdminMenu` 聚合 + `AdminUserRole` / `AdminRoleMenu` / `AdminRolePermission` 实体 + 6 张 `sys_admin_*` 表。鉴权：BCrypt(10) + cartisan-security（默认 `SaTokenAuthenticationService`）+ `StpInterface`（Bug ① 后：admin 用默认 loginType，`StpInterface` 无条件返回 admin 权限/角色）+ `@RequirePermission` + `PermissionScanner`。
 **用户菜单/权限 = 其全部启用角色的汇总（并集）**；**禁用角色（`AdminRoleStatus.DISABLED`）在任何汇总聚合中视为不存在**——不贡献菜单、不参与 home 推导、不贡献权限 claims 与 roleCodes（REQ-13 定，2026-08-02：`getRoleCodes`/`getPermissions`/导航聚合（现 `getMyMenus`）同路径一次修齐；此前禁用角色零消费、照样发菜单发权限）。超管不受影响（`SUPER_ADMIN` 角色自身不可禁用，REQ-10）。
@@ -82,6 +86,10 @@ _Avoid_: 给消费面端点挂管理权限注解；让消费面为了"超管全�
 admin 内 `payment` 子包承载的**运营管理**关注点——支付/退款订单列表与详情、订单生命周期视图、退款审核、通知重发、统计 dashboard。admin 作为 BFF 经 cartisan-openapi 签名调用 payment 服务（消费视角契约见 issue #37）。**≠ 财务上下文**（只读收入确认 + append-only 冲销，尚未建）：payment admin 是**运营写操作 + 运营看板**，财务是**会计视角的只读聚合**；两者都读 payment 数据，但关注点不同，不可混。
 _Avoid_: 把退款审核/通知重发塞进财务上下文；把 payment admin 的运营 dashboard 当作财务报表。
 
+**账号管理上下文 (Account Admin Context)**:
+admin 内 `account` 子包承载的**终端用户账号运营管理**关注点——平台账号（identity 域）的搜索、管理详情、封号/解封/解锁、强制下线（**不处理密码**——reset/clear/force-change 三端点不暴露，密码生命周期归 identity 用户自务，见 [ADR-0008](docs/adr/0008-admin-does-not-handle-end-user-passwords.md)）。admin 作为 BFF 经 cartisan-openapi 签名调用 identity 的 `/api/account/*` 管理端点（消费视角契约见 admin issue #49 / identity spec #66）。与 payment admin 同构（BFF 纯透传、操作者身份走 RequestContext、审计归 identity、详情走抽屉、出站客户端裸 `@Component` [ADR-0007](docs/adr/0007-admin-bff-outbound-clients-are-flat-components.md)）；**≠ Operator 管理（系统管理）**——管的是终端用户账号，非后台员工。v1 透传 identity 6 端点（搜索/管理详情/封号/解封/解锁/强制下线），**不暴露 3 个密码端点**（见 [ADR-0008](docs/adr/0008-admin-does-not-handle-end-user-passwords.md)）；字段级契约待 identity #67–#72 冻结。
+_Avoid_: admin 自建账号表/本地审计；把「账号管理(终端用户)」与「系统管理(operator)」混淆。
+
 **admin 是 BFF（非严格 DDD 领域服务）**:
 admin 的职责 = **调接口 + DTO 转换 + 聚合**，无重业务逻辑。出站服务客户端（`AppRegistryClient` / `PaymentClient` / 未来钱包·Token 客户端）为 **infrastructure 包内裸 `@Component`**，应用层直接注入——**不走** `@Port(CLIENT)` + `@Adapter(CLIENT)`。`@Port`/`@Adapter` 是**业务服务**南向端口的 DDD 规范（Domain 定义 Port、Infra 实现 Adapter），admin 作为 BFF 没有那样的 domain 厚度值得去解耦。Q5 grill 定（2026-08-11，issue #37）。
 _Avoid_: 在 admin 里给出站客户端套 @Port/@Adapter（误把 BFF 当领域服务）；future 想统一时另立 ADR 再动。
@@ -136,6 +144,7 @@ ID：directory=80；leaves=100/110/120/130/140（支付/退款详情不种）。
 ### Phase 2 — 财务上下文 + 各能力域聚合（BFF）
 - ✅ cartisan-openapi 签名客户端 —— **复用框架 `OpenApiClient`**（admin-console 身份，无需新建凭据/客户端）；各能力域签名约定**统一一套**（issue #37 grill 定，2026-08-11，见上「admin 是 BFF」）
 - ⏳ **支付管理（payment admin BFF）** —— [issue #37](https://github.com/ZhangColin/aieducenter-admin/issues/37) grill 定稿（2026-08-11）：全量 16 端点分期实现；`payment` 子包；菜单见上「支付管理菜单」；出站客户端 `PaymentClient` 复用框架 `OpenApiClient`（裸 `@Component`，[ADR-0007](docs/adr/0007-admin-bff-outbound-clients-are-flat-components.md)）；操作者身份走 `RequestContext.getUserId()/getUserName()`；审计归 payment；dashboard 当下透传、留跨服务聚合余地
+- ⏳ **账号管理（account admin BFF）** —— [issue #49](https://github.com/ZhangColin/aieducenter-admin/issues/49) grill 中（2026-08-12）：`account` 子包（镜像 payment）；v1 透传 identity 6 端点（搜索/管理详情/封号/解封/解锁/强制下线），**不暴露 3 个密码端点**（reset/clear/force-change，见 [ADR-0008](docs/adr/0008-admin-does-not-handle-end-user-passwords.md)）；菜单「账号管理」目录(sort=4)+「账号列表」叶子、详情走抽屉；出站客户端 `AccountClient` 复用框架 `OpenApiClient`（裸 `@Component`，[ADR-0007](docs/adr/0007-admin-bff-outbound-clients-are-flat-components.md)）；操作者身份走 `RequestContext`；审计归 identity；权限码跟 payment 同模式（`admin:account:*`，统一处理）；v1 不做 dashboard（需求由后台反向提）；字段级契约待 identity #67–#72
 - ⏳ 财务上下文（只读收入确认）—— 与支付管理不同关注点，见上「支付管理上下文」
 
 ### Issue 处置（前端 aieducenter-admin-web 提的需求）
