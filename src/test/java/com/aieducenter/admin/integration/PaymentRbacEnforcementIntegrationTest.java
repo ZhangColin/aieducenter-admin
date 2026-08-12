@@ -74,6 +74,7 @@ class PaymentRbacEnforcementIntegrationTest {
     private static final String PASSWORD = "Test1234";
     private static final String PERMISSION_CODE = "admin:payment:read";
     private static final String AUDIT_PERMISSION_CODE = "admin:payment:refund:audit";
+    private static final String BANK_QUERY_PERMISSION_CODE = "admin:payment:bank:query";
 
     /** 挂 {@code admin:payment:read} 的全部端点（列表 + 详情 + 生命周期 + 日志）——逐一验证三态。 */
     private static final List<String> ENDPOINTS = List.of(
@@ -101,6 +102,7 @@ class PaymentRbacEnforcementIntegrationTest {
     private String usernameWithPermission;
     private String usernameWithoutPermission;
     private String usernameWithAuditPermission;
+    private String usernameWithBankQueryPermission;
     private Long auditUserId;
     private String auditUserNickname;
 
@@ -124,6 +126,7 @@ class PaymentRbacEnforcementIntegrationTest {
         usernameWithPermission = "payop" + suffix;
         usernameWithoutPermission = "paynone" + suffix;
         usernameWithAuditPermission = "payauditor" + suffix;
+        usernameWithBankQueryPermission = "paybankq" + suffix;
 
         Long roleId = roleAppService.create(
                 new CreateRoleCommand("支付运营_" + suffix, "PAYOP_" + suffix, "仅有支付查看权限", 20, null));
@@ -144,6 +147,14 @@ class PaymentRbacEnforcementIntegrationTest {
         auditUserId = userAppService.create(
                 new CreateAdminUserCommand(usernameWithAuditPermission, PASSWORD, auditUserNickname, null, null, null));
         userAppService.assignRoles(auditUserId, new AssignRolesCommand(List.of(auditRoleId)));
+
+        // 主动查行专用运营（仅有 admin:payment:bank:query）——证明该写操作按独立权限码放行
+        Long bankQueryRoleId = roleAppService.create(
+                new CreateRoleCommand("主动查行_" + suffix, "PAYBANKQ_" + suffix, "仅有主动查行权限", 40, null));
+        roleAppService.assignPermissions(bankQueryRoleId, new AssignPermissionsCommand(List.of(BANK_QUERY_PERMISSION_CODE)));
+        Long bankQueryUserId = userAppService.create(
+                new CreateAdminUserCommand(usernameWithBankQueryPermission, PASSWORD, "查行运营_" + suffix, null, null, null));
+        userAppService.assignRoles(bankQueryUserId, new AssignRolesCommand(List.of(bankQueryRoleId)));
 
         // 200 用例：payment 下游 mock 为空页/空时间线，证明通路接通（不依赖真实 payment 服务）
         when(paymentClient.listPayments(any(), anyInt(), anyInt()))
@@ -166,6 +177,10 @@ class PaymentRbacEnforcementIntegrationTest {
         when(paymentClient.auditRefund(eq("RF-1"), any(AuditRefundWireRequest.class))).thenReturn(
                 new RefundOrderDetailWireResponse("RF-1", null, null, null, "APPROVED",
                         null, "MANUAL", null, null, null, null));
+        // 主动查行 200 用例：mock 返回查询后支付单（与详情同形），证明写通路接通
+        when(paymentClient.queryPayment("PAY-1")).thenReturn(
+                new PaymentOrderDetailWireResponse("PAY-1", null, null, "PAID",
+                        null, null, null, null, null, null));
     }
 
     @ParameterizedTest(name = "[{0}] 非超管且拥有 admin:payment:read → 200")
@@ -234,6 +249,37 @@ class PaymentRbacEnforcementIntegrationTest {
         ResponseEntity<String> response = postWithToken(
                 "/api/admin/payment/refunds/RF-1/audit", null,
                 "{\"agreed\":true,\"remark\":\"同意\"}");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    // ========== 主动查行（POST /payments/{no}/query）· 权限三态 ==========
+
+    @Test
+    @DisplayName("非超管且拥有 admin:payment:bank:query：主动查行返回 200，且透传 paymentOrderNo")
+    void given_nonSuperAdminWithBankQueryPermission_when_query_then_200_andPassesPaymentOrderNo() {
+        String token = login(usernameWithBankQueryPermission);
+        ResponseEntity<String> response = postWithToken(
+                "/api/admin/payment/payments/PAY-1/query", token, "");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        // 无请求体、无身份透传：仅验证 paymentOrderNo 原样透传给下游
+        verify(paymentClient).queryPayment("PAY-1");
+    }
+
+    @Test
+    @DisplayName("仅有 admin:payment:read（无 bank:query）→ 主动查行 403（read ≠ bank:query）")
+    void given_nonSuperAdminWithReadOnly_when_query_then_403() {
+        String token = login(usernameWithPermission);
+        ResponseEntity<String> response = postWithToken(
+                "/api/admin/payment/payments/PAY-1/query", token, "");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("未登录主动查行返回 401")
+    void given_unauthenticated_when_query_then_401() {
+        ResponseEntity<String> response = postWithToken(
+                "/api/admin/payment/payments/PAY-1/query", null, "");
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 

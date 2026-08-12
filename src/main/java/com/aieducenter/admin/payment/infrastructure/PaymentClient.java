@@ -257,6 +257,26 @@ public class PaymentClient {
     }
 
     /**
+     * 主动查行（透传 payment）——触发 payment 向银行查询并把本地状态对齐银行真相。
+     *
+     * <p>payment {@code POST /api/v1/payments/{paymentOrderNo}/query} 仅取路径参数（无请求体、不接收操作者身份），
+     * 返回查询（可能已同步）后的支付单聚合（与 {@link #getPayment} 详情同形 {@code PaymentOrderResponse}）。
+     * 主动查行的频控/审计归属 payment 侧，admin 仅按 {@code admin:payment:bank:query} 权限放行（issue #46）。</p>
+     *
+     * @param paymentOrderNo 支付订单号
+     * @return payment 返回的查询后支付单聚合（与详情同形）
+     * @throws com.cartisan.openapi.client.OpenApiClientException payment 404（订单不存在）、
+     *         5xx（银行/通道不可达）等透传，由应用层翻译
+     */
+    public PaymentOrderDetailWireResponse queryPayment(String paymentOrderNo) {
+        String url = baseUrl + "/api/v1/payments/" + encode(paymentOrderNo) + "/query";
+        log.debug("PaymentClient.queryPayment: {}", url);
+        // 无请求体：框架 OpenApiClient.post 对 null body 发空 body（POST 仍带 application/json），payment 端只读路径参数
+        ApiResponse<PaymentOrderDetailWireResponse> resp = openApiClient.post(url, null, PAYMENT_DETAIL_TYPEREF);
+        return resp.data();
+    }
+
+    /**
      * 查询订单生命周期（透传 payment）。
      *
      * <p>payment 侧按 {@code orderNo} 把 PaymentLog + OperationLog union 后按时间排序返回

@@ -294,6 +294,30 @@ public class PaymentManagementAppService {
     }
 
     /**
+     * 主动查行（透传 payment）——运营人员触发 payment 向银行查询并把本地状态对齐银行真相。
+     *
+     * <p>无请求体、无操作者身份透传（payment {@code POST /payments/{no}/query} 仅取路径参数，不接收 auditor）；
+     * admin 仅按 {@code admin:payment:bank:query} 权限放行该写操作（issue #46）。返回查询后的支付单聚合
+     * （与 {@link #getPaymentDetail} 详情同形），复用 {@link #toPaymentDetail} 映射。</p>
+     *
+     * <p>错误翻译（复用 {@link #translatePaymentError}）：payment 404（订单不存在）⟹
+     * {@link BaseCodeMessage#NOT_FOUND}；payment 5xx（银行/通道不可达）⟹
+     * {@link BaseCodeMessage#THIRD_PARTY_ERROR}。</p>
+     *
+     * @param paymentOrderNo 支付订单号
+     * @return payment 返回的查询后支付单聚合（与详情同形）
+     */
+    public PaymentOrderDetailResponse queryPayment(String paymentOrderNo) {
+        PaymentOrderDetailWireResponse wire;
+        try {
+            wire = paymentClient.queryPayment(paymentOrderNo);
+        } catch (OpenApiClientException e) {
+            throw translatePaymentError(e);
+        }
+        return toPaymentDetail(wire);
+    }
+
+    /**
      * 查询订单生命周期（透传 payment）——payment 已合并（PaymentLog + OperationLog 按时间排序）的时间线。
      *
      * <p>合并在 payment 完成（ADR-0002 读模型），admin 透传不改序、不本地合并——避免双逻辑不一致。

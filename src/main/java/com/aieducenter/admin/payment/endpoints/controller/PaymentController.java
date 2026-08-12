@@ -212,4 +212,19 @@ public class PaymentController {
         return ApiResponse.ok(paymentAppService.auditRefund(
                 refundOrderNo, command, RequestContext.getUserId(), RequestContext.getUserName()));
     }
+
+    @PostMapping("/payments/{paymentOrderNo}/query")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:payment:bank:query",
+            name = "支付管理 / 主动查行",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "主动查行——透传 payment 向银行查询并同步本地状态为银行真相")
+    public ApiResponse<PaymentOrderDetailResponse> queryPayment(
+            @PathVariable String paymentOrderNo) {
+        // 无请求体、无操作者身份透传：payment POST /payments/{no}/query 仅取路径参数，
+        // 触发银行查询 + 本地状态对齐（频控/审计归 payment）。admin 仅按本权限码放行。
+        return ApiResponse.ok(paymentAppService.queryPayment(paymentOrderNo));
+    }
 }

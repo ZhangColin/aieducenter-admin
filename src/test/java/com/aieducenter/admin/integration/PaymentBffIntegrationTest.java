@@ -678,6 +678,56 @@ class PaymentBffIntegrationTest {
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.BAD_REQUEST);
     }
 
+    // ========== queryPayment · 主动查行透传（无请求体、无身份透传，返回与详情同形） ==========
+
+    @Test
+    void given_bankQueriedPayment_when_queryPayment_then_returnMappedDetail_andPassPaymentOrderNo() {
+        LocalDateTime now = LocalDateTime.now();
+        // payment POST /payments/{no}/query 仅取路径参数、返回查询后聚合（与 GET 详情同形 PaymentOrderResponse）
+        when(paymentClient.queryPayment("PAY-1")).thenReturn(
+                new PaymentOrderDetailWireResponse("PAY-1", "BIZ-1", "course-svc", "PAID",
+                        new BigDecimal("99.00"), "WECHAT", "WEB", "WECHAT_NATIVE",
+                        now, now.minusMinutes(5)));
+
+        PaymentOrderDetailResponse detail = paymentAppService.queryPayment("PAY-1");
+
+        // 复用 toPaymentDetail 映射：查行结果与详情同形、逐字段映射
+        assertThat(detail.paymentOrderNo()).isEqualTo("PAY-1");
+        assertThat(detail.businessOrderNo()).isEqualTo("BIZ-1");
+        assertThat(detail.businessSystemName()).isEqualTo("course-svc");
+        assertThat(detail.status()).isEqualTo("PAID");
+        assertThat(detail.amount()).isEqualByComparingTo("99.00");
+        assertThat(detail.payMode()).isEqualTo("WECHAT");
+        assertThat(detail.paymentChannel()).isEqualTo("WECHAT_NATIVE");
+        assertThat(detail.paidAt()).isEqualTo(now);
+        // paymentOrderNo 原样透传给下游（无请求体，仅路径参数）
+        verify(paymentClient).queryPayment("PAY-1");
+    }
+
+    // ========== queryPayment · 错误翻译 ==========
+
+    @Test
+    void given_downstream404_when_queryPayment_then_throwNotFound() {
+        // payment 404（订单不存在）→ admin 404
+        when(paymentClient.queryPayment("NOPE"))
+                .thenThrow(new OpenApiClientException(404, "{\"message\":\"not found\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.queryPayment("NOPE"))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.NOT_FOUND);
+    }
+
+    @Test
+    void given_downstream500_when_queryPayment_then_throwThirdPartyError() {
+        // payment 5xx（银行/通道不可达）→ 统一对外 THIRD_PARTY_ERROR（运营侧已认证，下游故障为第三方错误）
+        when(paymentClient.queryPayment("PAY-1"))
+                .thenThrow(new OpenApiClientException(500, "{\"message\":\"bank unreachable\"}"));
+
+        assertThatThrownBy(() -> paymentAppService.queryPayment("PAY-1"))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
+    }
+
     // ========== getPaymentOverview · tier-1 统计透传契约（顶层 + 趋势分桶映射、不改序） ==========
 
     @Test
