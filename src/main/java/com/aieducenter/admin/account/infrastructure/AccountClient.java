@@ -21,8 +21,9 @@ import org.springframework.stereotype.Component;
  * <p>为 infrastructure 包内裸 {@code @Component}（BFF 出站客户端，不走 {@code @Port/@Adapter}，
  * 详见 ADR-0007「admin BFF 出站客户端为裸 @Component」，与 {@code PaymentClient} / {@code AppRegistryClient} 同款）。</p>
  *
- * <p>identity 账号管理契约（identity #67–#72）未全部冻结，本客户端按 #49 spec 计划形态对接，
- * 字段/端点最终以 identity 实现契约为准。client / appservice 可先写、用 mock 验，待 identity 就绪再接真。</p>
+ * <p>对接 identity {@code GET /api/account}（#70 已冻结：分页多条件搜索，返回
+ * {@code ApiResponse<PageResponse<AccountManagementView>>}）。查询参数 / 响应字段与 identity
+ * {@code AccountSearchQuery} / {@code AccountManagementView} 同构。</p>
  *
  * @since 0.1.0
  */
@@ -64,8 +65,8 @@ public class AccountClient {
         appendParam(url, "userId", filter.userId());
         appendParam(url, "status", filter.status());
         appendParam(url, "locked", filter.locked());
-        appendParam(url, "registeredAtFrom", filter.registeredAtFrom());
-        appendParam(url, "registeredAtTo", filter.registeredAtTo());
+        appendParam(url, "createdFrom", filter.createdFrom());
+        appendParam(url, "createdTo", filter.createdTo());
         log.debug("AccountClient.listAccounts: {}", url);
         ApiResponse<PageResponse<AccountWireResponse>> resp =
                 openApiClient.get(url.toString(), ACCOUNT_PAGE_TYPEREF);

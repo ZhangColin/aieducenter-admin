@@ -37,9 +37,10 @@ import com.cartisan.web.response.PageResponse;
  * 不模拟安全层（权限在 {@code AccountRbacEnforcementIntegrationTest} 覆盖）；
  * 不直测 {@link AccountClient}（与 {@code PaymentClient} / {@code AppRegistryClient} 一致，client bean 直接 mock）。</p>
  *
- * <p>identity 账号搜索契约（identity #70）未冻结，wire DTO 为提案；本测试在 client 边界 mock，
- * 验证的是 controller→appservice→client 通路（DTO 映射 / 筛选映射 / 分页契约 / 错误翻译），
- * 待 identity 就绪后 wire 反序列化契约由各自的 envelope 契约测试兜底。</p>
+ * <p>对接 identity {@code GET /api/account}（#70 已冻结）：mock 数据按 identity
+ * {@code AccountManagementView} 真实形状构造（userId=Long TSID、status=Integer BaseEnum code
+ * 1=ACTIVE/0=DISABLED、locked/hasPassword=原始 boolean、无注册时间字段）。本测试在 client 边界 mock，
+ * 验证 controller→appservice→client 通路（DTO 映射 / 筛选映射 / 分页契约 / 错误翻译）。</p>
  */
 @SpringBootTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -55,13 +56,14 @@ class AccountBffIntegrationTest {
 
     @Test
     void given_accounts_when_list_then_returnMappedPage() {
-        LocalDateTime now = LocalDateTime.now();
         when(accountClient.listAccounts(any(AccountSearchWireRequest.class), anyInt(), anyInt()))
                 .thenReturn(new PageResponse<>(List.of(
-                        new AccountWireResponse("u-1", "alice@example.com", "13800000001",
-                                "爱丽丝", "https://cdn/avatar1.png", "ACTIVE", false, now.minusDays(10)),
-                        new AccountWireResponse("u-2", "bob@example.com", "13800000002",
-                                null, null, "DISABLED", true, now.minusDays(2))
+                        // ACTIVE、未锁、已设密码的常规账号
+                        new AccountWireResponse(1001L, "alice@example.com", "13800000001",
+                                "爱丽丝", "https://cdn/avatar1.png", 1, false, true),
+                        // DISABLED、系统锁定、纯验证码账号（无密码、无资料）
+                        new AccountWireResponse(1002L, "bob@example.com", "13800000002",
+                                null, null, 0, true, false)
                 ), 28L, 0, 20));
 
         var page = accountAppService.list(
@@ -75,18 +77,19 @@ class AccountBffIntegrationTest {
         // DTO 映射：wire → response 逐字段
         assertThat(page.items()).hasSize(2);
         AccountSummaryResponse first = page.items().get(0);
-        assertThat(first.userId()).isEqualTo("u-1");
+        assertThat(first.userId()).isEqualTo(1001L);
         assertThat(first.email()).isEqualTo("alice@example.com");
         assertThat(first.phone()).isEqualTo("13800000001");
         assertThat(first.nickname()).isEqualTo("爱丽丝");
         assertThat(first.avatar()).isEqualTo("https://cdn/avatar1.png");
-        assertThat(first.status()).isEqualTo("ACTIVE");
+        assertThat(first.status()).isEqualTo(1);          // ACTIVE BaseEnum code
         assertThat(first.locked()).isFalse();
-        assertThat(first.registeredAt()).isEqualTo(now.minusDays(10));
+        assertThat(first.hasPassword()).isTrue();
         AccountSummaryResponse second = page.items().get(1);
-        assertThat(second.userId()).isEqualTo("u-2");
-        assertThat(second.status()).isEqualTo("DISABLED");
+        assertThat(second.userId()).isEqualTo(1002L);
+        assertThat(second.status()).isEqualTo(0);          // DISABLED BaseEnum code
         assertThat(second.locked()).isTrue();
+        assertThat(second.hasPassword()).isFalse();        // 纯验证码账号
         // 资料/头像可空（identity 不一定都返回）
         assertThat(second.nickname()).isNull();
         assertThat(second.avatar()).isNull();
@@ -100,16 +103,17 @@ class AccountBffIntegrationTest {
                 .thenReturn(new PageResponse<>(List.of(), 0L, 2, 20));
 
         AccountQuery query = new AccountQuery(
-                "alice@example.com", "13800000001", "u-1",
-                "ACTIVE", true,
+                "alice@example.com", "13800000001", 1001L,
+                1, true,
                 LocalDateTime.of(2026, 1, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
 
         accountAppService.list(query, PageRequest.of(2, 20));
 
-        // query → wire 映射：筛选原样透传；Spring Pageable 0-based(page=2) → 客户端 1-based(page=3)
+        // query → wire 映射：筛选原样透传（含 userId Long / status Integer code / createdFrom·To）；
+        // Spring Pageable 0-based(page=2) → 客户端 1-based(page=3)
         AccountSearchWireRequest expectedWire = new AccountSearchWireRequest(
-                "alice@example.com", "13800000001", "u-1",
-                "ACTIVE", true,
+                "alice@example.com", "13800000001", 1001L,
+                1, true,
                 LocalDateTime.of(2026, 1, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
         verify(accountClient).listAccounts(eq(expectedWire), eq(3), eq(20));
     }

@@ -1,37 +1,37 @@
 package com.aieducenter.admin.account.application.dto.wire;
 
-import java.time.LocalDateTime;
-
 /**
- * identity 账号列表项的 wire 镜像——仅包含 BFF 需要的字段。
+ * identity 账号列表项的 wire 镜像——与 identity {@code AccountManagementView}（#67/#70）字段同构。
  *
- * <p>用于 Jackson 反序列化 {@link com.cartisan.openapi.client.OpenApiClient} 响应，
- * 不与 identity 内部 DTO 耦合。字段最终以 identity 实现契约为准（identity #70 未冻结）。</p>
+ * <p>用于 Jackson 反序列化 {@link com.cartisan.openapi.client.OpenApiClient} 响应，不与 identity 内部
+ * DTO 耦合。{@code status} 经 cartisan-web {@code BaseEnumSerializer} 序列化为 Integer code
+ *（1=ACTIVE / 0=DISABLED），此处按 Integer 反序列化原值透传。{@code locked} / {@code hasPassword}
+ * 在 identity 为原始 boolean（恒在）。</p>
  *
  * @since 0.1.0
  */
 public record AccountWireResponse(
 
-        /** 用户 ID（identity 终端用户标识） */
-        String userId,
+        /** 用户 ID（identity TSID） */
+        Long userId,
 
         String email,
 
         String phone,
 
-        /** 昵称（资料） */
+        /** 昵称（取自 Profile，可空） */
         String nickname,
 
-        /** 头像 URL（资料） */
+        /** 头像 URL（取自 Profile，可空） */
         String avatar,
 
-        /** 账号状态（ACTIVE / DISABLED 等 identity 账号状态枚举名，原值透传） */
-        String status,
+        /** 账号状态 BaseEnum code（1=ACTIVE / 0=DISABLED） */
+        Integer status,
 
-        /** 是否系统锁定（登录失败次数等触发的系统锁，区别于封号状态） */
-        Boolean locked,
+        /** 是否被系统锁定（登录失败累计等，独立于 status） */
+        boolean locked,
 
-        /** 注册时间 */
-        LocalDateTime registeredAt
+        /** 是否设过密码（社交/纯验证码账号为 false） */
+        boolean hasPassword
 ) {
 }

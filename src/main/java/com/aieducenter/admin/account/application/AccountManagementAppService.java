@@ -19,8 +19,7 @@ import org.springframework.stereotype.Service;
  * （审计归 identity）。下游错误经 {@link #translateAccountError} 统一翻译为 {@link DomainException}
  * （携带 {@link BaseCodeMessage} CodeMessage），错误语义对齐 {@code PaymentManagementAppService}。</p>
  *
- * <p>identity 账号管理契约（identity #67–#72）未全部冻结，本应用服务按 #49 spec 计划形态对接，
- * client / appservice 可先写、用 mock 验，待 identity 就绪再接真。</p>
+ * <p>对接 identity {@code GET /api/account}（#70 已冻结）。</p>
  *
  * @since 0.1.0
  */
@@ -44,7 +43,7 @@ public class AccountManagementAppService {
         var filter = new AccountSearchWireRequest(
                 query.email(), query.phone(), query.userId(),
                 query.status(), query.locked(),
-                query.registeredAtFrom(), query.registeredAtTo());
+                query.createdFrom(), query.createdTo());
         PageResponse<AccountWireResponse> page;
         try {
             page = accountClient.listAccounts(
@@ -66,7 +65,7 @@ public class AccountManagementAppService {
         return new AccountSummaryResponse(
                 wire.userId(), wire.email(), wire.phone(),
                 wire.nickname(), wire.avatar(),
-                wire.status(), wire.locked(), wire.registeredAt());
+                wire.status(), wire.locked(), wire.hasPassword());
     }
 
     /**
