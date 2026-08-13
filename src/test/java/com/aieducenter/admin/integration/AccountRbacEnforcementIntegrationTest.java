@@ -52,7 +52,7 @@ import cn.dev33.satoken.config.SaTokenConfig;
  * <p>覆盖端点：
  * <ul>
  *   <li>读（{@code admin:account:read}）：列表 {@code GET /accounts}、管理详情 {@code GET /accounts/{userId}/management}。</li>
- *   <li>写（{@code admin:account:write}）：封号 {@code POST /accounts/{userId}/disable}、解封 {@code /activate}、解锁 {@code /unlock}。</li>
+ *   <li>写（{@code admin:account:write}）：封号 {@code POST /accounts/{userId}/disable}、解封 {@code /activate}、解锁 {@code /unlock}、强制下线 {@code /sessions/revoke}。</li>
  * </ul>
  *
  * <p>200 用例 mock {@link AccountClient}（空页 / 详情 / 写 no-op），证明权限放行后整条
@@ -79,6 +79,7 @@ class AccountRbacEnforcementIntegrationTest {
     private static final String DISABLE_ENDPOINT = "/api/admin/accounts/" + TARGET_USER_ID + "/disable";
     private static final String ACTIVATE_ENDPOINT = "/api/admin/accounts/" + TARGET_USER_ID + "/activate";
     private static final String UNLOCK_ENDPOINT = "/api/admin/accounts/" + TARGET_USER_ID + "/unlock";
+    private static final String REVOKE_ENDPOINT = "/api/admin/accounts/" + TARGET_USER_ID + "/sessions/revoke";
 
     private final AdminUserManagementAppService userAppService;
     private final RoleManagementAppService roleAppService;
@@ -160,6 +161,8 @@ class AccountRbacEnforcementIntegrationTest {
                 .activate(eq(TARGET_USER_ID), any(AccountReasonWireRequest.class));
         doAnswer(inv -> { capture.run(); return null; }).when(accountClient)
                 .unlock(eq(TARGET_USER_ID), any(AccountReasonWireRequest.class));
+        doAnswer(inv -> { capture.run(); return null; }).when(accountClient)
+                .revokeSessions(eq(TARGET_USER_ID), any(AccountReasonWireRequest.class));
     }
 
     // ========== 列表（admin:account:read）· 权限三态 ==========
@@ -261,15 +264,17 @@ class AccountRbacEnforcementIntegrationTest {
     }
 
     @Test
-    @DisplayName("activate/unlock reason 超长（>500）→ 400（@Valid 触发 @Size(max=500)，此前缺 @Valid 是死代码）")
-    void given_writePermissionButOversizedReason_when_activateOrUnlock_then_400() {
+    @DisplayName("activate/unlock/revoke reason 超长（>500）→ 400（@Valid 触发 @Size(max=500)，此前缺 @Valid 是死代码）")
+    void given_writePermissionButOversizedReason_when_activateUnlockRevoke_then_400() {
         String token = login(usernameWithWritePermission);
         String tooLong = "{\"reason\":\"" + "x".repeat(501) + "\"}";
-        // activate / unlock 均挂 @Valid → @Size(max=500) 生效；缺 @Valid 时会放行（200），此处钉死校验生效
+        // activate / unlock / revoke 均挂 @Valid → @Size(max=500) 生效；缺 @Valid 时会放行（200），此处钉死校验生效
         ResponseEntity<String> activateResp = postWithToken(ACTIVATE_ENDPOINT, token, tooLong);
         assertThat(activateResp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         ResponseEntity<String> unlockResp = postWithToken(UNLOCK_ENDPOINT, token, tooLong);
         assertThat(unlockResp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        ResponseEntity<String> revokeResp = postWithToken(REVOKE_ENDPOINT, token, tooLong);
+        assertThat(revokeResp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     // ========== 解封（admin:account:write）· 权限三态 + 操作者身份透传 ==========
@@ -333,6 +338,40 @@ class AccountRbacEnforcementIntegrationTest {
     void given_unauthenticated_when_unlock_then_401() {
         ResponseEntity<String> response = postWithToken(
                 UNLOCK_ENDPOINT, null, "{\"reason\":\"x\"}");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    // ========== 强制下线（admin:account:write）· 权限三态 + 操作者身份透传 ==========
+
+    @Test
+    @DisplayName("非超管且拥有 admin:account:write → 强制下线 200，且 RequestContext 透传登录 operator 身份")
+    void given_nonSuperAdminWithWrite_when_revokeSessions_then_200_andRequestContextCarriesOperator() {
+        String token = login(usernameWithWritePermission);
+        ResponseEntity<String> response = postWithToken(
+                REVOKE_ENDPOINT, token, "{\"reason\":\"排查异常登录\"}");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        // 操作者身份不经 body——经 RequestContext 抵达出站调用点（OpenApiClient 据此带 X-User-Id/X-User-Name）
+        assertThat(capturedOperatorId.get()).isEqualTo(writeUserId);
+        assertThat(capturedOperatorName.get()).isEqualTo(writeUserNickname);
+        // reason 原样透传到出站 wire（operator 不在 wire 里）；revoke 不触发任何状态变更调用（不改状态）
+        verify(accountClient).revokeSessions(eq(TARGET_USER_ID), eq(new AccountReasonWireRequest("排查异常登录")));
+    }
+
+    @Test
+    @DisplayName("仅有 admin:account:read（无 write）→ 强制下线 403")
+    void given_nonSuperAdminWithReadOnly_when_revokeSessions_then_403() {
+        String token = login(usernameWithReadPermission);
+        ResponseEntity<String> response = postWithToken(
+                REVOKE_ENDPOINT, token, "{\"reason\":\"x\"}");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("未登录强制下线返回 401")
+    void given_unauthenticated_when_revokeSessions_then_401() {
+        ResponseEntity<String> response = postWithToken(
+                REVOKE_ENDPOINT, null, "{\"reason\":\"x\"}");
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 

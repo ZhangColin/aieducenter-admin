@@ -47,7 +47,8 @@ import com.cartisan.web.response.PageResponse;
  * 验证 controller→appservice→client 通路（DTO 映射 / 筛选映射 / 分页契约 / 错误翻译）。</p>
  *
  * <p>另覆盖 #53：管理详情（{@code GET /api/account/{userId}/management}，wire→detail 映射 + 错误翻译）、
- * 三个状态写端点（disable/activate/unlock，{@code {reason}} wire 透传 + 回读详情 + 错误翻译）。operator 身份
+ * 三个状态写端点（disable/activate/unlock，{@code {reason}} wire 透传 + 回读详情 + 错误翻译）。以及 #54
+ * 强制下线（sessions/revoke，纯透传 + <strong>不改账号状态</strong> + 错误翻译）。operator 身份
  * 透传（经 RequestContext，非 body）的端到端证据在 {@code AccountRbacEnforcementIntegrationTest}（真实登录 +
  * mocked client 边界抓 RequestContext）。</p>
  */
@@ -277,6 +278,41 @@ class AccountBffIntegrationTest {
                 .when(accountClient).unlock(eq(9999L), any(AccountReasonWireRequest.class));
 
         assertThatThrownBy(() -> accountAppService.unlock(9999L, null))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.NOT_FOUND);
+    }
+
+    // ========== sessions/revoke · 纯透传 wire + 不改账号状态 + 错误翻译 ==========
+
+    @Test
+    void given_optionalReason_when_revokeSessions_then_passReasonAsWireAndTouchNoStatusOp() {
+        // 强制下线：纯透传 {reason}，不回读。acceptance #1「不改账号状态（区别于 disable）」的 BFF 侧证据——
+        // revoke 只调 revokeSessions 出站，绝不触发 disable/activate/unlock 等状态变更调用。
+        // （identity 端 revokeSessions 的实际不动状态是其契约保证：调 SsoSessionRevoker.revokeQuietly + 审计，不碰 status。）
+        accountAppService.revokeSessions(1001L, "排查异常登录");
+
+        verify(accountClient).revokeSessions(eq(1001L), eq(new AccountReasonWireRequest("排查异常登录")));
+        verify(accountClient, never()).getManagementDetail(any());   // 纯透传不回读
+        verify(accountClient, never()).disable(any(), any());        // 不改状态（区别于封号「改状态+附带踢人」）
+        verify(accountClient, never()).activate(any(), any());
+        verify(accountClient, never()).unlock(any(), any());
+    }
+
+    @Test
+    void given_nullReason_when_revokeSessions_then_passNullReason() {
+        // reason 可空（低危可逆动作）：前端不带 body 时 reason 为 null
+        accountAppService.revokeSessions(1001L, null);
+
+        verify(accountClient).revokeSessions(eq(1001L), eq(new AccountReasonWireRequest(null)));
+    }
+
+    @Test
+    void given_downstream404_when_revokeSessions_then_throwNotFound() {
+        // identity 404（账号不存在）→ admin 404（NOT_FOUND）
+        doThrow(new OpenApiClientException(404, "{\"message\":\"not found\"}"))
+                .when(accountClient).revokeSessions(eq(9999L), any(AccountReasonWireRequest.class));
+
+        assertThatThrownBy(() -> accountAppService.revokeSessions(9999L, null))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.NOT_FOUND);
     }

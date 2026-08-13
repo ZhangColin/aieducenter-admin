@@ -117,4 +117,21 @@ public class AccountController {
         accountAppService.unlock(userId, command == null ? null : command.reason());
         return ApiResponse.ok(null);
     }
+
+    @PostMapping("/{userId}/sessions/revoke")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:account:write",
+            name = "账号管理 / 状态操作",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "强制下线——一键 revoke 该账号全部会话、不改账号状态（区别于封号）；操作者身份经 RequestContext 透传，审计归 identity")
+    public ApiResponse<Void> revokeSessions(
+            @PathVariable Long userId,
+            @Valid @RequestBody(required = false) AccountReasonCommand command) {
+        // 强制下线 ≠ 封号：只清 SSO 会话、不动 status（identity revokeSessions 契约）；reason 可选；
+        // @Valid 兜 @Size(max=500)；operator 经 RequestContext 透传（同 disable）。纯透传。
+        accountAppService.revokeSessions(userId, command == null ? null : command.reason());
+        return ApiResponse.ok(null);
+    }
 }

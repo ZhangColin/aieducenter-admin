@@ -42,7 +42,7 @@ public class AccountClient {
     private static final TypeReference<ApiResponse<AccountWireResponse>> MANAGEMENT_DETAIL_TYPEREF =
             new TypeReference<>() {};
 
-    // identity 状态写端点（disable/activate/unlock）返回 raw 204 No Content（空 body，无信封）。
+    // identity 写端点（disable/activate/unlock/sessions-revoke）返回 raw 204 No Content（空 body，无信封）。
     // 用 ApiResponse<Void> typerref 消费：cartisan-boot OpenApiClient.readBody 对空 body 返回 null、不抛
     // （cartisan-boot #19 已修；真实 204 消费路径由 AccountClientWriteVoidContractTest 钉死）。
     private static final TypeReference<ApiResponse<Void>> VOID_TYPEREF =
@@ -156,6 +156,27 @@ public class AccountClient {
     public void unlock(Long userId, AccountReasonWireRequest request) {
         String url = baseUrl + "/api/account/" + encode(userId.toString()) + "/unlock";
         log.debug("AccountClient.unlock: {}", url);
+        openApiClient.post(url, request, VOID_TYPEREF);
+    }
+
+    /**
+     * 强制下线（透传 identity）——一键清退该用户所有 SSO 会话（独立踢人），<strong>不改账号状态</strong>
+     * （区别于 {@link #disable}：封号是「改状态 + 附带踢人」，revoke 是「只踢人、不动状态」）+ 审计。
+     *
+     * <p>对接 identity {@code POST /api/account/{userId}/sessions/revoke}（#69 已冻结）：body {@code {reason}}
+     * （reason 可空）；返回 raw 204 无 body。该用户当前无在线会话时撤销 0 个、正常返回 204（不报错）。operator
+     * 身份经框架 {@code RequestContext}→{@code X-User-Id/X-User-Name} 自动带入出站 header，identity 据此审计——
+     * <strong>不</strong>在 body 里塞 operator（同 {@link #disable}）。</p>
+     *
+     * <p>identity 返 raw 204 空 body（#19 已修，{@code readBody} 返 null——同 {@link #disable}）。</p>
+     *
+     * @param userId  用户 ID（identity TSID）
+     * @param request wire 层强制下线载荷（{reason}，可空）
+     * @throws com.cartisan.openapi.client.OpenApiClientException identity 404（账号不存在）等透传，由应用层翻译
+     */
+    public void revokeSessions(Long userId, AccountReasonWireRequest request) {
+        String url = baseUrl + "/api/account/" + encode(userId.toString()) + "/sessions/revoke";
+        log.debug("AccountClient.revokeSessions: {}", url);
         openApiClient.post(url, request, VOID_TYPEREF);
     }
 

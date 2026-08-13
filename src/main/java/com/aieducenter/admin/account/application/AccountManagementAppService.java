@@ -155,6 +155,30 @@ public class AccountManagementAppService {
     }
 
     /**
+     * 强制下线（透传 identity）——一键清退该用户所有 SSO 会话（独立踢人），<strong>不改账号状态</strong>
+     * （区别于 {@link #disable}：封号「改状态+附带踢人」，revoke「只踢人、不动状态」）+ 审计。纯透传：仅转发 {reason}，不回读。
+     *
+     * <p>复用 {@link #disable} 的身份透传范式：{@code reason} 可空（用户可重新登录、无破坏性，低危可逆动作），
+     * operator 经框架 RequestContext 透传，纯透传不回读（同 {@link #disable}）。</p>
+     *
+     * <p>「不改账号状态」的 BFF 侧保证：本方法只转发至 identity {@code /sessions/revoke}，<strong>不</strong>触发
+     * disable/activate/unlock 等状态变更出站调用（见 {@code AccountBffIntegrationTest} 的 never() 断言）。
+     * identity 端的实际不动状态由其 revokeSessions 契约保证（调 SsoSessionRevoker.revokeQuietly + 审计，不碰状态）。</p>
+     *
+     * <p>错误翻译：identity 404（账号不存在）⟹ {@link BaseCodeMessage#NOT_FOUND}。</p>
+     *
+     * @param userId 用户 ID（identity TSID）
+     * @param reason 强制下线原因（可空）
+     */
+    public void revokeSessions(Long userId, String reason) {
+        try {
+            accountClient.revokeSessions(userId, new AccountReasonWireRequest(reason));
+        } catch (OpenApiClientException e) {
+            throw translateAccountError(e);
+        }
+    }
+
+    /**
      * identity 下游错误翻译——按 HTTP 状态映射为 {@link DomainException}（携带 {@link BaseCodeMessage}），
      * 保留下游异常为 cause。供本上下文各调用点复用（与 {@code PaymentManagementAppService.translatePaymentError} 同款）。
      *

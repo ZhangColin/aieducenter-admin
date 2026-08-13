@@ -25,7 +25,7 @@ import com.sun.net.httpserver.HttpServer;
 /**
  * identity 状态写端点的 204 空 body 消费契约测试（cartisan-boot #19 已修后补的 proof）。
  *
- * <p>identity 的 {@code disable}/{@code activate}/{@code unlock} 返 raw <strong>204 No Content（空 body、无信封）</strong>。
+ * <p>identity 的 {@code disable}/{@code activate}/{@code unlock}/{@code sessions-revoke} 返 raw <strong>204 No Content（空 body、无信封）</strong>。
  * {@link AccountClient} 三写方法用 {@code VOID_TYPEREF} 消费。cartisan-boot #19 前，{@link OpenApiClient} 对空 body
  * 无条件 {@code readValue} 抛 {@code MismatchedInputException}（实测确认）——彼时此测试无法写（一调就抛）。
  * #19 修了 {@code readBody}（空 body 返 null、不抛）后，本测试钉死 admin 的完整写路径：真实
@@ -66,7 +66,7 @@ class AccountClientWriteVoidContractTest {
     }
 
     /**
-     * 三写端点共享同一 {@code openApiClient.post(url, body, VOID_TYPEREF)} 机制，逐一钉死：204 空 body 被消费不抛、
+     * 四写端点共享同一 {@code openApiClient.post(url, body, VOID_TYPEREF)} 机制，逐一钉死：204 空 body 被消费不抛、
      * 出站路径 + {@code {reason}} body 正确。
      */
     static java.util.stream.Stream<Object[]> writeOps() {
@@ -74,10 +74,12 @@ class AccountClientWriteVoidContractTest {
         BiConsumer<AccountClient, AccountReasonWireRequest> disable = (c, r) -> c.disable(userId, r);
         BiConsumer<AccountClient, AccountReasonWireRequest> activate = (c, r) -> c.activate(userId, r);
         BiConsumer<AccountClient, AccountReasonWireRequest> unlock = (c, r) -> c.unlock(userId, r);
+        BiConsumer<AccountClient, AccountReasonWireRequest> revoke = (c, r) -> c.revokeSessions(userId, r);
         return java.util.stream.Stream.of(
                 new Object[]{disable, "/disable", "违规账号，多次刷单"},
                 new Object[]{activate, "/activate", "申诉成功"},
-                new Object[]{unlock, "/unlock", "风控误判"});
+                new Object[]{unlock, "/unlock", "风控误判"},
+                new Object[]{revoke, "/sessions/revoke", "排查异常登录"});
     }
 
     @ParameterizedTest(name = "[{1}] identity 返 204 空 body → 写操作不抛 + 出站路径/body 正确")
