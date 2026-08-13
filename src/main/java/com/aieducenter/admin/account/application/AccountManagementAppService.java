@@ -1,7 +1,9 @@
 package com.aieducenter.admin.account.application;
 
 import com.aieducenter.admin.account.application.dto.query.AccountQuery;
+import com.aieducenter.admin.account.application.dto.response.AccountManagementDetailResponse;
 import com.aieducenter.admin.account.application.dto.response.AccountSummaryResponse;
+import com.aieducenter.admin.account.application.dto.wire.AccountReasonWireRequest;
 import com.aieducenter.admin.account.application.dto.wire.AccountSearchWireRequest;
 import com.aieducenter.admin.account.application.dto.wire.AccountWireResponse;
 import com.aieducenter.admin.account.infrastructure.AccountClient;
@@ -66,6 +68,90 @@ public class AccountManagementAppService {
                 wire.userId(), wire.email(), wire.phone(),
                 wire.nickname(), wire.avatar(),
                 wire.status(), wire.locked(), wire.hasPassword());
+    }
+
+    /**
+     * 查询账号管理详情（透传 identity）——状态/锁定/是否有密码 + 资料，供前端抽屉。
+     *
+     * <p>identity 404（账号不存在）翻译为 {@link BaseCodeMessage#NOT_FOUND}（404）。</p>
+     */
+    public AccountManagementDetailResponse getManagementDetail(Long userId) {
+        AccountWireResponse wire;
+        try {
+            wire = accountClient.getManagementDetail(userId);
+        } catch (OpenApiClientException e) {
+            throw translateAccountError(e);
+        }
+        return toDetail(wire);
+    }
+
+    private static AccountManagementDetailResponse toDetail(AccountWireResponse wire) {
+        return new AccountManagementDetailResponse(
+                wire.userId(), wire.email(), wire.phone(),
+                wire.nickname(), wire.avatar(),
+                wire.status(), wire.locked(), wire.hasPassword());
+    }
+
+    /**
+     * 封号（透传 identity）——状态置 DISABLED + identity 自动踢所有会话 + 审计。纯透传：仅转发 {reason}，不回读。
+     *
+     * <p>{@code reason} 来自前端（封号高危、必填，由 {@code DisableAccountCommand @NotBlank} 兜）；
+     * operator 身份<strong>不</strong>经此方法——经框架 {@code RequestContext}→{@code X-User-Id/X-User-Name}
+     * 自动带入出站 header（identity 管理端点从 RequestContext 读 operator 审计，与 payment 退款审核身份进 body 不同）。</p>
+     *
+     * <p>纯透传（spec「纯透传」）：identity 写端点返 raw 204、无 body，admin 不回读——避免「封号成功却因回读 GET 抖动
+     * 报错」的歧义（成功操作不应因二次读失败而误报）。前端收到成功 ack 后自行回读详情刷新抽屉。</p>
+     *
+     * <p>错误翻译（复用 {@link #translateAccountError}）：identity 404（账号不存在）⟹
+     * {@link BaseCodeMessage#NOT_FOUND}；identity 400（reason 缺失）⟹ {@link BaseCodeMessage#BAD_REQUEST}。</p>
+     *
+     * @param userId 用户 ID（identity TSID）
+     * @param reason 封号原因（必填，非空——由 controller 层 @Valid 保证）
+     */
+    public void disable(Long userId, String reason) {
+        try {
+            accountClient.disable(userId, new AccountReasonWireRequest(reason));
+        } catch (OpenApiClientException e) {
+            throw translateAccountError(e);
+        }
+    }
+
+    /**
+     * 解封（透传 identity）——状态置 ACTIVE（不改会话：封号时已清，用户需重新登录）+ 审计。纯透传：仅转发 {reason}，不回读。
+     *
+     * <p>复用 {@link #disable} 的身份透传范式：{@code reason} 可空（低危可逆动作），operator 经框架 RequestContext 透传，
+     * 纯透传不回读（同 {@link #disable}）。</p>
+     *
+     * <p>错误翻译：identity 404（账号不存在）⟹ {@link BaseCodeMessage#NOT_FOUND}。</p>
+     *
+     * @param userId 用户 ID（identity TSID）
+     * @param reason 解封原因（可空）
+     */
+    public void activate(Long userId, String reason) {
+        try {
+            accountClient.activate(userId, new AccountReasonWireRequest(reason));
+        } catch (OpenApiClientException e) {
+            throw translateAccountError(e);
+        }
+    }
+
+    /**
+     * 解锁（透传 identity）——locked 置 false（解除系统自动锁定，独立于 status、不改会话）+ 审计。纯透传：仅转发 {reason}，不回读。
+     *
+     * <p>复用 {@link #disable} 的身份透传范式：{@code reason} 可空，operator 经框架 RequestContext 透传，
+     * 纯透传不回读（同 {@link #disable}）。</p>
+     *
+     * <p>错误翻译：identity 404（账号不存在）⟹ {@link BaseCodeMessage#NOT_FOUND}。</p>
+     *
+     * @param userId 用户 ID（identity TSID）
+     * @param reason 解锁原因（可空）
+     */
+    public void unlock(Long userId, String reason) {
+        try {
+            accountClient.unlock(userId, new AccountReasonWireRequest(reason));
+        } catch (OpenApiClientException e) {
+            throw translateAccountError(e);
+        }
     }
 
     /**

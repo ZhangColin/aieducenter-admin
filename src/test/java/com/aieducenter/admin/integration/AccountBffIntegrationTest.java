@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -20,7 +22,9 @@ import org.springframework.data.domain.PageRequest;
 
 import com.aieducenter.admin.account.application.AccountManagementAppService;
 import com.aieducenter.admin.account.application.dto.query.AccountQuery;
+import com.aieducenter.admin.account.application.dto.response.AccountManagementDetailResponse;
 import com.aieducenter.admin.account.application.dto.response.AccountSummaryResponse;
+import com.aieducenter.admin.account.application.dto.wire.AccountReasonWireRequest;
 import com.aieducenter.admin.account.application.dto.wire.AccountSearchWireRequest;
 import com.aieducenter.admin.account.application.dto.wire.AccountWireResponse;
 import com.aieducenter.admin.account.infrastructure.AccountClient;
@@ -41,6 +45,11 @@ import com.cartisan.web.response.PageResponse;
  * {@code AccountManagementView} 真实形状构造（userId=Long TSID、status=Integer BaseEnum code
  * 1=ACTIVE/0=DISABLED、locked/hasPassword=原始 boolean、无注册时间字段）。本测试在 client 边界 mock，
  * 验证 controller→appservice→client 通路（DTO 映射 / 筛选映射 / 分页契约 / 错误翻译）。</p>
+ *
+ * <p>另覆盖 #53：管理详情（{@code GET /api/account/{userId}/management}，wire→detail 映射 + 错误翻译）、
+ * 三个状态写端点（disable/activate/unlock，{@code {reason}} wire 透传 + 回读详情 + 错误翻译）。operator 身份
+ * 透传（经 RequestContext，非 body）的端到端证据在 {@code AccountRbacEnforcementIntegrationTest}（真实登录 +
+ * mocked client 边界抓 RequestContext）。</p>
  */
 @SpringBootTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -154,6 +163,120 @@ class AccountBffIntegrationTest {
         assertThatThrownBy(() -> accountAppService.list(
                 new AccountQuery(null, null, null, null, null, null, null),
                 PageRequest.of(0, 20)))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.NOT_FOUND);
+    }
+
+    // ========== management detail · DTO 映射 + 错误翻译 ==========
+
+    @Test
+    void given_managementDetail_when_get_then_returnMappedDetail() {
+        when(accountClient.getManagementDetail(1001L)).thenReturn(
+                new AccountWireResponse(1001L, "alice@example.com", "13800000001",
+                        "爱丽丝", "https://cdn/avatar1.png", 1, false, true));
+
+        AccountManagementDetailResponse detail = accountAppService.getManagementDetail(1001L);
+
+        // DTO 映射：wire → detail response 逐字段（与列表项同构）
+        assertThat(detail.userId()).isEqualTo(1001L);
+        assertThat(detail.email()).isEqualTo("alice@example.com");
+        assertThat(detail.phone()).isEqualTo("13800000001");
+        assertThat(detail.nickname()).isEqualTo("爱丽丝");
+        assertThat(detail.avatar()).isEqualTo("https://cdn/avatar1.png");
+        assertThat(detail.status()).isEqualTo(1);          // ACTIVE
+        assertThat(detail.locked()).isFalse();
+        assertThat(detail.hasPassword()).isTrue();
+    }
+
+    @Test
+    void given_downstream404_when_getManagementDetail_then_throwNotFound() {
+        // identity 404（账号不存在）→ admin 404（NOT_FOUND）
+        when(accountClient.getManagementDetail(9999L))
+                .thenThrow(new OpenApiClientException(404, "{\"message\":\"not found\"}"));
+
+        assertThatThrownBy(() -> accountAppService.getManagementDetail(9999L))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.NOT_FOUND);
+    }
+
+    @Test
+    void given_downstream500_when_getManagementDetail_then_throwThirdPartyError() {
+        when(accountClient.getManagementDetail(1001L))
+                .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
+
+        assertThatThrownBy(() -> accountAppService.getManagementDetail(1001L))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
+    }
+
+    // ========== disable · 纯透传 wire + 错误翻译 ==========
+
+    @Test
+    void given_validReason_when_disable_then_passReasonAsWireAndNoRefetch() {
+        // 纯透传：仅转发 {reason}，不回读（accountClient.disable 为 void，mock 默认 no-op = 封号成功）
+        accountAppService.disable(1001L, "违规账号，多次刷单");
+
+        // wire 映射：command.reason → AccountReasonWireRequest.reason（不含 operator 身份——经 RequestContext 透传）
+        verify(accountClient).disable(eq(1001L), eq(new AccountReasonWireRequest("违规账号，多次刷单")));
+        // 纯透传不回读：写操作不触发 getManagementDetail（避免「成功却因回读抖动报错」）
+        verify(accountClient, never()).getManagementDetail(any());
+    }
+
+    @Test
+    void given_downstream404_when_disable_then_throwNotFound() {
+        // identity 404（账号不存在）→ admin 404（NOT_FOUND）
+        doThrow(new OpenApiClientException(404, "{\"message\":\"not found\"}"))
+                .when(accountClient).disable(eq(9999L), any(AccountReasonWireRequest.class));
+
+        assertThatThrownBy(() -> accountAppService.disable(9999L, "x"))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.NOT_FOUND);
+    }
+
+    @Test
+    void given_downstream400_when_disable_then_throwBadRequest() {
+        // identity 400（reason 缺失——被 @NotBlank 兜，此为下游兜底）→ admin 400（BAD_REQUEST）
+        doThrow(new OpenApiClientException(400, "{\"message\":\"reason required\"}"))
+                .when(accountClient).disable(eq(1001L), any(AccountReasonWireRequest.class));
+
+        assertThatThrownBy(() -> accountAppService.disable(1001L, "x"))
+                .isInstanceOf(DomainException.class)
+                .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.BAD_REQUEST);
+    }
+
+    // ========== activate / unlock · 纯透传 wire（reason 可空）+ 错误翻译 ==========
+
+    @Test
+    void given_optionalReason_when_activate_then_passReasonAsWireAndNoRefetch() {
+        accountAppService.activate(1001L, "申诉成功");
+
+        verify(accountClient).activate(eq(1001L), eq(new AccountReasonWireRequest("申诉成功")));
+        verify(accountClient, never()).getManagementDetail(any());
+    }
+
+    @Test
+    void given_nullReason_when_activate_then_passNullReason() {
+        // activate/unlock reason 可空：前端不带 body 时 reason 为 null
+        accountAppService.activate(1001L, null);
+
+        verify(accountClient).activate(eq(1001L), eq(new AccountReasonWireRequest(null)));
+        verify(accountClient, never()).getManagementDetail(any());
+    }
+
+    @Test
+    void given_validReason_when_unlock_then_passReasonAsWireAndNoRefetch() {
+        accountAppService.unlock(1001L, "风控误判");
+
+        verify(accountClient).unlock(eq(1001L), eq(new AccountReasonWireRequest("风控误判")));
+        verify(accountClient, never()).getManagementDetail(any());
+    }
+
+    @Test
+    void given_downstream404_when_unlock_then_throwNotFound() {
+        doThrow(new OpenApiClientException(404, "{\"message\":\"not found\"}"))
+                .when(accountClient).unlock(eq(9999L), any(AccountReasonWireRequest.class));
+
+        assertThatThrownBy(() -> accountAppService.unlock(9999L, null))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.NOT_FOUND);
     }
