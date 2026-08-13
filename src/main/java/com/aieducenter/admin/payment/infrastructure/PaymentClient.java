@@ -30,6 +30,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
+
 /**
  * payment 签名 HTTP 客户端——封装 {@link OpenApiClient}，屏蔽 wire 层细节。
  *
@@ -368,13 +370,20 @@ public class PaymentClient {
      *
      * <p>一档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
      *
+     * @param from       统计窗口起（必填，ISO DATE_TIME，透传 payment）
+     * @param to         统计窗口止（必填，ISO DATE_TIME，透传 payment）
+     * @param granularity 趋势分桶粒度（可选，原值透传 payment StatsGranularity；admin 不拥有该枚举，故按字符串透传）
      * @return payment 返回的支付总览统计
      * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
      */
-    public PaymentOverviewWireResponse getPaymentOverview() {
-        String url = baseUrl + "/api/v1/stats/payments/overview";
+    public PaymentOverviewWireResponse getPaymentOverview(LocalDateTime from, LocalDateTime to, String granularity) {
+        // payment overview 要求必填 from/to（+可选 granularity）；admin 如实透传，不内置默认窗口（issue #51）。
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/v1/stats/payments/overview?from=").append(encode(from.toString()))
+                .append("&to=").append(encode(to.toString()));
+        appendParam(url, "granularity", granularity);
         log.debug("PaymentClient.getPaymentOverview: {}", url);
-        ApiResponse<PaymentOverviewWireResponse> resp = openApiClient.get(url, PAYMENT_OVERVIEW_TYPEREF);
+        ApiResponse<PaymentOverviewWireResponse> resp = openApiClient.get(url.toString(), PAYMENT_OVERVIEW_TYPEREF);
         return resp.data();
     }
 
@@ -398,13 +407,18 @@ public class PaymentClient {
      *
      * <p>一档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
      *
+     * @param from 统计窗口起（必填，ISO DATE_TIME，透传 payment）
+     * @param to   统计窗口止（必填，ISO DATE_TIME，透传 payment）
      * @return payment 返回的通道健康统计
      * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
      */
-    public GatewayHealthWireResponse getGatewayHealth() {
-        String url = baseUrl + "/api/v1/stats/gateway/health";
+    public GatewayHealthWireResponse getGatewayHealth(LocalDateTime from, LocalDateTime to) {
+        // payment gateway-health 要求必填 from/to；admin 如实透传，不内置默认窗口（issue #51）。
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/v1/stats/gateway/health?from=").append(encode(from.toString()))
+                .append("&to=").append(encode(to.toString()));
         log.debug("PaymentClient.getGatewayHealth: {}", url);
-        ApiResponse<GatewayHealthWireResponse> resp = openApiClient.get(url, GATEWAY_HEALTH_TYPEREF);
+        ApiResponse<GatewayHealthWireResponse> resp = openApiClient.get(url.toString(), GATEWAY_HEALTH_TYPEREF);
         return resp.data();
     }
 
@@ -413,13 +427,18 @@ public class PaymentClient {
      *
      * <p>一档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
      *
+     * @param from 统计窗口起（必填，ISO DATE_TIME，透传 payment）
+     * @param to   统计窗口止（必填，ISO DATE_TIME，透传 payment）
      * @return payment 返回的审核统计
      * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
      */
-    public OperationsAuditWireResponse getOperationsAudit() {
-        String url = baseUrl + "/api/v1/stats/operations/audit";
+    public OperationsAuditWireResponse getOperationsAudit(LocalDateTime from, LocalDateTime to) {
+        // payment operations-audit 要求必填 from/to；admin 如实透传，不内置默认窗口（issue #51）。
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/v1/stats/operations/audit?from=").append(encode(from.toString()))
+                .append("&to=").append(encode(to.toString()));
         log.debug("PaymentClient.getOperationsAudit: {}", url);
-        ApiResponse<OperationsAuditWireResponse> resp = openApiClient.get(url, OPERATIONS_AUDIT_TYPEREF);
+        ApiResponse<OperationsAuditWireResponse> resp = openApiClient.get(url.toString(), OPERATIONS_AUDIT_TYPEREF);
         return resp.data();
     }
 
@@ -428,13 +447,18 @@ public class PaymentClient {
      *
      * <p>二档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
      *
+     * @param from 统计窗口起（必填，ISO DATE_TIME，透传 payment）
+     * @param to   统计窗口止（必填，ISO DATE_TIME，透传 payment）
      * @return payment 返回的按业务系统细分统计
      * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
      */
-    public BusinessSystemStatsWireResponse getByBusinessSystem() {
-        String url = baseUrl + "/api/v1/stats/by-business-system";
+    public BusinessSystemStatsWireResponse getByBusinessSystem(LocalDateTime from, LocalDateTime to) {
+        // payment by-business-system 要求必填 from/to；admin 如实透传，不内置默认窗口（issue #51）。
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/v1/stats/by-business-system?from=").append(encode(from.toString()))
+                .append("&to=").append(encode(to.toString()));
         log.debug("PaymentClient.getByBusinessSystem: {}", url);
-        ApiResponse<BusinessSystemStatsWireResponse> resp = openApiClient.get(url, BUSINESS_SYSTEM_STATS_TYPEREF);
+        ApiResponse<BusinessSystemStatsWireResponse> resp = openApiClient.get(url.toString(), BUSINESS_SYSTEM_STATS_TYPEREF);
         return resp.data();
     }
 
@@ -443,13 +467,18 @@ public class PaymentClient {
      *
      * <p>二档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
      *
+     * @param from 统计窗口起（必填，ISO DATE_TIME，透传 payment）
+     * @param to   统计窗口止（必填，ISO DATE_TIME，透传 payment）
      * @return payment 返回的按通道细分统计
      * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
      */
-    public ChannelStatsWireResponse getByChannel() {
-        String url = baseUrl + "/api/v1/stats/by-channel";
+    public ChannelStatsWireResponse getByChannel(LocalDateTime from, LocalDateTime to) {
+        // payment by-channel 要求必填 from/to；admin 如实透传，不内置默认窗口（issue #51）。
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/v1/stats/by-channel?from=").append(encode(from.toString()))
+                .append("&to=").append(encode(to.toString()));
         log.debug("PaymentClient.getByChannel: {}", url);
-        ApiResponse<ChannelStatsWireResponse> resp = openApiClient.get(url, CHANNEL_STATS_TYPEREF);
+        ApiResponse<ChannelStatsWireResponse> resp = openApiClient.get(url.toString(), CHANNEL_STATS_TYPEREF);
         return resp.data();
     }
 
@@ -474,13 +503,18 @@ public class PaymentClient {
      *
      * <p>二档统计（issue #37），admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
      *
+     * @param from 统计窗口起（必填，ISO DATE_TIME，透传 payment）
+     * @param to   统计窗口止（必填，ISO DATE_TIME，透传 payment）
      * @return payment 返回的操作员活动统计
      * @throws com.cartisan.openapi.client.OpenApiClientException payment 5xx 等透传，由应用层翻译
      */
-    public OperationsActivityWireResponse getOperationsActivity() {
-        String url = baseUrl + "/api/v1/stats/operations/activity";
+    public OperationsActivityWireResponse getOperationsActivity(LocalDateTime from, LocalDateTime to) {
+        // payment operations/activity 要求必填 from/to；admin 如实透传，不内置默认窗口（issue #51）。
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/v1/stats/operations/activity?from=").append(encode(from.toString()))
+                .append("&to=").append(encode(to.toString()));
         log.debug("PaymentClient.getOperationsActivity: {}", url);
-        ApiResponse<OperationsActivityWireResponse> resp = openApiClient.get(url, OPERATIONS_ACTIVITY_TYPEREF);
+        ApiResponse<OperationsActivityWireResponse> resp = openApiClient.get(url.toString(), OPERATIONS_ACTIVITY_TYPEREF);
         return resp.data();
     }
 

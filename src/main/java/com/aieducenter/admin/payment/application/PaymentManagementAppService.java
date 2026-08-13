@@ -49,6 +49,7 @@ import com.cartisan.web.response.PageResponse;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -430,11 +431,15 @@ public class PaymentManagementAppService {
      *
      * <p>支付/退款笔数·金额·成功率·净额 + 按时间分桶趋势，聚合归 payment（一档统计，issue #37）。
      * admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     *
+     * @param from 统计窗口起（必填，ISO DATE_TIME，透传 payment）
+     * @param to   统计窗口止（必填，ISO DATE_TIME，透传 payment）
+     * @param granularity 趋势分桶粒度（可选，原值透传 payment StatsGranularity；admin 不拥有该枚举）
      */
-    public PaymentOverviewResponse getPaymentOverview() {
+    public PaymentOverviewResponse getPaymentOverview(LocalDateTime from, LocalDateTime to, String granularity) {
         PaymentOverviewWireResponse wire;
         try {
-            wire = paymentClient.getPaymentOverview();
+            wire = paymentClient.getPaymentOverview(from, to, granularity);
         } catch (OpenApiClientException e) {
             throw translatePaymentError(e);
         }
@@ -495,11 +500,14 @@ public class PaymentManagementAppService {
      *
      * <p>各银行接口调用次数·成功率·平均耗时·返回码分布，聚合归 payment（一档统计，issue #37）。
      * admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     *
+     * @param from 统计窗口起（必填，ISO DATE_TIME，透传 payment）
+     * @param to   统计窗口止（必填，ISO DATE_TIME，透传 payment）
      */
-    public GatewayHealthResponse getGatewayHealth() {
+    public GatewayHealthResponse getGatewayHealth(LocalDateTime from, LocalDateTime to) {
         GatewayHealthWireResponse wire;
         try {
-            wire = paymentClient.getGatewayHealth();
+            wire = paymentClient.getGatewayHealth(from, to);
         } catch (OpenApiClientException e) {
             throw translatePaymentError(e);
         }
@@ -533,11 +541,14 @@ public class PaymentManagementAppService {
      *
      * <p>审核笔数·通过率·平均审核时长 + 按审核人聚合，聚合归 payment（一档统计，issue #37）。
      * admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     *
+     * @param from 统计窗口起（必填，ISO DATE_TIME，透传 payment）
+     * @param to   统计窗口止（必填，ISO DATE_TIME，透传 payment）
      */
-    public OperationsAuditResponse getOperationsAudit() {
+    public OperationsAuditResponse getOperationsAudit(LocalDateTime from, LocalDateTime to) {
         OperationsAuditWireResponse wire;
         try {
-            wire = paymentClient.getOperationsAudit();
+            wire = paymentClient.getOperationsAudit(from, to);
         } catch (OpenApiClientException e) {
             throw translatePaymentError(e);
         }
@@ -564,11 +575,14 @@ public class PaymentManagementAppService {
      *
      * <p>各业务系统支付/退款笔数·金额·成功率·退款率，聚合归 payment（二档统计，issue #37）。
      * admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     *
+     * @param from 统计窗口起（必填，ISO DATE_TIME，透传 payment）
+     * @param to   统计窗口止（必填，ISO DATE_TIME，透传 payment）
      */
-    public BusinessSystemStatsResponse getByBusinessSystem() {
+    public BusinessSystemStatsResponse getByBusinessSystem(LocalDateTime from, LocalDateTime to) {
         BusinessSystemStatsWireResponse wire;
         try {
-            wire = paymentClient.getByBusinessSystem();
+            wire = paymentClient.getByBusinessSystem(from, to);
         } catch (OpenApiClientException e) {
             throw translatePaymentError(e);
         }
@@ -594,11 +608,14 @@ public class PaymentManagementAppService {
      *
      * <p>按 payMode / accessType 聚合的支付笔数·金额·成功率，聚合归 payment（二档统计，issue #37）。
      * admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     *
+     * @param from 统计窗口起（必填，ISO DATE_TIME，透传 payment）
+     * @param to   统计窗口止（必填，ISO DATE_TIME，透传 payment）
      */
-    public ChannelStatsResponse getByChannel() {
+    public ChannelStatsResponse getByChannel(LocalDateTime from, LocalDateTime to) {
         ChannelStatsWireResponse wire;
         try {
-            wire = paymentClient.getByChannel();
+            wire = paymentClient.getByChannel(from, to);
         } catch (OpenApiClientException e) {
             throw translatePaymentError(e);
         }
@@ -649,11 +666,14 @@ public class PaymentManagementAppService {
      *
      * <p>各操作员操作类型·笔数 + 通知重发次数，聚合归 payment（二档统计，issue #37）。
      * admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
+     *
+     * @param from 统计窗口起（必填，ISO DATE_TIME，透传 payment）
+     * @param to   统计窗口止（必填，ISO DATE_TIME，透传 payment）
      */
-    public OperationsActivityResponse getOperationsActivity() {
+    public OperationsActivityResponse getOperationsActivity(LocalDateTime from, LocalDateTime to) {
         OperationsActivityWireResponse wire;
         try {
-            wire = paymentClient.getOperationsActivity();
+            wire = paymentClient.getOperationsActivity(from, to);
         } catch (OpenApiClientException e) {
             throw translatePaymentError(e);
         }

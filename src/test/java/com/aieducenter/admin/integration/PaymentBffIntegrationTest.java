@@ -90,6 +90,11 @@ class PaymentBffIntegrationTest {
     @MockBean
     private PaymentClient paymentClient;
 
+    // 统计端点时间窗口（issue #51）：payment 要求 from/to 必填，admin 如实接收转发。所有统计透传测试共用此窗口。
+    private static final LocalDateTime STATS_FROM = LocalDateTime.of(2026, 7, 14, 0, 0);
+    private static final LocalDateTime STATS_TO = LocalDateTime.of(2026, 8, 13, 23, 59, 59);
+    private static final String STATS_GRANULARITY = "DAY";
+
     // ========== list · DTO 映射 + 分页契约 ==========
 
     @Test
@@ -831,7 +836,7 @@ class PaymentBffIntegrationTest {
         LocalDateTime b2 = LocalDateTime.of(2026, 8, 12, 0, 0);
         // 故意让 payment 回传顺序与时间序相反（b2 在前、b1 在后）——证明 admin 透传不重排：
         // 聚合/排序归 payment（spec「仪表盘」），admin 只 map 不 sort。
-        when(paymentClient.getPaymentOverview()).thenReturn(new PaymentOverviewWireResponse(
+        when(paymentClient.getPaymentOverview(STATS_FROM, STATS_TO, STATS_GRANULARITY)).thenReturn(new PaymentOverviewWireResponse(
                 1200L, new BigDecimal("98000.00"),
                 30L, new BigDecimal("2400.00"),
                 new BigDecimal("0.9850"), new BigDecimal("95600.00"),
@@ -841,7 +846,7 @@ class PaymentBffIntegrationTest {
                         new PaymentOverviewWireResponse.TrendBucketWireResponse(
                                 b1, 18L, new BigDecimal("1440.00"), 0L, new BigDecimal("0.00")))));
 
-        PaymentOverviewResponse overview = paymentAppService.getPaymentOverview();
+        PaymentOverviewResponse overview = paymentAppService.getPaymentOverview(STATS_FROM, STATS_TO, STATS_GRANULARITY);
 
         // 顶层快照逐字段映射
         assertThat(overview.paymentCount()).isEqualTo(1200L);
@@ -862,10 +867,10 @@ class PaymentBffIntegrationTest {
     @Test
     void given_overviewDownstream500_when_getPaymentOverview_then_throwThirdPartyError() {
         // payment 5xx（内部错误）→ 统一对外 THIRD_PARTY_ERROR（运营侧已认证，下游故障为第三方错误）
-        when(paymentClient.getPaymentOverview())
+        when(paymentClient.getPaymentOverview(STATS_FROM, STATS_TO, STATS_GRANULARITY))
                 .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
 
-        assertThatThrownBy(() -> paymentAppService.getPaymentOverview())
+        assertThatThrownBy(() -> paymentAppService.getPaymentOverview(STATS_FROM, STATS_TO, STATS_GRANULARITY))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
     }
@@ -917,7 +922,7 @@ class PaymentBffIntegrationTest {
 
     @Test
     void given_gatewayHealth_when_getGatewayHealth_then_mapBankInterfacesAndReturnCodes() {
-        when(paymentClient.getGatewayHealth()).thenReturn(new GatewayHealthWireResponse(List.of(
+        when(paymentClient.getGatewayHealth(STATS_FROM, STATS_TO)).thenReturn(new GatewayHealthWireResponse(List.of(
                 new GatewayHealthWireResponse.BankInterfaceStatWireResponse(
                         "ICBC_PAY", 1000L, 980L, new BigDecimal("0.98"), 120L,
                         List.of(
@@ -929,7 +934,7 @@ class PaymentBffIntegrationTest {
                         "WECHAT_QUERY", 500L, 495L, new BigDecimal("0.99"), 80L,
                         List.of()))));
 
-        GatewayHealthResponse health = paymentAppService.getGatewayHealth();
+        GatewayHealthResponse health = paymentAppService.getGatewayHealth(STATS_FROM, STATS_TO);
 
         assertThat(health.bankInterfaces()).hasSize(2);
         GatewayHealthResponse.BankInterfaceStat first = health.bankInterfaces().get(0);
@@ -950,10 +955,10 @@ class PaymentBffIntegrationTest {
 
     @Test
     void given_gatewayHealthDownstream500_when_getGatewayHealth_then_throwThirdPartyError() {
-        when(paymentClient.getGatewayHealth())
+        when(paymentClient.getGatewayHealth(STATS_FROM, STATS_TO))
                 .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
 
-        assertThatThrownBy(() -> paymentAppService.getGatewayHealth())
+        assertThatThrownBy(() -> paymentAppService.getGatewayHealth(STATS_FROM, STATS_TO))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
     }
@@ -962,7 +967,7 @@ class PaymentBffIntegrationTest {
 
     @Test
     void given_operationsAudit_when_getOperationsAudit_then_mapTopLevelAndAuditors() {
-        when(paymentClient.getOperationsAudit()).thenReturn(new OperationsAuditWireResponse(
+        when(paymentClient.getOperationsAudit(STATS_FROM, STATS_TO)).thenReturn(new OperationsAuditWireResponse(
                 60L, new BigDecimal("0.90"), 1800L,
                 List.of(
                         new OperationsAuditWireResponse.AuditorStatWireResponse(
@@ -970,7 +975,7 @@ class PaymentBffIntegrationTest {
                         new OperationsAuditWireResponse.AuditorStatWireResponse(
                                 2002L, "bob", 20L, 16L, new BigDecimal("0.80"), 2100L))));
 
-        OperationsAuditResponse audit = paymentAppService.getOperationsAudit();
+        OperationsAuditResponse audit = paymentAppService.getOperationsAudit(STATS_FROM, STATS_TO);
 
         // 顶层映射
         assertThat(audit.auditCount()).isEqualTo(60L);
@@ -988,10 +993,10 @@ class PaymentBffIntegrationTest {
 
     @Test
     void given_operationsAuditDownstream500_when_getOperationsAudit_then_throwThirdPartyError() {
-        when(paymentClient.getOperationsAudit())
+        when(paymentClient.getOperationsAudit(STATS_FROM, STATS_TO))
                 .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
 
-        assertThatThrownBy(() -> paymentAppService.getOperationsAudit())
+        assertThatThrownBy(() -> paymentAppService.getOperationsAudit(STATS_FROM, STATS_TO))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
     }
@@ -1000,7 +1005,7 @@ class PaymentBffIntegrationTest {
 
     @Test
     void given_businessSystemStats_when_getByBusinessSystem_then_mapSystemsAndPreserveOrder() {
-        when(paymentClient.getByBusinessSystem()).thenReturn(new BusinessSystemStatsWireResponse(List.of(
+        when(paymentClient.getByBusinessSystem(STATS_FROM, STATS_TO)).thenReturn(new BusinessSystemStatsWireResponse(List.of(
                 new BusinessSystemStatsWireResponse.BusinessSystemStatWireResponse(
                         "course-svc", 800L, new BigDecimal("64000.00"),
                         20L, new BigDecimal("1600.00"),
@@ -1010,7 +1015,7 @@ class PaymentBffIntegrationTest {
                         10L, new BigDecimal("800.00"),
                         new BigDecimal("0.95"), new BigDecimal("0.025")))));
 
-        BusinessSystemStatsResponse stats = paymentAppService.getByBusinessSystem();
+        BusinessSystemStatsResponse stats = paymentAppService.getByBusinessSystem(STATS_FROM, STATS_TO);
 
         // 按业务系统聚合映射 + 顺序保留
         assertThat(stats.systems()).hasSize(2);
@@ -1028,10 +1033,10 @@ class PaymentBffIntegrationTest {
     @Test
     void given_businessSystemStatsDownstream500_when_getByBusinessSystem_then_throwThirdPartyError() {
         // payment 5xx（内部错误）→ 统一对外 THIRD_PARTY_ERROR（运营侧已认证，下游故障为第三方错误）
-        when(paymentClient.getByBusinessSystem())
+        when(paymentClient.getByBusinessSystem(STATS_FROM, STATS_TO))
                 .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
 
-        assertThatThrownBy(() -> paymentAppService.getByBusinessSystem())
+        assertThatThrownBy(() -> paymentAppService.getByBusinessSystem(STATS_FROM, STATS_TO))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
     }
@@ -1040,7 +1045,7 @@ class PaymentBffIntegrationTest {
 
     @Test
     void given_channelStats_when_getByChannel_then_mapBothDimensionsAndPreserveOrder() {
-        when(paymentClient.getByChannel()).thenReturn(new ChannelStatsWireResponse(
+        when(paymentClient.getByChannel(STATS_FROM, STATS_TO)).thenReturn(new ChannelStatsWireResponse(
                 List.of(new ChannelStatsWireResponse.PayModeStatWireResponse(
                                 "WECHAT", 600L, new BigDecimal("48000.00"), new BigDecimal("0.98")),
                         new ChannelStatsWireResponse.PayModeStatWireResponse(
@@ -1048,7 +1053,7 @@ class PaymentBffIntegrationTest {
                 List.of(new ChannelStatsWireResponse.AccessTypeStatWireResponse(
                         "WEB", 700L, new BigDecimal("56000.00"), new BigDecimal("0.97")))));
 
-        ChannelStatsResponse stats = paymentAppService.getByChannel();
+        ChannelStatsResponse stats = paymentAppService.getByChannel(STATS_FROM, STATS_TO);
 
         // payMode 维度映射 + 顺序保留
         assertThat(stats.byPayMode()).hasSize(2);
@@ -1067,10 +1072,10 @@ class PaymentBffIntegrationTest {
     @Test
     void given_channelStatsDownstream400_when_getByChannel_then_throwBadRequest() {
         // payment 400（统计窗口参数非法）→ admin 400（BAD_REQUEST）
-        when(paymentClient.getByChannel())
+        when(paymentClient.getByChannel(STATS_FROM, STATS_TO))
                 .thenThrow(new OpenApiClientException(400, "{\"message\":\"bad window\"}"));
 
-        assertThatThrownBy(() -> paymentAppService.getByChannel())
+        assertThatThrownBy(() -> paymentAppService.getByChannel(STATS_FROM, STATS_TO))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.BAD_REQUEST);
     }
@@ -1104,7 +1109,7 @@ class PaymentBffIntegrationTest {
 
     @Test
     void given_operationsActivity_when_getOperationsActivity_then_mapOperatorsAndOperationCountsPreserveOrder() {
-        when(paymentClient.getOperationsActivity()).thenReturn(new OperationsActivityWireResponse(List.of(
+        when(paymentClient.getOperationsActivity(STATS_FROM, STATS_TO)).thenReturn(new OperationsActivityWireResponse(List.of(
                 new OperationsActivityWireResponse.OperatorActivityStatWireResponse(
                         1001L, "alice",
                         List.of(new OperationsActivityWireResponse.OperationCountWireResponse("AUDIT_APPROVE", 38L),
@@ -1115,7 +1120,7 @@ class PaymentBffIntegrationTest {
                         List.of(new OperationsActivityWireResponse.OperationCountWireResponse("NOTIFY_RESEND", 3L)),
                         3L))));
 
-        OperationsActivityResponse activity = paymentAppService.getOperationsActivity();
+        OperationsActivityResponse activity = paymentAppService.getOperationsActivity(STATS_FROM, STATS_TO);
 
         // 按操作员聚合映射 + 顺序保留
         assertThat(activity.operators()).hasSize(2);
@@ -1137,10 +1142,10 @@ class PaymentBffIntegrationTest {
 
     @Test
     void given_operationsActivityDownstream500_when_getOperationsActivity_then_throwThirdPartyError() {
-        when(paymentClient.getOperationsActivity())
+        when(paymentClient.getOperationsActivity(STATS_FROM, STATS_TO))
                 .thenThrow(new OpenApiClientException(500, "{\"message\":\"boom\"}"));
 
-        assertThatThrownBy(() -> paymentAppService.getOperationsActivity())
+        assertThatThrownBy(() -> paymentAppService.getOperationsActivity(STATS_FROM, STATS_TO))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
     }

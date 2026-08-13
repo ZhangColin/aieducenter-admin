@@ -30,14 +30,17 @@ import com.cartisan.web.response.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.time.LocalDateTime;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -159,9 +162,13 @@ public class PaymentController {
             name = "支付管理 / 查看",
             scope = AdminScopes.ADMIN
     )
-    @Operation(summary = "支付总览统计（tier-1）——透传 payment：笔数·金额·成功率·净额 + 趋势")
-    public ApiResponse<PaymentOverviewResponse> getPaymentOverview() {
-        return ApiResponse.ok(paymentAppService.getPaymentOverview());
+    @Operation(summary = "支付总览统计（tier-1）——透传 payment：笔数·金额·成功率·净额 + 趋势（时间窗口 from/to 必填）")
+    public ApiResponse<PaymentOverviewResponse> getPaymentOverview(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to,
+            @RequestParam(required = false) String granularity) {
+        // payment overview 要求 from/to 必填、granularity 可选；admin 如实接收并转发，不内置默认窗口（issue #51）。
+        return ApiResponse.ok(paymentAppService.getPaymentOverview(from, to, granularity));
     }
 
     @GetMapping("/stats/orders/status-distribution")
@@ -183,9 +190,11 @@ public class PaymentController {
             name = "支付管理 / 查看",
             scope = AdminScopes.ADMIN
     )
-    @Operation(summary = "通道健康统计（tier-1）——透传 payment：各银行接口调用次数·成功率·平均耗时·返回码分布")
-    public ApiResponse<GatewayHealthResponse> getGatewayHealth() {
-        return ApiResponse.ok(paymentAppService.getGatewayHealth());
+    @Operation(summary = "通道健康统计（tier-1）——透传 payment：各银行接口调用次数·成功率·平均耗时·返回码分布（时间窗口 from/to 必填）")
+    public ApiResponse<GatewayHealthResponse> getGatewayHealth(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+        return ApiResponse.ok(paymentAppService.getGatewayHealth(from, to));
     }
 
     @GetMapping("/stats/operations/audit")
@@ -195,9 +204,11 @@ public class PaymentController {
             name = "支付管理 / 查看",
             scope = AdminScopes.ADMIN
     )
-    @Operation(summary = "审核统计（tier-1）——透传 payment：审核笔数·通过率·平均审核时长 + 按审核人聚合")
-    public ApiResponse<OperationsAuditResponse> getOperationsAudit() {
-        return ApiResponse.ok(paymentAppService.getOperationsAudit());
+    @Operation(summary = "审核统计（tier-1）——透传 payment：审核笔数·通过率·平均审核时长 + 按审核人聚合（时间窗口 from/to 必填）")
+    public ApiResponse<OperationsAuditResponse> getOperationsAudit(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+        return ApiResponse.ok(paymentAppService.getOperationsAudit(from, to));
     }
 
     @GetMapping("/stats/by-business-system")
@@ -207,9 +218,11 @@ public class PaymentController {
             name = "支付管理 / 查看",
             scope = AdminScopes.ADMIN
     )
-    @Operation(summary = "按业务系统细分统计（tier-2）——透传 payment：各业务系统支付/退款笔数·金额·成功率·退款率")
-    public ApiResponse<BusinessSystemStatsResponse> getByBusinessSystem() {
-        return ApiResponse.ok(paymentAppService.getByBusinessSystem());
+    @Operation(summary = "按业务系统细分统计（tier-2）——透传 payment：各业务系统支付/退款笔数·金额·成功率·退款率（时间窗口 from/to 必填）")
+    public ApiResponse<BusinessSystemStatsResponse> getByBusinessSystem(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+        return ApiResponse.ok(paymentAppService.getByBusinessSystem(from, to));
     }
 
     @GetMapping("/stats/by-channel")
@@ -219,9 +232,11 @@ public class PaymentController {
             name = "支付管理 / 查看",
             scope = AdminScopes.ADMIN
     )
-    @Operation(summary = "按通道细分统计（tier-2）——透传 payment：按 payMode / accessType 聚合的支付笔数·金额·成功率")
-    public ApiResponse<ChannelStatsResponse> getByChannel() {
-        return ApiResponse.ok(paymentAppService.getByChannel());
+    @Operation(summary = "按通道细分统计（tier-2）——透传 payment：按 payMode / accessType 聚合的支付笔数·金额·成功率（时间窗口 from/to 必填）")
+    public ApiResponse<ChannelStatsResponse> getByChannel(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+        return ApiResponse.ok(paymentAppService.getByChannel(from, to));
     }
 
     @GetMapping("/stats/anomalies")
@@ -243,9 +258,11 @@ public class PaymentController {
             name = "支付管理 / 查看",
             scope = AdminScopes.ADMIN
     )
-    @Operation(summary = "操作员活动统计（tier-2）——透传 payment：各操作员操作类型·笔数 + 通知重发次数")
-    public ApiResponse<OperationsActivityResponse> getOperationsActivity() {
-        return ApiResponse.ok(paymentAppService.getOperationsActivity());
+    @Operation(summary = "操作员活动统计（tier-2）——透传 payment：各操作员操作类型·笔数 + 通知重发次数（时间窗口 from/to 必填）")
+    public ApiResponse<OperationsActivityResponse> getOperationsActivity(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+        return ApiResponse.ok(paymentAppService.getOperationsActivity(from, to));
     }
 
     @PostMapping("/refunds/{refundOrderNo}/audit")
