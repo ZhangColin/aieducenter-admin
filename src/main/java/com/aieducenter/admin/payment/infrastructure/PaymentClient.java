@@ -46,16 +46,19 @@ public class PaymentClient {
 
     private static final Logger log = LoggerFactory.getLogger(PaymentClient.class);
 
-    private static final TypeReference<PageResponse<PaymentOrderWireResponse>> PAYMENT_PAGE_TYPEREF =
+    // payment 的列表端点返回 ApiResponse<PageResponse<...>> 信封（{code,message,data:{items,total,page,size}}），
+    // 须按信封反序列化并取 .data()——与详情/统计端点一致。若误按裸 PageResponse 反序列化，Spring Boot 默认
+    // FAIL_ON_UNKNOWN_PROPERTIES=false 会静略信封字段，致 items=null、AppService.page.items().stream() 抛 NPE。
+    private static final TypeReference<ApiResponse<PageResponse<PaymentOrderWireResponse>>> PAYMENT_PAGE_TYPEREF =
             new TypeReference<>() {};
 
-    private static final TypeReference<PageResponse<RefundOrderWireResponse>> REFUND_PAGE_TYPEREF =
+    private static final TypeReference<ApiResponse<PageResponse<RefundOrderWireResponse>>> REFUND_PAGE_TYPEREF =
             new TypeReference<>() {};
 
-    private static final TypeReference<PageResponse<PaymentLogWireResponse>> PAYMENT_LOG_PAGE_TYPEREF =
+    private static final TypeReference<ApiResponse<PageResponse<PaymentLogWireResponse>>> PAYMENT_LOG_PAGE_TYPEREF =
             new TypeReference<>() {};
 
-    private static final TypeReference<PageResponse<OperationLogWireResponse>> OPERATION_LOG_PAGE_TYPEREF =
+    private static final TypeReference<ApiResponse<PageResponse<OperationLogWireResponse>>> OPERATION_LOG_PAGE_TYPEREF =
             new TypeReference<>() {};
 
     private static final TypeReference<ApiResponse<PaymentOrderDetailWireResponse>> PAYMENT_DETAIL_TYPEREF =
@@ -118,7 +121,7 @@ public class PaymentClient {
         appendParam(url, "businessOrderNo", filter.businessOrderNo());
         appendParam(url, "businessSystemName", filter.businessSystemName());
         if (filter.statuses() != null && !filter.statuses().isEmpty()) {
-            for (String status : filter.statuses()) {
+            for (Integer status : filter.statuses()) {
                 appendParam(url, "status", status);
             }
         }
@@ -132,7 +135,9 @@ public class PaymentClient {
         appendParam(url, "paidAtFrom", filter.paidAtFrom());
         appendParam(url, "paidAtTo", filter.paidAtTo());
         log.debug("PaymentClient.listPayments: {}", url);
-        return openApiClient.get(url.toString(), PAYMENT_PAGE_TYPEREF);
+        ApiResponse<PageResponse<PaymentOrderWireResponse>> resp =
+                openApiClient.get(url.toString(), PAYMENT_PAGE_TYPEREF);
+        return resp.data();
     }
 
     /**
@@ -154,7 +159,7 @@ public class PaymentClient {
         appendParam(url, "businessOrderNo", filter.businessOrderNo());
         appendParam(url, "businessSystemName", filter.businessSystemName());
         if (filter.statuses() != null && !filter.statuses().isEmpty()) {
-            for (String status : filter.statuses()) {
+            for (Integer status : filter.statuses()) {
                 appendParam(url, "status", status);
             }
         }
@@ -165,7 +170,9 @@ public class PaymentClient {
         appendParam(url, "createdAtFrom", filter.createdAtFrom());
         appendParam(url, "createdAtTo", filter.createdAtTo());
         log.debug("PaymentClient.listRefunds: {}", url);
-        return openApiClient.get(url.toString(), REFUND_PAGE_TYPEREF);
+        ApiResponse<PageResponse<RefundOrderWireResponse>> resp =
+                openApiClient.get(url.toString(), REFUND_PAGE_TYPEREF);
+        return resp.data();
     }
 
     /**
@@ -195,7 +202,9 @@ public class PaymentClient {
         appendParam(url, "createdAtFrom", filter.createdAtFrom());
         appendParam(url, "createdAtTo", filter.createdAtTo());
         log.debug("PaymentClient.listPaymentLogs: {}", url);
-        return openApiClient.get(url.toString(), PAYMENT_LOG_PAGE_TYPEREF);
+        ApiResponse<PageResponse<PaymentLogWireResponse>> resp =
+                openApiClient.get(url.toString(), PAYMENT_LOG_PAGE_TYPEREF);
+        return resp.data();
     }
 
     /**
@@ -222,7 +231,9 @@ public class PaymentClient {
         appendParam(url, "createdAtStart", filter.createdAtStart());
         appendParam(url, "createdAtEnd", filter.createdAtEnd());
         log.debug("PaymentClient.listOperationLogs: {}", url);
-        return openApiClient.get(url.toString(), OPERATION_LOG_PAGE_TYPEREF);
+        ApiResponse<PageResponse<OperationLogWireResponse>> resp =
+                openApiClient.get(url.toString(), OPERATION_LOG_PAGE_TYPEREF);
+        return resp.data();
     }
 
     /**

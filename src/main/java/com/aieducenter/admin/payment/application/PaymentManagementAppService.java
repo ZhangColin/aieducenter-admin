@@ -103,8 +103,11 @@ public class PaymentManagementAppService {
     private static PaymentOrderSummaryResponse toSummary(PaymentOrderWireResponse wire) {
         return new PaymentOrderSummaryResponse(
                 wire.paymentOrderNo(), wire.businessOrderNo(), wire.businessSystemName(),
-                wire.status(), wire.amount(), wire.payMode(), wire.accessType(),
-                wire.paymentChannel(), wire.paidAt(), wire.createdAt());
+                wire.status(), wire.statusName(), wire.amount(),
+                wire.payMode(), wire.payModeName(),
+                wire.accessType(), wire.accessTypeName(),
+                wire.paymentChannel(), wire.paymentChannelName(),
+                wire.paidAt(), wire.createdAt());
     }
 
     /**
@@ -140,8 +143,9 @@ public class PaymentManagementAppService {
     private static RefundOrderSummaryResponse toRefundSummary(RefundOrderWireResponse wire) {
         return new RefundOrderSummaryResponse(
                 wire.refundOrderNo(), wire.paymentOrderNo(), wire.businessOrderNo(),
-                wire.businessSystemName(), wire.status(), wire.refundAmount(),
-                wire.auditType(), wire.auditorId(), wire.auditorName(),
+                wire.businessSystemName(), wire.status(), wire.statusName(), wire.refundAmount(),
+                wire.auditType(), wire.auditTypeName(),
+                wire.auditorId(), wire.auditorName(),
                 wire.auditedAt(), wire.createdAt());
     }
 
@@ -218,8 +222,9 @@ public class PaymentManagementAppService {
 
     private static OperationLogSummaryResponse toOperationLogSummary(OperationLogWireResponse wire) {
         return new OperationLogSummaryResponse(
-                wire.id(), wire.targetType(), wire.targetNo(),
-                wire.operation(), wire.operatorId(), wire.operatorName(),
+                wire.id(), wire.targetType(), wire.targetTypeName(), wire.targetNo(),
+                wire.operation(), wire.operationName(),
+                wire.operatorId(), wire.operatorName(),
                 wire.operatorSystem(), wire.result(), wire.remark(),
                 wire.createdAt());
     }
@@ -242,8 +247,11 @@ public class PaymentManagementAppService {
     private static PaymentOrderDetailResponse toPaymentDetail(PaymentOrderDetailWireResponse wire) {
         return new PaymentOrderDetailResponse(
                 wire.paymentOrderNo(), wire.businessOrderNo(), wire.businessSystemName(),
-                wire.status(), wire.amount(), wire.payMode(), wire.accessType(),
-                wire.paymentChannel(), wire.paidAt(), wire.createdAt());
+                wire.status(), wire.statusName(), wire.amount(),
+                wire.payMode(), wire.payModeName(),
+                wire.accessType(), wire.accessTypeName(),
+                wire.paymentChannel(), wire.paymentChannelName(),
+                wire.paidAt(), wire.createdAt());
     }
 
     /**
@@ -264,8 +272,9 @@ public class PaymentManagementAppService {
     private static RefundOrderDetailResponse toRefundDetail(RefundOrderDetailWireResponse wire) {
         return new RefundOrderDetailResponse(
                 wire.refundOrderNo(), wire.paymentOrderNo(), wire.businessOrderNo(),
-                wire.businessSystemName(), wire.status(), wire.refundAmount(),
-                wire.auditType(), wire.auditorId(), wire.auditorName(),
+                wire.businessSystemName(), wire.status(), wire.statusName(), wire.refundAmount(),
+                wire.auditType(), wire.auditTypeName(),
+                wire.auditorId(), wire.auditorName(),
                 wire.auditedAt(), wire.createdAt());
     }
 
@@ -477,7 +486,8 @@ public class PaymentManagementAppService {
 
     private static OrderStatusDistributionResponse.StatusBucket toStatusBucket(
             OrderStatusDistributionWireResponse.StatusBucketWireResponse wire) {
-        return new OrderStatusDistributionResponse.StatusBucket(wire.status(), wire.count(), wire.amount());
+        return new OrderStatusDistributionResponse.StatusBucket(
+                wire.status(), wire.statusName(), wire.count(), wire.amount());
     }
 
     /**

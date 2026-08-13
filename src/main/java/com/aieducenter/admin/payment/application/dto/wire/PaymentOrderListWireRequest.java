@@ -13,7 +13,8 @@ import java.util.List;
  * 与 {@code AppRegistryClient} 依赖 {@code *WireRequest} 的约定一致——query DTO 是应用层内部概念，
  * 不应被基础设施 import。</p>
  *
- * <p>{@code statuses} 为多选，经 {@code PaymentClient} 展开为重复的 {@code status} 查询参数。</p>
+ * <p>枚举筛选项以 payment BaseEnum 的 Integer code 承载（payment 按 code 绑定枚举）；{@code statuses} 为多选，
+ * 经 {@code PaymentClient} 展开为重复的 {@code status} 查询参数。</p>
  *
  * @since 0.1.0
  */
@@ -25,14 +26,14 @@ public record PaymentOrderListWireRequest(
 
         String businessSystemName,
 
-        /** 订单状态多选；空 = 不限 */
-        List<String> statuses,
+        /** 订单状态多选（payment BaseEnum code）；空 = 不限 */
+        List<Integer> statuses,
 
-        String payMode,
+        Integer payMode,
 
-        String accessType,
+        Integer accessType,
 
-        String paymentChannel,
+        Integer paymentChannel,
 
         /** 金额下限（含） */
         BigDecimal amountMin,

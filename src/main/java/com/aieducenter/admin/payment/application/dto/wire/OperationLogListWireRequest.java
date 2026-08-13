@@ -11,7 +11,8 @@ import java.time.LocalDateTime;
  * 与 {@code AppRegistryClient} 依赖 {@code *WireRequest}、{@code RefundOrderListWireRequest} 的约定一致——
  * query DTO 是应用层内部概念，不应被基础设施 import。</p>
  *
- * <p>{@code operation} 为单选，对齐 payment {@code OperationLogQuery.operation} 的单值 EQUAL 契约。</p>
+ * <p>枚举筛选项（{@code targetType} / {@code operation}）以 payment BaseEnum 的 Integer code 承载；
+ * {@code operation} 为单选，对齐 payment {@code OperationLogQuery.operation} 的单值 EQUAL 契约。</p>
  *
  * <p><b>时间区间字段名对齐 payment 特例</b>：payment 的 {@code OperationLogQuery} 用 {@code createdAtStart}/
  * {@code createdAtEnd}（其余三个查询用 {@code createdAtFrom}/{@code createdAtTo}）。Spring 按记录组件名绑定查询参数，
@@ -22,12 +23,12 @@ import java.time.LocalDateTime;
  */
 public record OperationLogListWireRequest(
 
-        String targetType,
+        Integer targetType,
 
         String targetNo,
 
-        /** 操作类型——单选，对齐 payment 单值契约 */
-        String operation,
+        /** 操作类型（payment BaseEnum code）——单选，对齐 payment 单值契约 */
+        Integer operation,
 
         Long operatorId,
 

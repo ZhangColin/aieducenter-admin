@@ -9,17 +9,24 @@ import java.time.LocalDateTime;
  * <p>记录行为者对订单的操作（审核通过/拒绝、通知重发等），用于合规追溯与运营审计
  * （CONTEXT.md · OperationLog）。admin 原值透传、不做翻译。</p>
  *
+ * <p>枚举出口规则（ADR-0009）：{@code targetType}/{@code targetTypeName}、{@code operation}/{@code operationName}，
+ * 枚举 code 为 Integer；前端直读 {@code *Name}，不在端侧做枚举→中文映射。中文名由 payment 出口提供、admin 透传。</p>
+ *
  * @since 0.1.0
  */
 public record OperationLogSummaryResponse(
 
         Long id,
 
-        String targetType,
+        Integer targetType,
+
+        String targetTypeName,
 
         String targetNo,
 
-        String operation,
+        Integer operation,
+
+        String operationName,
 
         Long operatorId,
 

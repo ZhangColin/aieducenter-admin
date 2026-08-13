@@ -8,8 +8,10 @@ import java.time.LocalDateTime;
  *
  * <p>与列表项 {@link RefundOrderWireResponse} 同源（payment {@code RefundOrder} 聚合），
  * 但承载<strong>详情全貌</strong>投影：列表项为扫描精简、详情为完整聚合，二者独立演进
- * （payment 契约定型后，详情端可能新增列表不需要的字段）。当前字段为 payment 数据模型速查所列
- * （issue #37），最终字段以 payment 实现契约为准。</p>
+ * （payment 契约定型后，详情端可能新增列表不需要的字段）。字段以 payment 实现契约为准。</p>
+ *
+ * <p>枚举出口规则（ADR-0009）：{@code status}/{@code statusName}、{@code auditType}/{@code auditTypeName}，
+ * 枚举 code 为 Integer。中文名由 payment 出口提供、admin 透传。</p>
  *
  * @since 0.1.0
  */
@@ -23,13 +25,19 @@ public record RefundOrderDetailWireResponse(
 
         String businessSystemName,
 
-        /** 退款状态（PENDING / REJECTED / APPROVED / REFUNDING / SUCCESS / FAILED） */
-        String status,
+        /** 退款状态（payment BaseEnum code） */
+        Integer status,
+
+        /** 退款状态中文名（payment 出口提供） */
+        String statusName,
 
         BigDecimal refundAmount,
 
-        /** 审核类型（AUTO 免审 / MANUAL 人工） */
-        String auditType,
+        /** 审核类型（payment BaseEnum code：AUTO 免审 / MANUAL 人工） */
+        Integer auditType,
+
+        /** 审核类型中文名（payment 出口提供） */
+        String auditTypeName,
 
         Long auditorId,
 

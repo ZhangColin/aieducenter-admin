@@ -102,6 +102,10 @@ _Avoid_: admin 给 payment 操作建镜像审计表；把 admin 当成业务操�
 后台 dashboard 的数据**不一定来自单一服务**——BFF 的作用恰是按真实使用需求，把多个能力域（支付/钱包/Token计量/…）的数据**聚合到一个看板**。当前 payment stats 端点（tier-1/2）是**先行拍脑袋**的预置，admin 直接透传；真实运营需求到来后，dashboard widget 可能跨服务取数、admin 侧组合，**不要求每个 widget 都对应一个单服务端点**。故 payment admin 的 `PaymentStats*` 客户端现在纯透传，但 BFF 架构要为日后跨服务聚合留余地（不把「payment 端点 ↔ dashboard widget」焊死成 1:1）。
 _Avoid_: 假设每个 dashboard widget 都必须有对应的单服务端点；把 BFF 仪表盘写成对单一服务的薄透传而不留聚合余地。
 
+**BFF 出口枚举须配 *Name 中文名 (BFF enum responses carry display names)**:
+平台统一规则——服务出口（BFF 对外响应）凡有枚举字段（如 `status`），**必须同时给中文名**（如 `statusName`）；前端直读 `*Name`、**不在端侧做枚举→中文 i18n 映射**（展示文案归后端出口统一负责）。新 BFF Response DTO 枚举字段一律配 `*Name`，wire 镜像 DTO 收 `*Name` 并在 `toXxx` 透传；**不在 admin 侧臆造 code→中文映射**（admin 不拥有各域枚举语义）——能力域出口未给 `*Name` 的，向能力域提 issue。见 [ADR-0009](docs/adr/0009-bff-enum-response-carries-display-name.md)（[#50](https://github.com/ZhangColin/aieducenter-admin/issues/50)；admin 自身上下文早已遵守：`AdminUserResponse` 出 `statusName`/`genderName`）。横切规则，兄弟 BFF 子上下文继承。
+_Avoid_: 在前端维护枚举 code→中文映射表；在 BFF 里手写 code→中文翻译兜底能力域缺的 `*Name`；旧 DTO javadoc「展示文案由前端 i18n 映射」立场（已作废）。
+
 **退款审核 (Refund Audit)**:
 运营对退款单的 approve/reject 操作（payment `POST /api/v1/refunds/{no}/audit`），落 payment `OperationLog`、`auditType=MANUAL`。admin 透传当前 operator 的 `auditorId`/`auditorName` 于请求体，**不改本地状态**。权限码 `admin:payment:refund:audit`（独立于 read）。
 

@@ -8,8 +8,11 @@ import java.time.LocalDateTime;
  *
  * <p>与列表项 {@link PaymentOrderWireResponse} 同源（payment {@code PaymentOrder} 聚合），
  * 但承载<strong>详情全貌</strong>投影：列表项为扫描精简、详情为完整聚合，二者独立演进
- * （payment 契约定型后，详情端可能新增列表不需要的字段）。当前字段为 payment 数据模型速查所列
- * （issue #37），最终字段以 payment 实现契约为准。</p>
+ * （payment 契约定型后，详情端可能新增列表不需要的字段）。字段以 payment 实现契约为准。</p>
+ *
+ * <p>枚举出口规则（ADR-0009）：每个枚举字段以 Integer code 承载、配 {@code *Name} 中文名
+ * （{@code status}/{@code statusName}、{@code payMode}/{@code payModeName}、{@code accessType}/
+ * {@code accessTypeName}、{@code paymentChannel}/{@code paymentChannelName}）。中文名由 payment 出口提供、admin 透传。</p>
  *
  * @since 0.1.0
  */
@@ -21,17 +24,31 @@ public record PaymentOrderDetailWireResponse(
 
         String businessSystemName,
 
-        /** 订单状态（PENDING / PAID / FAILED / CANCELLED / EXPIRED） */
-        String status,
+        /** 订单状态（payment BaseEnum code） */
+        Integer status,
+
+        /** 订单状态中文名（payment 出口提供） */
+        String statusName,
 
         BigDecimal amount,
 
-        /** 支付方式（WECHAT / ALIPAY / UNIONPAY） */
-        String payMode,
+        /** 支付方式（payment BaseEnum code） */
+        Integer payMode,
 
-        String accessType,
+        /** 支付方式中文名（payment 出口提供） */
+        String payModeName,
 
-        String paymentChannel,
+        /** 接入类型（payment BaseEnum code） */
+        Integer accessType,
+
+        /** 接入类型中文名（payment 出口提供） */
+        String accessTypeName,
+
+        /** 支付渠道（payment BaseEnum code） */
+        Integer paymentChannel,
+
+        /** 支付渠道中文名（payment 出口提供） */
+        String paymentChannelName,
 
         LocalDateTime paidAt,
 

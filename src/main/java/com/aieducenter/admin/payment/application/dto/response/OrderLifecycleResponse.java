@@ -8,7 +8,11 @@ import java.util.List;
  * 映射而来，承载 payment 已合并（按时间排序）的时间线。
  *
  * <p>合并在 payment 完成（ADR-0002），admin 透传不改序、不本地合并。每个事件以 {@link LifecycleEvent#source}
- * 区分来源，前端按 source 渲染网关交互或行为者操作。展示文案（i18n）由前端按枚举名映射。</p>
+ * 区分来源，前端按 source 渲染网关交互或行为者操作。</p>
+ *
+ * <p><b>待对齐（#55）</b>：本 DTO 为 payment 早期契约假设的平表 union 形状，与 payment 实际的语义抽象
+ * （{@code action}/{@code actionName}）不符；枚举字段尚未 Integer 化、未配 {@code *Name}。形状 + 枚举对齐在
+ * #55 完成后，按 ADR-0009 由后端出口统一提供展示名（旧「前端 i18n 映射」立场已作废）。</p>
  *
  * @since 0.1.0
  */
