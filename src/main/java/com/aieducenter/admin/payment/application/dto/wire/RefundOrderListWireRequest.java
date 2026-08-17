@@ -1,6 +1,5 @@
 package com.aieducenter.admin.payment.application.dto.wire;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -14,7 +13,8 @@ import java.util.List;
  * query DTO 是应用层内部概念，不应被基础设施 import。</p>
  *
  * <p>枚举筛选项以 payment BaseEnum 的 Integer code 承载；{@code statuses} 为多选，经 {@code PaymentClient}
- * 展开为重复的 {@code status} 查询参数。</p>
+ * 展开为重复的 {@code status} 查询参数。金额筛选为 <strong>Long（分）</strong>，与 payment
+ * {@code RefundOrderQuery} 同型透传、零换算（ADR-0011）。</p>
  *
  * @since 0.1.0
  */
@@ -35,11 +35,11 @@ public record RefundOrderListWireRequest(
 
         Long auditorId,
 
-        /** 退款金额下限（含） */
-        BigDecimal refundAmountMin,
+        /** 退款金额下限（分，含） */
+        Long refundAmountMin,
 
-        /** 退款金额上限（含） */
-        BigDecimal refundAmountMax,
+        /** 退款金额上限（分，含） */
+        Long refundAmountMax,
 
         /** 创建时间起（含） */
         LocalDateTime createdAtFrom,

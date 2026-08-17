@@ -146,8 +146,7 @@ public class PaymentManagementAppService {
                 wire.refundOrderNo(), wire.paymentOrderNo(), wire.businessOrderNo(),
                 wire.businessSystemName(), wire.status(), wire.statusName(), wire.refundAmount(),
                 wire.auditType(), wire.auditTypeName(),
-                wire.auditorId(), wire.auditorName(),
-                wire.auditedAt(), wire.createdAt());
+                wire.auditorName(), wire.createdAt());
     }
 
     /**
@@ -275,8 +274,7 @@ public class PaymentManagementAppService {
                 wire.refundOrderNo(), wire.paymentOrderNo(), wire.businessOrderNo(),
                 wire.businessSystemName(), wire.status(), wire.statusName(), wire.refundAmount(),
                 wire.auditType(), wire.auditTypeName(),
-                wire.auditorId(), wire.auditorName(),
-                wire.auditedAt(), wire.createdAt());
+                wire.auditorName(), wire.createdAt());
     }
 
     /**

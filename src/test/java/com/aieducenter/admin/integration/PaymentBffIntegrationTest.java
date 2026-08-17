@@ -196,11 +196,9 @@ class PaymentBffIntegrationTest {
         when(paymentClient.listRefunds(any(RefundOrderListWireRequest.class), anyInt(), anyInt()))
                 .thenReturn(new PageResponse<>(List.of(
                         new RefundOrderWireResponse("RF-1", "PAY-1", "BIZ-1", "course-svc", 5, "退款成功",
-                                new BigDecimal("99.00"), 2, "人工审核", 1001L, "alice",
-                                now.minusMinutes(3), now.minusMinutes(10)),
+                                9900L, 2, "人工审核", "alice", now.minusMinutes(10)),
                         new RefundOrderWireResponse("RF-2", "PAY-2", "BIZ-2", "course-svc", 1, "待审核",
-                                new BigDecimal("199.00"), 1, "免审", null, null,
-                                null, now.minusMinutes(1))
+                                19900L, 1, "免审", null, now.minusMinutes(1))
                 ), 9L, 0, 20));
 
         var page = paymentAppService.listRefunds(
@@ -212,25 +210,21 @@ class PaymentBffIntegrationTest {
         assertThat(page.total()).isEqualTo(9L);
         assertThat(page.page()).isEqualTo(0);
         assertThat(page.size()).isEqualTo(20);
-        // DTO 映射：wire → response 逐字段
+        // DTO 映射：wire → response 逐字段（金额 Long 分透传 ADR-0011；无 auditorId/auditedAt——payment ghost）
         assertThat(page.items()).hasSize(2);
         RefundOrderSummaryResponse first = page.items().get(0);
         assertThat(first.refundOrderNo()).isEqualTo("RF-1");
         assertThat(first.paymentOrderNo()).isEqualTo("PAY-1");
         assertThat(first.businessOrderNo()).isEqualTo("BIZ-1");
         assertThat(first.status()).isEqualTo(5);
-        assertThat(first.refundAmount()).isEqualByComparingTo("99.00");
+        assertThat(first.refundAmount()).isEqualTo(9900L);
         assertThat(first.auditType()).isEqualTo(2);
-        assertThat(first.auditorId()).isEqualTo(1001L);
         assertThat(first.auditorName()).isEqualTo("alice");
-        assertThat(first.auditedAt()).isEqualTo(now.minusMinutes(3));
         RefundOrderSummaryResponse second = page.items().get(1);
         assertThat(second.refundOrderNo()).isEqualTo("RF-2");
         assertThat(second.status()).isEqualTo(1);
         assertThat(second.auditType()).isEqualTo(1);
-        assertThat(second.auditorId()).isNull();
         assertThat(second.auditorName()).isNull();
-        assertThat(second.auditedAt()).isNull();
     }
 
     // ========== listRefunds · 筛选映射 + 页码换算 ==========
@@ -243,16 +237,17 @@ class PaymentBffIntegrationTest {
         RefundOrderQuery query = new RefundOrderQuery(
                 "RF-1", "PAY-1", "BIZ-1", "course-svc",
                 List.of(1, 3), 2, 1001L,
-                new BigDecimal("10.00"), new BigDecimal("500.00"),
+                1000L, 50000L,
                 LocalDateTime.of(2026, 8, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
 
         paymentAppService.listRefunds(query, PageRequest.of(2, 20));
 
-        // query → wire 映射：筛选原样透传；Spring Pageable 0-based(page=2) → 客户端 1-based(page=3)
+        // query → wire 映射：筛选原样透传（auditorId 保留——payment 支持按审核人筛选；金额区间 Long 分）；
+        // Spring Pageable 0-based(page=2) → 客户端 1-based(page=3)
         RefundOrderListWireRequest expectedWire = new RefundOrderListWireRequest(
                 "RF-1", "PAY-1", "BIZ-1", "course-svc",
                 List.of(1, 3), 2, 1001L,
-                new BigDecimal("10.00"), new BigDecimal("500.00"),
+                1000L, 50000L,
                 LocalDateTime.of(2026, 8, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
         verify(paymentClient).listRefunds(eq(expectedWire), eq(3), eq(20));
     }
@@ -516,22 +511,19 @@ class PaymentBffIntegrationTest {
         LocalDateTime now = LocalDateTime.now();
         when(paymentClient.getRefund("RF-1")).thenReturn(
                 new RefundOrderDetailWireResponse("RF-1", "PAY-1", "BIZ-1", "course-svc", 5, "退款成功",
-                        new BigDecimal("99.00"), 2, "人工审核", 1001L, "alice",
-                        now.minusMinutes(3), now.minusMinutes(10)));
+                        9900L, 2, "人工审核", "alice", now.minusMinutes(10)));
 
         RefundOrderDetailResponse detail = paymentAppService.getRefundDetail("RF-1");
 
-        // 详情聚合逐字段映射
+        // 详情聚合逐字段映射（金额 Long 分；无 auditorId/auditedAt——payment ghost）
         assertThat(detail.refundOrderNo()).isEqualTo("RF-1");
         assertThat(detail.paymentOrderNo()).isEqualTo("PAY-1");
         assertThat(detail.businessOrderNo()).isEqualTo("BIZ-1");
         assertThat(detail.businessSystemName()).isEqualTo("course-svc");
         assertThat(detail.status()).isEqualTo(5);
-        assertThat(detail.refundAmount()).isEqualByComparingTo("99.00");
+        assertThat(detail.refundAmount()).isEqualTo(9900L);
         assertThat(detail.auditType()).isEqualTo(2);
-        assertThat(detail.auditorId()).isEqualTo(1001L);
         assertThat(detail.auditorName()).isEqualTo("alice");
-        assertThat(detail.auditedAt()).isEqualTo(now.minusMinutes(3));
         assertThat(detail.createdAt()).isEqualTo(now.minusMinutes(10));
     }
 
@@ -619,8 +611,7 @@ class PaymentBffIntegrationTest {
         LocalDateTime now = LocalDateTime.now();
         when(paymentClient.auditRefund(eq("RF-1"), any(AuditRefundWireRequest.class))).thenReturn(
                 new RefundOrderDetailWireResponse("RF-1", "PAY-1", "BIZ-1", "course-svc", 3, "已批准",
-                        new BigDecimal("99.00"), 2, "人工审核", 1001L, "alice",
-                        now, now.minusMinutes(10)));
+                        9900L, 2, "人工审核", "alice", now.minusMinutes(10)));
 
         RefundOrderDetailResponse detail = paymentAppService.auditRefund(
                 "RF-1", new RefundAuditCommand(true, "同意退款"), 1001L, "alice");
@@ -634,20 +625,19 @@ class PaymentBffIntegrationTest {
         assertThat(wire.agreed()).isTrue();
         assertThat(wire.remark()).isEqualTo("同意退款");
 
-        // 响应映射：审核后退款单聚合（与详情同形）
+        // 响应映射：审核后退款单聚合（与详情同形，无 auditorId/auditedAt——payment ghost）
         assertThat(detail.refundOrderNo()).isEqualTo("RF-1");
         assertThat(detail.status()).isEqualTo(3);
         assertThat(detail.auditType()).isEqualTo(2);
-        assertThat(detail.auditorId()).isEqualTo(1001L);
         assertThat(detail.auditorName()).isEqualTo("alice");
-        assertThat(detail.auditedAt()).isEqualTo(now);
+        assertThat(detail.refundAmount()).isEqualTo(9900L);
     }
 
     @Test
     void given_auditReject_when_auditRefund_then_wireRequestCarriesAgreedFalse() {
         when(paymentClient.auditRefund(eq("RF-2"), any(AuditRefundWireRequest.class))).thenReturn(
                 new RefundOrderDetailWireResponse("RF-2", null, null, null, 2, "已拒绝",
-                        null, 2, "人工审核", 2002L, "bob", null, null));
+                        null, 2, "人工审核", "bob", null));
 
         paymentAppService.auditRefund("RF-2", new RefundAuditCommand(false, "金额不符"), 2002L, "bob");
 
@@ -664,7 +654,7 @@ class PaymentBffIntegrationTest {
     void given_auditRemarkNull_when_auditRefund_then_wireRequestCarriesNullRemark() {
         when(paymentClient.auditRefund(eq("RF-3"), any(AuditRefundWireRequest.class))).thenReturn(
                 new RefundOrderDetailWireResponse("RF-3", null, null, null, 3, "已批准",
-                        null, 2, "人工审核", 3003L, "carol", null, null));
+                        null, 2, "人工审核", "carol", null));
 
         // remark 选填——前端不传时透传 null（payment 侧 @Size 仅约束非空长度）
         paymentAppService.auditRefund("RF-3", new RefundAuditCommand(true, null), 3003L, "carol");
@@ -789,8 +779,7 @@ class PaymentBffIntegrationTest {
         // payment 返回当前退款单聚合（状态未变——SUCCESS），证明通知重发不改订单状态
         when(paymentClient.resendRefundNotification(eq("RF-1"), any(ResendNotificationWireRequest.class)))
                 .thenReturn(new RefundOrderDetailWireResponse("RF-1", "PAY-1", "BIZ-1", "course-svc", 5, "退款成功",
-                        new BigDecimal("99.00"), 2, "人工审核", 1001L, "alice",
-                        now.minusMinutes(3), now.minusMinutes(10)));
+                        9900L, 2, "人工审核", "alice", now.minusMinutes(10)));
 
         RefundOrderDetailResponse detail = paymentAppService.resendRefundNotification("RF-1", 2002L, "bob");
 
@@ -804,7 +793,7 @@ class PaymentBffIntegrationTest {
         // 响应映射：当前退款单聚合（状态未变 SUCCESS），复用 toRefundDetail
         assertThat(detail.refundOrderNo()).isEqualTo("RF-1");
         assertThat(detail.status()).isEqualTo(5);
-        assertThat(detail.refundAmount()).isEqualByComparingTo("99.00");
+        assertThat(detail.refundAmount()).isEqualTo(9900L);
         assertThat(detail.auditType()).isEqualTo(2);
     }
 

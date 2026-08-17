@@ -1,6 +1,5 @@
 package com.aieducenter.admin.payment.application.dto.query;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -12,7 +11,8 @@ import java.util.List;
  * 字段以 payment 实现契约为准。</p>
  *
  * <p>枚举筛选项（{@code statuses} / {@code auditType}）以 payment BaseEnum 的 Integer code 传递（payment 按 code 绑定枚举）。
- * 退款金额筛选 {@code refundAmountMin/Max} 暂以元（BigDecimal）承，与 payment 的分（Long）对齐见 #55。</p>
+ * 退款金额筛选 {@code refundAmountMin/Max} 为 <strong>Long（分）</strong>，与 payment {@code RefundOrderQuery}
+ * 同型透传、零换算（ADR-0011——前端已按分提交，admin 不做分↔元换算）。</p>
  *
  * @since 0.1.0
  */
@@ -36,14 +36,14 @@ public record RefundOrderQuery(
         /** 审核类型（payment BaseEnum code：AUTO 免审 / MANUAL 人工） */
         Integer auditType,
 
-        /** 审核人 ID（operator id） */
+        /** 审核人 ID（operator id；payment {@code RefundOrderQuery} 支持按审核人筛选） */
         Long auditorId,
 
-        /** 退款金额下限（含） */
-        BigDecimal refundAmountMin,
+        /** 退款金额下限（分，含） */
+        Long refundAmountMin,
 
-        /** 退款金额上限（含） */
-        BigDecimal refundAmountMax,
+        /** 退款金额上限（分，含） */
+        Long refundAmountMax,
 
         /** 创建时间起（含） */
         LocalDateTime createdAtFrom,

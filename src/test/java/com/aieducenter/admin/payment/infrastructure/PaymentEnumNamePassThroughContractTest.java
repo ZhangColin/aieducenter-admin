@@ -51,6 +51,8 @@ class PaymentEnumNamePassThroughContractTest {
 
     @Test
     void given_refundListWithEnumNames_when_listRefunds_then_itemsCarryStatusAndAuditNames() {
+        // fixture 取 payment 真实序列化形状：金额 Long 经框架 ToStringSerializer 出 string（ADR-0011）、
+        // 无 auditorId/auditedAt（payment RefundOrderResponse 从不发送的 ghost，#59 删）
         String envelope = """
                 {
                   "code": 0, "message": "ok",
@@ -60,10 +62,10 @@ class PaymentEnumNamePassThroughContractTest {
                         "refundOrderNo": "RF-1", "paymentOrderNo": "PAY-1", "businessOrderNo": "BIZ-1",
                         "businessSystemName": "course-svc",
                         "status": 1, "statusName": "待审核",
-                        "refundAmount": 9900,
+                        "refundAmount": "9900",
                         "auditType": 2, "auditTypeName": "人工审核",
-                        "auditorId": null, "auditorName": null,
-                        "auditedAt": null, "createdAt": "2026-08-12T09:55:00"
+                        "auditorName": null,
+                        "createdAt": "2026-08-12T09:55:00"
                       }
                     ],
                     "total": 1, "page": 0, "size": 20
@@ -72,13 +74,16 @@ class PaymentEnumNamePassThroughContractTest {
                 }
                 """;
         var page = PaymentWireTestSupport.appServiceWithStubTransport(envelope).listRefunds(
-                new RefundOrderQuery(null, null, null, null, null, null, null, null, null, null, null),
+                new RefundOrderQuery(null, null, null, null, null, null, null,
+                        null, null, null, null),
                 PageRequest.of(0, 20));
 
         assertThat(page.items()).hasSize(1);
         var item = page.items().get(0);
         assertThat(item.status()).isEqualTo(1);
         assertThat(item.statusName()).isEqualTo("待审核");
+        // 金额 Long（分）透传：string 形态进、Long 出（零换算，ADR-0011 §1）
+        assertThat(item.refundAmount()).isEqualTo(9900L);
         assertThat(item.auditType()).isEqualTo(2);
         assertThat(item.auditTypeName()).isEqualTo("人工审核");
     }

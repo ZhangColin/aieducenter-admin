@@ -1,6 +1,5 @@
 package com.aieducenter.admin.payment.application.dto.wire;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -11,6 +10,11 @@ import java.time.LocalDateTime;
  *
  * <p>枚举出口规则（ADR-0009）：{@code status}/{@code statusName}、{@code auditType}/{@code auditTypeName}，
  * 枚举 code 为 Integer。中文名由 payment 出口提供、admin 透传。</p>
+ *
+ * <p>金额出口规则（ADR-0011）：{@code refundAmount} 为 <strong>Long（分）</strong>，与 payment
+ * {@code RefundOrderResponse.refundAmount} 同型透传、零换算。审核人出口仅 {@code auditorName}
+ * ——payment 从不发送 {@code auditorId}/{@code auditedAt}（ghost，#59 删）；按审核人筛选走 query 侧
+ * {@code auditorId}。</p>
  *
  * @since 0.1.0
  */
@@ -30,7 +34,8 @@ public record RefundOrderWireResponse(
         /** 退款状态中文名（payment 出口提供） */
         String statusName,
 
-        BigDecimal refundAmount,
+        /** 退款金额（分） */
+        Long refundAmount,
 
         /** 审核类型（payment BaseEnum code：AUTO 免审 / MANUAL 人工） */
         Integer auditType,
@@ -38,11 +43,7 @@ public record RefundOrderWireResponse(
         /** 审核类型中文名（payment 出口提供） */
         String auditTypeName,
 
-        Long auditorId,
-
         String auditorName,
-
-        LocalDateTime auditedAt,
 
         LocalDateTime createdAt
 ) {

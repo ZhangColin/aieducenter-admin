@@ -186,12 +186,12 @@ class PaymentRbacEnforcementIntegrationTest {
                         null, null, null, null, null, null, null, null, null));
         when(paymentClient.getRefund("RF-1")).thenReturn(
                 new RefundOrderDetailWireResponse("RF-1", null, null, null, 1, "待审核",
-                        null, null, null, null, null, null, null));
+                        null, null, null, null, null));
         when(paymentClient.getLifecycle("PAY-1")).thenReturn(List.of());
         // 退款审核 200 用例：mock 返回审核后退款单，证明写通路接通；出站 wire 请求体由 ArgumentCaptor 抓取
         when(paymentClient.auditRefund(eq("RF-1"), any(AuditRefundWireRequest.class))).thenReturn(
                 new RefundOrderDetailWireResponse("RF-1", null, null, null, 3, "已批准",
-                        null, 2, "人工审核", null, null, null, null));
+                        null, 2, "人工审核", null, null));
         // 主动查行 200 用例：mock 返回查询后支付单（与详情同形），证明写通路接通
         when(paymentClient.queryPayment("PAY-1")).thenReturn(
                 new PaymentOrderDetailWireResponse("PAY-1", null, null, 2, "已支付",
@@ -202,7 +202,7 @@ class PaymentRbacEnforcementIntegrationTest {
                         null, null, null, null, null, null, null, null, null));
         when(paymentClient.resendRefundNotification(eq("RF-1"), any(ResendNotificationWireRequest.class))).thenReturn(
                 new RefundOrderDetailWireResponse("RF-1", null, null, null, 5, "退款成功",
-                        null, null, null, null, null, null, null));
+                        null, null, null, null, null));
     }
 
     @ParameterizedTest(name = "[{0}] 非超管且拥有 admin:payment:read → 200")
