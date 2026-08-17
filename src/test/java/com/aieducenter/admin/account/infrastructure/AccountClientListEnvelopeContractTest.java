@@ -34,6 +34,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 序列化为 Integer code（1=ACTIVE / 0=DISABLED）、{@code userId} 为 Long TSID、{@code locked}/{@code hasPassword}
  * 为原始 boolean、不含注册时间字段。本测试一并钉死这些类型契约。</p>
  *
+ * <p>分页契约（#56 钉死，ADR-0010）：identity 请求 {@code page} 0-based（Spring Pageable）、响应 {@code page}
+ * 回显「页码+1」1-based。fixture 的 {@code "page"} 按 identity 真实回显构造（wire 请求 page=0 → 回显 1），
+ * <strong>不是</strong> wire 上发出的裸页码——此前误建模为 0-based，误导前端 REQ-18 推出错误的 +1 适配。</p>
+ *
  * @since 0.1.0
  */
 class AccountClientListEnvelopeContractTest {
@@ -41,6 +45,7 @@ class AccountClientListEnvelopeContractTest {
     /**
      * identity GET /api/account 的真实响应形状：ApiResponse&lt;PageResponse&lt;AccountManagementView&gt;&gt; 信封。
      * 每项按 identity AccountManagementView 字段（status 为 Integer code、userId 为 Long、locked/hasPassword 为 boolean）。
+     * {@code page} 按 identity 真实回显 1-based 构造：本 fixture 对应 wire 请求 page=0（第 1 页）→ 回显 1。
      */
     private static final String ACCOUNT_LIST_ENVELOPE = """
             {
@@ -70,7 +75,7 @@ class AccountClientListEnvelopeContractTest {
                   }
                 ],
                 "total": 2,
-                "page": 0,
+                "page": 1,
                 "size": 20
               },
               "requestId": null,
@@ -79,8 +84,9 @@ class AccountClientListEnvelopeContractTest {
             """;
 
     @Test
-    void given_identityApiResponseEnvelope_when_listAccounts_then_itemsPopulatedAndTypesCorrect() {
-        AccountManagementAppService appService = appServiceWithStubTransport(ACCOUNT_LIST_ENVELOPE);
+    void given_identityApiResponseEnvelope_when_listAccounts_then_itemsTypesAndPaginationContractCorrect() {
+        String[] wireUrl = new String[1];
+        AccountManagementAppService appService = appServiceWithStubTransport(ACCOUNT_LIST_ENVELOPE, wireUrl);
 
         var page = appService.list(
                 new AccountQuery(null, null, null, null, null, null, null),
@@ -89,7 +95,10 @@ class AccountClientListEnvelopeContractTest {
         // 信封正确拆开（非 null items）——证明 ACCOUNT_PAGE_TYPEREF 按 ApiResponse<PageResponse<…>> 反序列化并取 .data()
         assertThat(page.items()).hasSize(2);
         assertThat(page.total()).isEqualTo(2L);
-        assertThat(page.page()).isZero();
+        // 分页换算链（ADR-0010）：Pageable page=0 → client 入参 +1=1 → wire page-1=0（0-based，identity 请求契约）
+        assertThat(wireUrl[0]).endsWith("/api/account?page=0&size=20");
+        // 响应 page 为 identity 1-based 回显（wire 页码+1），北向透传
+        assertThat(page.page()).isEqualTo(1);
         assertThat(page.size()).isEqualTo(20);
 
         // identity AccountManagementView 类型契约逐字段
@@ -115,7 +124,7 @@ class AccountClientListEnvelopeContractTest {
      * （{@code getTimeout()}），传无参构造的 {@link CartisanOpenapiProperties}（默认初始化各字段）即可。
      * {@code AccountClient} 传入的 {@code TypeReference} 即被测对象——真实反序列化路径完整保留。
      */
-    private static AccountManagementAppService appServiceWithStubTransport(String envelopeBody) {
+    private static AccountManagementAppService appServiceWithStubTransport(String envelopeBody, String[] wireUrlSink) {
         ObjectMapper mapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
@@ -124,6 +133,7 @@ class AccountClientListEnvelopeContractTest {
         OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, mapper) {
             @Override
             public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;   // 捕获 wire URL——断言 page 换算（0-based）打到真实出站 seam
                 try {
                     return mapper.readValue(envelopeBody, typeReference);
                 } catch (Exception e) {

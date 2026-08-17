@@ -43,7 +43,8 @@ import com.cartisan.web.response.PageResponse;
  *
  * <p>对接 identity {@code GET /api/account}（#70 已冻结）：mock 数据按 identity
  * {@code AccountManagementView} 真实形状构造（userId=Long TSID、status=Integer BaseEnum code
- * 1=ACTIVE/0=DISABLED、locked/hasPassword=原始 boolean、无注册时间字段）。本测试在 client 边界 mock，
+ * 1=ACTIVE/0=DISABLED、locked/hasPassword=原始 boolean、无注册时间字段；分页回显 1-based——
+ * identity 收 wire 页码 N 回显 N+1，见 ADR-0010）。本测试在 client 边界 mock，
  * 验证 controller→appservice→client 通路（DTO 映射 / 筛选映射 / 分页契约 / 错误翻译）。</p>
  *
  * <p>另覆盖 #53：管理详情（{@code GET /api/account/{userId}/management}，wire→detail 映射 + 错误翻译）、
@@ -67,6 +68,8 @@ class AccountBffIntegrationTest {
     @Test
     void given_accounts_when_list_then_returnMappedPage() {
         when(accountClient.listAccounts(any(AccountSearchWireRequest.class), anyInt(), anyInt()))
+                // mock 建模 identity 真实回显（1-based）：Pageable page=0 → client 入参 1 → wire page=0 →
+                // identity 回显 0+1=1（identity #70 契约：请求 0-based / 回显 页码+1，#56 钉死）
                 .thenReturn(new PageResponse<>(List.of(
                         // ACTIVE、未锁、已设密码的常规账号
                         new AccountWireResponse(1001L, "alice@example.com", "13800000001",
@@ -74,15 +77,16 @@ class AccountBffIntegrationTest {
                         // DISABLED、系统锁定、纯验证码账号（无密码、无资料）
                         new AccountWireResponse(1002L, "bob@example.com", "13800000002",
                                 null, null, 0, true, false)
-                ), 28L, 0, 20));
+                ), 28L, 1, 20));
 
         var page = accountAppService.list(
                 new AccountQuery(null, null, null, null, null, null, null),
                 PageRequest.of(0, 20));
 
-        // 分页契约：total/page/size 沿用 identity 回显
+        // 分页契约：total/page/size 沿用 identity 回显；page 为 1-based 且北向透传（不得再 +1）——
+        // 平台分页协议「请求 0-based / 响应 1-based」（ADR-0010）
         assertThat(page.total()).isEqualTo(28L);
-        assertThat(page.page()).isEqualTo(0);
+        assertThat(page.page()).isEqualTo(1);
         assertThat(page.size()).isEqualTo(20);
         // DTO 映射：wire → response 逐字段
         assertThat(page.items()).hasSize(2);
@@ -110,14 +114,15 @@ class AccountBffIntegrationTest {
     @Test
     void given_filtersAndPageable_when_list_then_passQueryAndConvertPage() {
         when(accountClient.listAccounts(any(AccountSearchWireRequest.class), anyInt(), anyInt()))
-                .thenReturn(new PageResponse<>(List.of(), 0L, 2, 20));
+                // mock 建模 identity 真实回显（1-based）：client 入参 page=3 → wire page=2 → 回显 2+1=3
+                .thenReturn(new PageResponse<>(List.of(), 0L, 3, 20));
 
         AccountQuery query = new AccountQuery(
                 "alice@example.com", "13800000001", 1001L,
                 1, true,
                 LocalDateTime.of(2026, 1, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
 
-        accountAppService.list(query, PageRequest.of(2, 20));
+        var page = accountAppService.list(query, PageRequest.of(2, 20));
 
         // query → wire 映射：筛选原样透传（含 userId Long / status Integer code / createdFrom·To）；
         // Spring Pageable 0-based(page=2) → 客户端 1-based(page=3)
@@ -126,6 +131,8 @@ class AccountBffIntegrationTest {
                 1, true,
                 LocalDateTime.of(2026, 1, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
         verify(accountClient).listAccounts(eq(expectedWire), eq(3), eq(20));
+        // 北向响应透传 identity 的 1-based 回显（请求 0-based page=2 → 响应 page=3，ADR-0010）
+        assertThat(page.page()).isEqualTo(3);
     }
 
     // ========== list · 错误翻译 ==========

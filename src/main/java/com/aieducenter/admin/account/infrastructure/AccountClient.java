@@ -64,7 +64,8 @@ public class AccountClient {
      * @param page   页码，<strong>1-based</strong>（应用层由 Spring {@code Pageable} 的 0-based 页码 +1 传入；
      *               此处 {@code page - 1} 还原为 identity 端 Spring {@code Pageable} 的 0-based）
      * @param size   每页大小
-     * @return identity 返回的分页结果
+     * @return identity 返回的分页结果（{@code page} 为 identity 1-based 回显「wire 页码+1」，
+     *                identity #70 契约；应用层北向透传，见 ADR-0010）
      */
     public PageResponse<AccountWireResponse> listAccounts(AccountSearchWireRequest filter, int page, int size) {
         // 入参 page 为 1-based，identity 端用 Spring Pageable 的 0-based，故 -1（与 PaymentClient.listPayments 一致）。

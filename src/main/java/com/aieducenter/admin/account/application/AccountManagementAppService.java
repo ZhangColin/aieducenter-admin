@@ -37,8 +37,10 @@ public class AccountManagementAppService {
     /**
      * 分页搜索平台账号（透传 identity）。
      *
-     * <p>分页形状对齐 admin 现有列表端点（与 {@code /apps}、{@code /payments} 同形）：{@code Pageable} 0-based 页码
-     * +1 传入客户端（客户端约定 1-based），响应沿用 identity 回显的 {@code total/page/size}。</p>
+     * <p>分页形状对齐 admin 现有列表端点（与 {@code /apps}、{@code /payments} 同形），平台分页协议
+     * 「请求 0-based / 响应 1-based」（ADR-0010）：{@code Pageable} 0-based 页码 +1 传入客户端（1-based
+     * 中间表示，client 上 wire 前 -1 还原 0-based）；identity 回显的 {@code page} 本就是 1-based
+     * （identity #70 契约：回显「页码+1」），北向响应<strong>原样透传，不得再 +1</strong>。</p>
      */
     public PageResponse<AccountSummaryResponse> list(AccountQuery query, Pageable pageable) {
         // query（北向 controller 绑定）→ wire（出站载荷），与 PaymentManagementAppService.list 把 query 映射为 wire 同位
@@ -60,6 +62,7 @@ public class AccountManagementAppService {
                 .map(AccountManagementAppService::toSummary)
                 .toList();
 
+        // page 为 identity 1-based 回显，北向透传（不得再 +1——#56 验证：响应已是 1-based，再加即 2-based 回归）
         return new PageResponse<>(items, page.total(), page.page(), page.size());
     }
 
