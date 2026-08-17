@@ -22,7 +22,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>fixture 取 payment <strong>真实</strong> 序列化形状：枚举为 Integer code（{@code PaymentStatus.PAID=2}、
  * {@code PayMode.WECHAT=9}、{@code AccessType.H5=4}、{@code PaymentChannel.ICBC=1}）+ 同名 {@code *Name} 中文名
- * （ADR-0009）——而非早期凭 spec 猜测的 enum name 串。既验信封反序列化不丢字段，又验 {@code *Name} 透传到 admin Response。</p>
+ * （ADR-0009）——而非早期凭 spec 猜测的 enum name 串；金额为 <strong>string 形态</strong>（{@code "amount": "9900"}，
+ * Long 分，ADR-0011——cartisan-web 全局对 Long 注册 {@code ToStringSerializer}，与 {@code auditorId} 等既有
+ * Long 字段同形态）。既验信封反序列化不丢字段，又验 {@code *Name} 与金额 Long 透传到 admin Response。</p>
  *
  * @since 0.1.0
  */
@@ -30,7 +32,7 @@ class PaymentClientListEnvelopeContractTest {
 
     /**
      * payment GET /api/v1/payments 的真实响应形状：ApiResponse<PageResponse<PaymentOrderResponse>> 信封，
-     * 枚举为 Integer code + *Name 中文名。
+     * 枚举为 Integer code + *Name 中文名，金额为 string 形态的 Long（分）。
      */
     private static final String PAYMENT_LIST_ENVELOPE = """
             {
@@ -44,7 +46,7 @@ class PaymentClientListEnvelopeContractTest {
                     "businessSystemName": "course-svc",
                     "status": 2,
                     "statusName": "已支付",
-                    "amount": 9900,
+                    "amount": "9900",
                     "payMode": 9,
                     "payModeName": "微信",
                     "accessType": 4,
@@ -85,6 +87,8 @@ class PaymentClientListEnvelopeContractTest {
         assertThat(item.payMode()).isEqualTo(9);
         assertThat(item.accessType()).isEqualTo(4);
         assertThat(item.paymentChannel()).isEqualTo(1);
+        // 金额 Long（分）从 string 形态 fixture 透传到北向 Response（ADR-0011：与 payment 同型、零换算）
+        assertThat(item.amount()).isEqualTo(9900L);
         // *Name 中文名透传到 admin Response（ADR-0009）——前端直读，取代前端 i18n 枚举映射
         assertThat(item.statusName()).isEqualTo("已支付");
         assertThat(item.payModeName()).isEqualTo("微信");

@@ -1,6 +1,5 @@
 package com.aieducenter.admin.payment.application.dto.wire;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -13,6 +12,9 @@ import java.time.LocalDateTime;
  * <p>枚举出口规则（ADR-0009）：每个枚举字段以 Integer code 承载、配 {@code *Name} 中文名
  * （{@code status}/{@code statusName}、{@code payMode}/{@code payModeName}、{@code accessType}/
  * {@code accessTypeName}、{@code paymentChannel}/{@code paymentChannelName}）。中文名由 payment 出口提供、admin 透传。</p>
+ *
+ * <p>金额出口规则（ADR-0011）：{@code amount} 为 <strong>Long（分）</strong>，与 payment
+ * {@code PaymentOrderResponse.amount} 同型透传、零换算。</p>
  *
  * @since 0.1.0
  */
@@ -30,7 +32,8 @@ public record PaymentOrderDetailWireResponse(
         /** 订单状态中文名（payment 出口提供） */
         String statusName,
 
-        BigDecimal amount,
+        /** 支付金额（分） */
+        Long amount,
 
         /** 支付方式（payment BaseEnum code） */
         Integer payMode,

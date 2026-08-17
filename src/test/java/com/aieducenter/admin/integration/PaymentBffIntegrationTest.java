@@ -103,10 +103,10 @@ class PaymentBffIntegrationTest {
         when(paymentClient.listPayments(any(PaymentOrderListWireRequest.class), anyInt(), anyInt()))
                 .thenReturn(new PageResponse<>(List.of(
                         new PaymentOrderWireResponse("PAY-1", "BIZ-1", "course-svc", 2, "已支付",
-                                new BigDecimal("99.00"), 9, "微信", 4, "H5", 1, "工商银行",
+                                9900L, 9, "微信", 4, "H5", 1, "工商银行",
                                 now, now.minusMinutes(5)),
                         new PaymentOrderWireResponse("PAY-2", "BIZ-2", "course-svc", 1, "待支付",
-                                new BigDecimal("199.00"), 10, "支付宝", 5, "APP", 1, "工商银行",
+                                19900L, 10, "支付宝", 5, "APP", 1, "工商银行",
                                 null, now.minusMinutes(1))
                 ), 28L, 0, 20));
 
@@ -124,7 +124,7 @@ class PaymentBffIntegrationTest {
         PaymentOrderSummaryResponse first = page.items().get(0);
         assertThat(first.paymentOrderNo()).isEqualTo("PAY-1");
         assertThat(first.status()).isEqualTo(2);
-        assertThat(first.amount()).isEqualByComparingTo("99.00");
+        assertThat(first.amount()).isEqualTo(9900L);
         assertThat(first.payMode()).isEqualTo(9);
         assertThat(first.paidAt()).isEqualTo(now);
         PaymentOrderSummaryResponse second = page.items().get(1);
@@ -143,7 +143,7 @@ class PaymentBffIntegrationTest {
         PaymentOrderQuery query = new PaymentOrderQuery(
                 "PAY-1", "BIZ-1", "course-svc",
                 List.of(2, 1), 9, 4, 1,
-                new BigDecimal("10.00"), new BigDecimal("500.00"),
+                1000L, 50000L,
                 LocalDateTime.of(2026, 8, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59),
                 null, null);
 
@@ -153,7 +153,7 @@ class PaymentBffIntegrationTest {
         PaymentOrderListWireRequest expectedWire = new PaymentOrderListWireRequest(
                 "PAY-1", "BIZ-1", "course-svc",
                 List.of(2, 1), 9, 4, 1,
-                new BigDecimal("10.00"), new BigDecimal("500.00"),
+                1000L, 50000L,
                 LocalDateTime.of(2026, 8, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59),
                 null, null);
         verify(paymentClient).listPayments(eq(expectedWire), eq(3), eq(20));
@@ -480,7 +480,7 @@ class PaymentBffIntegrationTest {
         LocalDateTime now = LocalDateTime.now();
         when(paymentClient.getPayment("PAY-1")).thenReturn(
                 new PaymentOrderDetailWireResponse("PAY-1", "BIZ-1", "course-svc", 2, "已支付",
-                        new BigDecimal("99.00"), 9, "微信", 4, "H5", 1, "工商银行",
+                        9900L, 9, "微信", 4, "H5", 1, "工商银行",
                         now, now.minusMinutes(5)));
 
         PaymentOrderDetailResponse detail = paymentAppService.getPaymentDetail("PAY-1");
@@ -490,7 +490,7 @@ class PaymentBffIntegrationTest {
         assertThat(detail.businessOrderNo()).isEqualTo("BIZ-1");
         assertThat(detail.businessSystemName()).isEqualTo("course-svc");
         assertThat(detail.status()).isEqualTo(2);
-        assertThat(detail.amount()).isEqualByComparingTo("99.00");
+        assertThat(detail.amount()).isEqualTo(9900L);
         assertThat(detail.payMode()).isEqualTo(9);
         assertThat(detail.accessType()).isEqualTo(4);
         assertThat(detail.paymentChannel()).isEqualTo(1);
@@ -709,7 +709,7 @@ class PaymentBffIntegrationTest {
         // payment POST /payments/{no}/query 仅取路径参数、返回查询后聚合（与 GET 详情同形 PaymentOrderResponse）
         when(paymentClient.queryPayment("PAY-1")).thenReturn(
                 new PaymentOrderDetailWireResponse("PAY-1", "BIZ-1", "course-svc", 2, "已支付",
-                        new BigDecimal("99.00"), 9, "微信", 4, "H5", 1, "工商银行",
+                        9900L, 9, "微信", 4, "H5", 1, "工商银行",
                         now, now.minusMinutes(5)));
 
         PaymentOrderDetailResponse detail = paymentAppService.queryPayment("PAY-1");
@@ -719,7 +719,7 @@ class PaymentBffIntegrationTest {
         assertThat(detail.businessOrderNo()).isEqualTo("BIZ-1");
         assertThat(detail.businessSystemName()).isEqualTo("course-svc");
         assertThat(detail.status()).isEqualTo(2);
-        assertThat(detail.amount()).isEqualByComparingTo("99.00");
+        assertThat(detail.amount()).isEqualTo(9900L);
         assertThat(detail.payMode()).isEqualTo(9);
         assertThat(detail.paymentChannel()).isEqualTo(1);
         assertThat(detail.paidAt()).isEqualTo(now);
@@ -760,7 +760,7 @@ class PaymentBffIntegrationTest {
         // admin 只透传 payment 的回显，admin 侧无从、也无需施加状态。
         when(paymentClient.resendPaymentNotification(eq("PAY-1"), any(ResendNotificationWireRequest.class)))
                 .thenReturn(new PaymentOrderDetailWireResponse("PAY-1", "BIZ-1", "course-svc", 2, "已支付",
-                        new BigDecimal("99.00"), 9, "微信", 4, "H5", 1, "工商银行",
+                        9900L, 9, "微信", 4, "H5", 1, "工商银行",
                         now, now.minusMinutes(5)));
 
         PaymentOrderDetailResponse detail = paymentAppService.resendPaymentNotification("PAY-1", 1001L, "alice");
@@ -776,7 +776,7 @@ class PaymentBffIntegrationTest {
         // 响应映射：当前支付单聚合（状态未变 PAID），复用 toPaymentDetail
         assertThat(detail.paymentOrderNo()).isEqualTo("PAY-1");
         assertThat(detail.status()).isEqualTo(2);
-        assertThat(detail.amount()).isEqualByComparingTo("99.00");
+        assertThat(detail.amount()).isEqualTo(9900L);
         assertThat(detail.payMode()).isEqualTo(9);
         assertThat(detail.paidAt()).isEqualTo(now);
     }

@@ -1,6 +1,5 @@
 package com.aieducenter.admin.payment.application.dto.wire;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -14,7 +13,8 @@ import java.util.List;
  * 不应被基础设施 import。</p>
  *
  * <p>枚举筛选项以 payment BaseEnum 的 Integer code 承载（payment 按 code 绑定枚举）；{@code statuses} 为多选，
- * 经 {@code PaymentClient} 展开为重复的 {@code status} 查询参数。</p>
+ * 经 {@code PaymentClient} 展开为重复的 {@code status} 查询参数。金额筛选 {@code amountMin/Max} 为
+ * <strong>Long（分）</strong>，与 payment {@code PaymentOrderQuery} 同型透传、零换算（ADR-0011）。</p>
  *
  * @since 0.1.0
  */
@@ -35,11 +35,11 @@ public record PaymentOrderListWireRequest(
 
         Integer paymentChannel,
 
-        /** 金额下限（含） */
-        BigDecimal amountMin,
+        /** 金额下限（分，含） */
+        Long amountMin,
 
-        /** 金额上限（含） */
-        BigDecimal amountMax,
+        /** 金额上限（分，含） */
+        Long amountMax,
 
         /** 创建时间起（含） */
         LocalDateTime createdAtFrom,
