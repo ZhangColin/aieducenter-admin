@@ -4,58 +4,53 @@ import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * payment {@code GET /api/v1/stats/by-channel} 的 wire 镜像——按通道细分的仪表盘。
+ * payment {@code GET /api/v1/stats/by-channel} 的 wire 镜像——按渠道维度细分的统计。
  *
- * <p>按 payMode（{@link PayModeStatWireResponse}）与 accessType（{@link AccessTypeStatWireResponse}）两个维度
- * 聚合支付笔数·金额·成功率，数据源 PaymentOrder（issue #37 二档统计）。admin 作为 BFF 纯透传——
- * <strong>不做</strong> admin 侧聚合/重算（spec「仪表盘」）。最终字段以 payment 实现契约为准（issue #37）。</p>
+ * <p>逐字镜像 payment 的 {@code ByChannelResponse}（ADR-0011 / issue #60）：{@code byPayMode}/{@code byAccessType}
+ * 共用同一 {@link ChannelBreakdownWireResponse} 形状，渠道为枚举 {@code Integer code + channelName}（非字符串
+ * token），按枚举顺序全列（缺失补零），仅统计 {@code pay_mode}/{@code access_type} 非空的支付单。聚合归
+ * payment（issue #37 二档统计）；admin 纯透传——不做 admin 侧聚合/重算/重排（spec「仪表盘」）。</p>
  *
+ * @param byPayMode    按支付方式（PayMode）聚合
+ * @param byAccessType 按接入类型（AccessType）聚合
  * @since 0.1.0
  */
 public record ChannelStatsWireResponse(
 
         /** 按 payMode（WECHAT/ALIPAY/UNIONPAY…）聚合的明细（payment 已排好序，admin 透传不改序） */
-        List<PayModeStatWireResponse> byPayMode,
+        List<ChannelBreakdownWireResponse> byPayMode,
 
-        /** 按 accessType（WEB/APP…）聚合的明细（payment 已排好序，admin 透传不改序） */
-        List<AccessTypeStatWireResponse> byAccessType
+        /** 按 accessType（H5/APP…）聚合的明细（payment 已排好序，admin 透传不改序） */
+        List<ChannelBreakdownWireResponse> byAccessType
 ) {
 
     /**
-     * payMode 维度统计——单一支付方式的支付笔数·金额·成功率。
+     * 渠道维度统计——单一渠道的支付笔数·金额·成功率（payMode / accessType 两维度同构）。
      *
-     * @param payMode        支付方式（PaymentOrder.payMode：WECHAT|ALIPAY|UNIONPAY）
-     * @param paymentCount   该支付方式支付笔数
-     * @param paymentAmount  该支付方式支付总金额（元）
-     * @param successRate    该支付方式支付成功率（小数，0–1 区间；最终精度以 payment 契约为准）
-     */
-    public record PayModeStatWireResponse(
-
-            String payMode,
-
-            Long paymentCount,
-
-            BigDecimal paymentAmount,
-
-            BigDecimal successRate
-    ) {
-    }
-
-    /**
-     * accessType 维度统计——单一接入类型的支付笔数·金额·成功率。
+     * <p>枚举出口规则（ADR-0009）：{@code channelCode} 为 PayMode/AccessType 的 Integer code、配
+     * {@code channelName} 显示名。</p>
      *
-     * @param accessType     接入类型（PaymentOrder.accessType：WEB|APP…）
-     * @param paymentCount   该接入类型支付笔数
-     * @param paymentAmount  该接入类型支付总金额（元）
-     * @param successRate    该接入类型支付成功率（小数，0–1 区间；最终精度以 payment 契约为准）
+     * @param channelCode   渠道枚举 code（PayMode / AccessType 的 code）
+     * @param channelName   渠道显示名（枚举 name）
+     * @param count         总笔数
+     * @param amount        总金额（分）
+     * @param successCount  成功笔数（PAID）
+     * @param successAmount 成功金额（分）
+     * @param successRate   成功率 [0,1] 4 位小数，分母为 0 时 0（比率 BigDecimal——provider 契约）
      */
-    public record AccessTypeStatWireResponse(
+    public record ChannelBreakdownWireResponse(
 
-            String accessType,
+            Integer channelCode,
 
-            Long paymentCount,
+            String channelName,
 
-            BigDecimal paymentAmount,
+            Long count,
+
+            Long amount,
+
+            Long successCount,
+
+            Long successAmount,
 
             BigDecimal successRate
     ) {

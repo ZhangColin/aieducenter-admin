@@ -4,52 +4,61 @@ import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * payment {@code GET /api/v1/stats/operations/audit} 的 wire 镜像——审核统计仪表盘。
+ * payment {@code GET /api/v1/stats/operations/audit} 的 wire 镜像——退款审核工作情况。
  *
- * <p>审核笔数·通过率·平均审核时长（顶层）+ 按审核人聚合（{@link AuditorStatWireResponse}），
- * 数据源 OperationLog（issue #37 一档统计）。admin 作为 BFF 纯透传——不做 admin 侧聚合/重算
- * （spec「仪表盘」）。最终字段以 payment 实现契约为准（issue #37）。</p>
+ * <p>逐字镜像 payment 的 {@code OperationsAuditResponse}（ADR-0011 / issue #60）：顶层为
+ * {@code totalAudits/approvedCount/rejectedCount/approvalRate/avgAuditDurationMinutes}（均值单位<strong>分钟</strong>、
+ * {@code BigDecimal}）+ {@code byAuditor} 按审核人聚合。数据源拆分：笔数/通过率/按审核人 ← OperationLog；
+ * 平均审核时长 ← RefundOrder（{@code audited_at - created_at}，{@code audit_type=MANUAL}）；
+ * {@code byAuditor} 不含人均时长（payment 侧避免跨聚合归属歧义）。聚合归 payment（issue #37 一档统计）；
+ * admin 纯透传——不做 admin 侧聚合/重算（spec「仪表盘」）。</p>
  *
+ * @param totalAudits            审核笔数（AUDIT_APPROVE + AUDIT_REJECT）
+ * @param approvedCount          通过数
+ * @param rejectedCount          拒绝数
+ * @param approvalRate           通过率 [0,1] 4 位小数（比率 BigDecimal——provider 契约）
+ * @param avgAuditDurationMinutes 平均审核时长（分钟，2 位小数，BigDecimal——provider 契约）
+ * @param byAuditor              按审核人聚合的明细（payment 已排好序，admin 透传不改序）
  * @since 0.1.0
  */
 public record OperationsAuditWireResponse(
 
-        /** 审核总笔数 */
-        Long auditCount,
+        Long totalAudits,
 
-        /** 审核通过率（小数，0–1 区间；最终精度以 payment 契约为准） */
+        Long approvedCount,
+
+        Long rejectedCount,
+
         BigDecimal approvalRate,
 
-        /** 平均审核时长（秒；退款创建到审核完成的平均间隔，最终单位以 payment 契约为准） */
-        Long avgAuditDurationSeconds,
+        BigDecimal avgAuditDurationMinutes,
 
-        /** 按审核人聚合的明细（payment 已排好序，admin 透传不改序） */
-        List<AuditorStatWireResponse> auditors
+        List<AuditorBreakdownWireResponse> byAuditor
 ) {
 
     /**
-     * 审核人统计——单一审核人的审核笔数·通过率·平均时长。
+     * 审核人维度统计——单一审核人的审核笔数·通过/拒绝数·通过率（无人均时长）。
      *
-     * @param auditorId              审核人 ID（OperationLog.operatorId）
-     * @param auditorName            审核人姓名（OperationLog.operatorName）
-     * @param auditCount             该审核人审核笔数
-     * @param approvedCount          该审核人通过笔数
-     * @param approvalRate           该审核人通过率（小数，0–1 区间）
-     * @param avgAuditDurationSeconds 该审核人平均审核时长（秒）
+     * @param auditorId     审核人 ID（OperationLog.operatorId）
+     * @param auditorName   审核人姓名（OperationLog.operatorName）
+     * @param count         该审核人审核笔数
+     * @param approvedCount 该审核人通过笔数
+     * @param rejectedCount 该审核人拒绝笔数
+     * @param approvalRate  该审核人通过率（小数，0–1 区间）
      */
-    public record AuditorStatWireResponse(
+    public record AuditorBreakdownWireResponse(
 
             Long auditorId,
 
             String auditorName,
 
-            Long auditCount,
+            Long count,
 
             Long approvedCount,
 
-            BigDecimal approvalRate,
+            Long rejectedCount,
 
-            Long avgAuditDurationSeconds
+            BigDecimal approvalRate
     ) {
     }
 }

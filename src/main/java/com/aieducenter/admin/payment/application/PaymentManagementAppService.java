@@ -443,15 +443,21 @@ public class PaymentManagementAppService {
                 wire.trend() == null ? List.of()
                         : wire.trend().stream().map(PaymentManagementAppService::toTrendBucket).toList();
         return new PaymentOverviewResponse(
-                wire.paymentCount(), wire.paymentAmount(),
-                wire.refundCount(), wire.refundAmount(),
-                wire.successRate(), wire.netAmount(), trend);
+                toOverviewSummary(wire.payment()), toOverviewSummary(wire.refund()),
+                wire.netAmount(), trend);
+    }
+
+    private static PaymentOverviewResponse.Summary toOverviewSummary(PaymentOverviewWireResponse.SummaryWireResponse wire) {
+        return wire == null ? null : new PaymentOverviewResponse.Summary(
+                wire.count(), wire.amount(), wire.successCount(), wire.successAmount(), wire.successRate());
     }
 
     private static PaymentOverviewResponse.TrendBucket toTrendBucket(PaymentOverviewWireResponse.TrendBucketWireResponse wire) {
         return new PaymentOverviewResponse.TrendBucket(
                 wire.bucket(), wire.paymentCount(), wire.paymentAmount(),
-                wire.refundCount(), wire.refundAmount());
+                wire.paidCount(), wire.paidAmount(),
+                wire.refundCount(), wire.refundAmount(),
+                wire.refundedCount(), wire.refundedAmount());
     }
 
     /**
@@ -471,20 +477,32 @@ public class PaymentManagementAppService {
     }
 
     private static OrderStatusDistributionResponse toOrderStatusDistribution(OrderStatusDistributionWireResponse wire) {
-        List<OrderStatusDistributionResponse.StatusBucket> paymentStatuses =
+        List<OrderStatusDistributionResponse.PaymentStatusBucket> paymentStatuses =
                 wire.paymentStatuses() == null ? List.of()
-                        : wire.paymentStatuses().stream().map(PaymentManagementAppService::toStatusBucket).toList();
-        List<OrderStatusDistributionResponse.StatusBucket> refundStatuses =
+                        : wire.paymentStatuses().stream().map(PaymentManagementAppService::toPaymentStatusBucket).toList();
+        List<OrderStatusDistributionResponse.RefundStatusBucket> refundStatuses =
                 wire.refundStatuses() == null ? List.of()
-                        : wire.refundStatuses().stream().map(PaymentManagementAppService::toStatusBucket).toList();
+                        : wire.refundStatuses().stream().map(PaymentManagementAppService::toRefundStatusBucket).toList();
         return new OrderStatusDistributionResponse(
-                paymentStatuses, refundStatuses, wire.refundPendingAuditCount());
+                paymentStatuses, refundStatuses, toBacklog(wire.refundBacklog()));
     }
 
-    private static OrderStatusDistributionResponse.StatusBucket toStatusBucket(
-            OrderStatusDistributionWireResponse.StatusBucketWireResponse wire) {
-        return new OrderStatusDistributionResponse.StatusBucket(
+    private static OrderStatusDistributionResponse.PaymentStatusBucket toPaymentStatusBucket(
+            OrderStatusDistributionWireResponse.PaymentStatusBucketWireResponse wire) {
+        return new OrderStatusDistributionResponse.PaymentStatusBucket(
                 wire.status(), wire.statusName(), wire.count(), wire.amount());
+    }
+
+    private static OrderStatusDistributionResponse.RefundStatusBucket toRefundStatusBucket(
+            OrderStatusDistributionWireResponse.RefundStatusBucketWireResponse wire) {
+        return new OrderStatusDistributionResponse.RefundStatusBucket(
+                wire.status(), wire.statusName(), wire.count(), wire.amount());
+    }
+
+    private static OrderStatusDistributionResponse.Backlog toBacklog(
+            OrderStatusDistributionWireResponse.BacklogWireResponse wire) {
+        return wire == null ? null : new OrderStatusDistributionResponse.Backlog(
+                wire.pendingCount(), wire.pendingAmount());
     }
 
     /**
@@ -507,25 +525,25 @@ public class PaymentManagementAppService {
     }
 
     private static GatewayHealthResponse toGatewayHealth(GatewayHealthWireResponse wire) {
-        List<GatewayHealthResponse.BankInterfaceStat> bankInterfaces =
-                wire.bankInterfaces() == null ? List.of()
-                        : wire.bankInterfaces().stream().map(PaymentManagementAppService::toBankInterfaceStat).toList();
-        return new GatewayHealthResponse(bankInterfaces);
+        List<GatewayHealthResponse.InterfaceHealth> interfaces =
+                wire.interfaces() == null ? List.of()
+                        : wire.interfaces().stream().map(PaymentManagementAppService::toInterfaceHealth).toList();
+        return new GatewayHealthResponse(interfaces);
     }
 
-    private static GatewayHealthResponse.BankInterfaceStat toBankInterfaceStat(
-            GatewayHealthWireResponse.BankInterfaceStatWireResponse wire) {
-        List<GatewayHealthResponse.BankInterfaceStat.ReturnCodeStat> returnCodes =
+    private static GatewayHealthResponse.InterfaceHealth toInterfaceHealth(
+            GatewayHealthWireResponse.InterfaceHealthWireResponse wire) {
+        List<GatewayHealthResponse.InterfaceHealth.ReturnCodeCount> returnCodes =
                 wire.returnCodes() == null ? List.of()
-                        : wire.returnCodes().stream().map(PaymentManagementAppService::toReturnCodeStat).toList();
-        return new GatewayHealthResponse.BankInterfaceStat(
-                wire.bankInterface(), wire.callCount(), wire.successCount(),
-                wire.successRate(), wire.avgExecutionTime(), returnCodes);
+                        : wire.returnCodes().stream().map(PaymentManagementAppService::toReturnCodeCount).toList();
+        return new GatewayHealthResponse.InterfaceHealth(
+                wire.bankCode(), wire.bankInterface(), wire.totalCount(), wire.successCount(),
+                wire.successRate(), wire.avgExecutionTimeMs(), returnCodes);
     }
 
-    private static GatewayHealthResponse.BankInterfaceStat.ReturnCodeStat toReturnCodeStat(
-            GatewayHealthWireResponse.BankInterfaceStatWireResponse.ReturnCodeStatWireResponse wire) {
-        return new GatewayHealthResponse.BankInterfaceStat.ReturnCodeStat(wire.returnCode(), wire.count());
+    private static GatewayHealthResponse.InterfaceHealth.ReturnCodeCount toReturnCodeCount(
+            GatewayHealthWireResponse.InterfaceHealthWireResponse.ReturnCodeCountWireResponse wire) {
+        return new GatewayHealthResponse.InterfaceHealth.ReturnCodeCount(wire.returnCode(), wire.count());
     }
 
     /**
@@ -548,18 +566,19 @@ public class PaymentManagementAppService {
     }
 
     private static OperationsAuditResponse toOperationsAudit(OperationsAuditWireResponse wire) {
-        List<OperationsAuditResponse.AuditorStat> auditors =
-                wire.auditors() == null ? List.of()
-                        : wire.auditors().stream().map(PaymentManagementAppService::toAuditorStat).toList();
+        List<OperationsAuditResponse.AuditorBreakdown> byAuditor =
+                wire.byAuditor() == null ? List.of()
+                        : wire.byAuditor().stream().map(PaymentManagementAppService::toAuditorBreakdown).toList();
         return new OperationsAuditResponse(
-                wire.auditCount(), wire.approvalRate(), wire.avgAuditDurationSeconds(), auditors);
+                wire.totalAudits(), wire.approvedCount(), wire.rejectedCount(),
+                wire.approvalRate(), wire.avgAuditDurationMinutes(), byAuditor);
     }
 
-    private static OperationsAuditResponse.AuditorStat toAuditorStat(
-            OperationsAuditWireResponse.AuditorStatWireResponse wire) {
-        return new OperationsAuditResponse.AuditorStat(
-                wire.auditorId(), wire.auditorName(), wire.auditCount(),
-                wire.approvedCount(), wire.approvalRate(), wire.avgAuditDurationSeconds());
+    private static OperationsAuditResponse.AuditorBreakdown toAuditorBreakdown(
+            OperationsAuditWireResponse.AuditorBreakdownWireResponse wire) {
+        return new OperationsAuditResponse.AuditorBreakdown(
+                wire.auditorId(), wire.auditorName(), wire.count(),
+                wire.approvedCount(), wire.rejectedCount(), wire.approvalRate());
     }
 
     /**
@@ -582,17 +601,23 @@ public class PaymentManagementAppService {
     }
 
     private static BusinessSystemStatsResponse toBusinessSystemStats(BusinessSystemStatsWireResponse wire) {
-        List<BusinessSystemStatsResponse.BusinessSystemStat> systems =
-                wire.systems() == null ? List.of()
-                        : wire.systems().stream().map(PaymentManagementAppService::toBusinessSystemStat).toList();
-        return new BusinessSystemStatsResponse(systems);
+        List<BusinessSystemStatsResponse.BusinessSystemBreakdown> businessSystems =
+                wire.businessSystems() == null ? List.of()
+                        : wire.businessSystems().stream().map(PaymentManagementAppService::toBusinessSystemBreakdown).toList();
+        return new BusinessSystemStatsResponse(businessSystems);
     }
 
-    private static BusinessSystemStatsResponse.BusinessSystemStat toBusinessSystemStat(
-            BusinessSystemStatsWireResponse.BusinessSystemStatWireResponse wire) {
-        return new BusinessSystemStatsResponse.BusinessSystemStat(
-                wire.businessSystemName(), wire.paymentCount(), wire.paymentAmount(),
-                wire.refundCount(), wire.refundAmount(), wire.successRate(), wire.refundRate());
+    private static BusinessSystemStatsResponse.BusinessSystemBreakdown toBusinessSystemBreakdown(
+            BusinessSystemStatsWireResponse.BusinessSystemBreakdownWireResponse wire) {
+        return new BusinessSystemStatsResponse.BusinessSystemBreakdown(
+                wire.businessSystemName(), toBusinessSystemSummary(wire.payment()),
+                toBusinessSystemSummary(wire.refund()), wire.refundRate());
+    }
+
+    private static BusinessSystemStatsResponse.Summary toBusinessSystemSummary(
+            BusinessSystemStatsWireResponse.SummaryWireResponse wire) {
+        return wire == null ? null : new BusinessSystemStatsResponse.Summary(
+                wire.count(), wire.amount(), wire.successCount(), wire.successAmount(), wire.successRate());
     }
 
     /**
@@ -615,25 +640,20 @@ public class PaymentManagementAppService {
     }
 
     private static ChannelStatsResponse toChannelStats(ChannelStatsWireResponse wire) {
-        List<ChannelStatsResponse.PayModeStat> byPayMode =
+        List<ChannelStatsResponse.ChannelBreakdown> byPayMode =
                 wire.byPayMode() == null ? List.of()
-                        : wire.byPayMode().stream().map(PaymentManagementAppService::toPayModeStat).toList();
-        List<ChannelStatsResponse.AccessTypeStat> byAccessType =
+                        : wire.byPayMode().stream().map(PaymentManagementAppService::toChannelBreakdown).toList();
+        List<ChannelStatsResponse.ChannelBreakdown> byAccessType =
                 wire.byAccessType() == null ? List.of()
-                        : wire.byAccessType().stream().map(PaymentManagementAppService::toAccessTypeStat).toList();
+                        : wire.byAccessType().stream().map(PaymentManagementAppService::toChannelBreakdown).toList();
         return new ChannelStatsResponse(byPayMode, byAccessType);
     }
 
-    private static ChannelStatsResponse.PayModeStat toPayModeStat(
-            ChannelStatsWireResponse.PayModeStatWireResponse wire) {
-        return new ChannelStatsResponse.PayModeStat(
-                wire.payMode(), wire.paymentCount(), wire.paymentAmount(), wire.successRate());
-    }
-
-    private static ChannelStatsResponse.AccessTypeStat toAccessTypeStat(
-            ChannelStatsWireResponse.AccessTypeStatWireResponse wire) {
-        return new ChannelStatsResponse.AccessTypeStat(
-                wire.accessType(), wire.paymentCount(), wire.paymentAmount(), wire.successRate());
+    private static ChannelStatsResponse.ChannelBreakdown toChannelBreakdown(
+            ChannelStatsWireResponse.ChannelBreakdownWireResponse wire) {
+        return new ChannelStatsResponse.ChannelBreakdown(
+                wire.channelCode(), wire.channelName(), wire.count(), wire.amount(),
+                wire.successCount(), wire.successAmount(), wire.successRate());
     }
 
     /**
@@ -649,8 +669,34 @@ public class PaymentManagementAppService {
         } catch (OpenApiClientException e) {
             throw translatePaymentError(e);
         }
+        return toAnomalies(wire);
+    }
+
+    private static AnomaliesResponse toAnomalies(AnomaliesWireResponse wire) {
         return new AnomaliesResponse(
-                wire.longPendingCount(), wire.longRefundingCount(), wire.recentFailureCount());
+                toStuckOrders(wire.longPendingPayments()),
+                toStuckOrders(wire.longRefundingRefunds()),
+                toRecentFailures(wire.recentFailures()));
+    }
+
+    private static AnomaliesResponse.StuckOrders toStuckOrders(AnomaliesWireResponse.StuckOrdersWireResponse wire) {
+        return wire == null ? null : new AnomaliesResponse.StuckOrders(wire.count(), wire.amount());
+    }
+
+    private static AnomaliesResponse.RecentFailures toRecentFailures(
+            AnomaliesWireResponse.RecentFailuresWireResponse wire) {
+        if (wire == null) {
+            return null;
+        }
+        List<AnomaliesResponse.FailureCount> byType =
+                wire.byType() == null ? List.of()
+                        : wire.byType().stream().map(PaymentManagementAppService::toFailureCount).toList();
+        return new AnomaliesResponse.RecentFailures(wire.totalCount(), byType);
+    }
+
+    private static AnomaliesResponse.FailureCount toFailureCount(
+            AnomaliesWireResponse.FailureCountWireResponse wire) {
+        return new AnomaliesResponse.FailureCount(wire.logType(), wire.failureCount());
     }
 
     /**
@@ -673,24 +719,41 @@ public class PaymentManagementAppService {
     }
 
     private static OperationsActivityResponse toOperationsActivity(OperationsActivityWireResponse wire) {
-        List<OperationsActivityResponse.OperatorActivityStat> operators =
-                wire.operators() == null ? List.of()
-                        : wire.operators().stream().map(PaymentManagementAppService::toOperatorActivityStat).toList();
-        return new OperationsActivityResponse(operators);
+        List<OperationsActivityResponse.OperatorActivity> byOperator =
+                wire.byOperator() == null ? List.of()
+                        : wire.byOperator().stream().map(PaymentManagementAppService::toOperatorActivity).toList();
+        return new OperationsActivityResponse(byOperator, toNotifyResendActivity(wire.notifyResend()));
     }
 
-    private static OperationsActivityResponse.OperatorActivityStat toOperatorActivityStat(
-            OperationsActivityWireResponse.OperatorActivityStatWireResponse wire) {
+    private static OperationsActivityResponse.OperatorActivity toOperatorActivity(
+            OperationsActivityWireResponse.OperatorActivityWireResponse wire) {
         List<OperationsActivityResponse.OperationCount> operations =
                 wire.operations() == null ? List.of()
                         : wire.operations().stream().map(PaymentManagementAppService::toOperationCount).toList();
-        return new OperationsActivityResponse.OperatorActivityStat(
-                wire.operatorId(), wire.operatorName(), operations, wire.notificationResendCount());
+        return new OperationsActivityResponse.OperatorActivity(
+                wire.operatorId(), wire.operatorName(), wire.totalCount(), operations);
     }
 
     private static OperationsActivityResponse.OperationCount toOperationCount(
             OperationsActivityWireResponse.OperationCountWireResponse wire) {
-        return new OperationsActivityResponse.OperationCount(wire.operation(), wire.count());
+        return new OperationsActivityResponse.OperationCount(
+                wire.operation(), wire.operationName(), wire.count());
+    }
+
+    private static OperationsActivityResponse.NotifyResendActivity toNotifyResendActivity(
+            OperationsActivityWireResponse.NotifyResendActivityWireResponse wire) {
+        if (wire == null) {
+            return null;
+        }
+        List<OperationsActivityResponse.SystemResendCount> byBusinessSystem =
+                wire.byBusinessSystem() == null ? List.of()
+                        : wire.byBusinessSystem().stream().map(PaymentManagementAppService::toSystemResendCount).toList();
+        return new OperationsActivityResponse.NotifyResendActivity(wire.totalCount(), byBusinessSystem);
+    }
+
+    private static OperationsActivityResponse.SystemResendCount toSystemResendCount(
+            OperationsActivityWireResponse.SystemResendCountWireResponse wire) {
+        return new OperationsActivityResponse.SystemResendCount(wire.businessSystem(), wire.count());
     }
 
     /**

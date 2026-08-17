@@ -25,18 +25,19 @@ class PaymentEnumNamePassThroughContractTest {
 
     @Test
     void given_paymentStatusDistributionWithStatusName_when_getOrderStatusDistribution_then_bucketCarriesStatusName() {
-        // issue #50 复现路径：GET /stats/orders/status-distribution 的各分桶须含 status + statusName
+        // issue #50 复现路径：GET /stats/orders/status-distribution 的各分桶须含 status + statusName。
+        // fixture 取 payment 真实序列化形状：Long（含金额/笔数）为 string（ADR-0011）、积压为嵌套 refundBacklog（#60）
         String envelope = """
                 {
                   "code": 0, "message": "ok",
                   "data": {
                     "paymentStatuses": [
-                      {"status": 2, "statusName": "已支付", "count": 72, "amount": 7200}
+                      {"status": 2, "statusName": "已支付", "count": "72", "amount": "7200"}
                     ],
                     "refundStatuses": [
-                      {"status": 1, "statusName": "待审核", "count": 3, "amount": 300}
+                      {"status": 1, "statusName": "待审核", "count": "3", "amount": "300"}
                     ],
-                    "refundPendingAuditCount": 3
+                    "refundBacklog": {"pendingCount": "3", "pendingAmount": "300"}
                   },
                   "requestId": null, "errors": null
                 }
@@ -46,7 +47,12 @@ class PaymentEnumNamePassThroughContractTest {
         assertThat(resp.paymentStatuses()).hasSize(1);
         assertThat(resp.paymentStatuses().get(0).status()).isEqualTo(2);
         assertThat(resp.paymentStatuses().get(0).statusName()).isEqualTo("已支付");
+        // 分桶金额 Long（分）透传：string 形态进、Long 出（零换算，ADR-0011 §1）
+        assertThat(resp.paymentStatuses().get(0).amount()).isEqualTo(7200L);
         assertThat(resp.refundStatuses().get(0).statusName()).isEqualTo("待审核");
+        // 退款待审核积压：嵌套 refundBacklog（笔数 + 金额）
+        assertThat(resp.refundBacklog().pendingCount()).isEqualTo(3L);
+        assertThat(resp.refundBacklog().pendingAmount()).isEqualTo(300L);
     }
 
     @Test

@@ -824,35 +824,40 @@ class PaymentBffIntegrationTest {
     // ========== getPaymentOverview · tier-1 统计透传契约（顶层 + 趋势分桶映射、不改序） ==========
 
     @Test
-    void given_overviewWithTrend_when_getPaymentOverview_then_mapTopLevelAndBucketsPreserveOrder() {
+    void given_overviewWithTrend_when_getPaymentOverview_then_mapSummariesNetAmountAndBucketsPreserveOrder() {
         LocalDateTime b1 = LocalDateTime.of(2026, 8, 11, 0, 0);
         LocalDateTime b2 = LocalDateTime.of(2026, 8, 12, 0, 0);
         // 故意让 payment 回传顺序与时间序相反（b2 在前、b1 在后）——证明 admin 透传不重排：
         // 聚合/排序归 payment（spec「仪表盘」），admin 只 map 不 sort。
         when(paymentClient.getPaymentOverview(STATS_FROM, STATS_TO, STATS_GRANULARITY)).thenReturn(new PaymentOverviewWireResponse(
-                1200L, new BigDecimal("98000.00"),
-                30L, new BigDecimal("2400.00"),
-                new BigDecimal("0.9850"), new BigDecimal("95600.00"),
+                new PaymentOverviewWireResponse.SummaryWireResponse(
+                        1200L, 9800000L, 1182L, 9650000L, new BigDecimal("0.9850")),
+                new PaymentOverviewWireResponse.SummaryWireResponse(
+                        30L, 240000L, 25L, 200000L, new BigDecimal("0.8333")),
+                9450000L,
                 List.of(
                         new PaymentOverviewWireResponse.TrendBucketWireResponse(
-                                b2, 20L, new BigDecimal("1600.00"), 1L, new BigDecimal("80.00")),
+                                b2, 20L, 160000L, 19L, 152000L, 1L, 8000L, 1L, 8000L),
                         new PaymentOverviewWireResponse.TrendBucketWireResponse(
-                                b1, 18L, new BigDecimal("1440.00"), 0L, new BigDecimal("0.00")))));
+                                b1, 18L, 144000L, 18L, 144000L, 0L, 0L, 0L, 0L))));
 
         PaymentOverviewResponse overview = paymentAppService.getPaymentOverview(STATS_FROM, STATS_TO, STATS_GRANULARITY);
 
-        // 顶层快照逐字段映射
-        assertThat(overview.paymentCount()).isEqualTo(1200L);
-        assertThat(overview.paymentAmount()).isEqualByComparingTo("98000.00");
-        assertThat(overview.refundCount()).isEqualTo(30L);
-        assertThat(overview.refundAmount()).isEqualByComparingTo("2400.00");
-        assertThat(overview.successRate()).isEqualByComparingTo("0.9850");
-        assertThat(overview.netAmount()).isEqualByComparingTo("95600.00");
-        // 趋势分桶顺序原样保留（payment 给 b2→b1，admin 不重排为 b1→b2）
+        // 嵌套支付/退款摘要逐字段映射（金额 Long 分、比率 BigDecimal——provider 契约分型）
+        assertThat(overview.payment().count()).isEqualTo(1200L);
+        assertThat(overview.payment().amount()).isEqualTo(9800000L);
+        assertThat(overview.payment().successCount()).isEqualTo(1182L);
+        assertThat(overview.payment().successAmount()).isEqualTo(9650000L);
+        assertThat(overview.payment().successRate()).isEqualByComparingTo("0.9850");
+        assertThat(overview.refund().count()).isEqualTo(30L);
+        assertThat(overview.refund().amount()).isEqualTo(240000L);
+        assertThat(overview.netAmount()).isEqualTo(9450000L);
+        // 趋势分桶（9 字段，含成功子集）顺序原样保留（payment 给 b2→b1，admin 不重排为 b1→b2）
         assertThat(overview.trend()).hasSize(2);
         assertThat(overview.trend().get(0).bucket()).isEqualTo(b2);
         assertThat(overview.trend().get(0).paymentCount()).isEqualTo(20L);
-        assertThat(overview.trend().get(0).refundAmount()).isEqualByComparingTo("80.00");
+        assertThat(overview.trend().get(0).paidAmount()).isEqualTo(152000L);
+        assertThat(overview.trend().get(0).refundAmount()).isEqualTo(8000L);
         assertThat(overview.trend().get(1).bucket()).isEqualTo(b1);
         assertThat(overview.trend().get(1).refundCount()).isZero();
     }
@@ -873,15 +878,15 @@ class PaymentBffIntegrationTest {
     @Test
     void given_statusDistribution_when_getOrderStatusDistribution_then_mapBucketsAndBacklog() {
         when(paymentClient.getOrderStatusDistribution()).thenReturn(new OrderStatusDistributionWireResponse(
-                List.of(new OrderStatusDistributionWireResponse.StatusBucketWireResponse(
-                                2, "已支付", 800L, new BigDecimal("64000.00")),
-                        new OrderStatusDistributionWireResponse.StatusBucketWireResponse(
-                                1, "待支付", 50L, new BigDecimal("4000.00"))),
-                List.of(new OrderStatusDistributionWireResponse.StatusBucketWireResponse(
-                                5, "退款成功", 25L, new BigDecimal("2000.00")),
-                        new OrderStatusDistributionWireResponse.StatusBucketWireResponse(
-                                1, "待审核", 5L, new BigDecimal("400.00"))),
-                5L));
+                List.of(new OrderStatusDistributionWireResponse.PaymentStatusBucketWireResponse(
+                                2, "已支付", 800L, 6400000L),
+                        new OrderStatusDistributionWireResponse.PaymentStatusBucketWireResponse(
+                                1, "待支付", 50L, 400000L)),
+                List.of(new OrderStatusDistributionWireResponse.RefundStatusBucketWireResponse(
+                                5, "退款成功", 25L, 200000L),
+                        new OrderStatusDistributionWireResponse.RefundStatusBucketWireResponse(
+                                1, "待审核", 5L, 40000L)),
+                new OrderStatusDistributionWireResponse.BacklogWireResponse(5L, 40000L)));
 
         OrderStatusDistributionResponse dist = paymentAppService.getOrderStatusDistribution();
 
@@ -889,15 +894,16 @@ class PaymentBffIntegrationTest {
         assertThat(dist.paymentStatuses()).hasSize(2);
         assertThat(dist.paymentStatuses().get(0).status()).isEqualTo(2);
         assertThat(dist.paymentStatuses().get(0).count()).isEqualTo(800L);
-        assertThat(dist.paymentStatuses().get(0).amount()).isEqualByComparingTo("64000.00");
+        assertThat(dist.paymentStatuses().get(0).amount()).isEqualTo(6400000L);
         assertThat(dist.paymentStatuses().get(1).status()).isEqualTo(1);
         // 退款状态分布映射
         assertThat(dist.refundStatuses()).hasSize(2);
         assertThat(dist.refundStatuses().get(0).status()).isEqualTo(5);
         assertThat(dist.refundStatuses().get(1).status()).isEqualTo(1);
-        assertThat(dist.refundStatuses().get(1).amount()).isEqualByComparingTo("400.00");
-        // 退款待审核积压（运营关注的积压 KPI，单独 roll-up）
-        assertThat(dist.refundPendingAuditCount()).isEqualTo(5L);
+        assertThat(dist.refundStatuses().get(1).amount()).isEqualTo(40000L);
+        // 退款待审核积压：嵌套 refundBacklog（笔数 + 金额分）——积压金额首次透出（#60）
+        assertThat(dist.refundBacklog().pendingCount()).isEqualTo(5L);
+        assertThat(dist.refundBacklog().pendingAmount()).isEqualTo(40000L);
     }
 
     @Test
@@ -914,36 +920,37 @@ class PaymentBffIntegrationTest {
     // ========== getGatewayHealth · tier-1 统计透传契约（银行接口 + 返回码分布） ==========
 
     @Test
-    void given_gatewayHealth_when_getGatewayHealth_then_mapBankInterfacesAndReturnCodes() {
+    void given_gatewayHealth_when_getGatewayHealth_then_mapInterfacesAndReturnCodes() {
         when(paymentClient.getGatewayHealth(STATS_FROM, STATS_TO)).thenReturn(new GatewayHealthWireResponse(List.of(
-                new GatewayHealthWireResponse.BankInterfaceStatWireResponse(
-                        "ICBC_PAY", 1000L, 980L, new BigDecimal("0.98"), 120L,
+                new GatewayHealthWireResponse.InterfaceHealthWireResponse(
+                        "ICBC", "ICBC_PAY", 1000L, 980L, new BigDecimal("0.9800"), new BigDecimal("120.50"),
                         List.of(
-                                new GatewayHealthWireResponse.BankInterfaceStatWireResponse.ReturnCodeStatWireResponse(
+                                new GatewayHealthWireResponse.InterfaceHealthWireResponse.ReturnCodeCountWireResponse(
                                         "000000", 980L),
-                                new GatewayHealthWireResponse.BankInterfaceStatWireResponse.ReturnCodeStatWireResponse(
+                                new GatewayHealthWireResponse.InterfaceHealthWireResponse.ReturnCodeCountWireResponse(
                                         "9999", 20L))),
-                new GatewayHealthWireResponse.BankInterfaceStatWireResponse(
-                        "WECHAT_QUERY", 500L, 495L, new BigDecimal("0.99"), 80L,
+                new GatewayHealthWireResponse.InterfaceHealthWireResponse(
+                        "WECHAT", "WECHAT_QUERY", 500L, 495L, new BigDecimal("0.9900"), new BigDecimal("80.00"),
                         List.of()))));
 
         GatewayHealthResponse health = paymentAppService.getGatewayHealth(STATS_FROM, STATS_TO);
 
-        assertThat(health.bankInterfaces()).hasSize(2);
-        GatewayHealthResponse.BankInterfaceStat first = health.bankInterfaces().get(0);
+        assertThat(health.interfaces()).hasSize(2);
+        GatewayHealthResponse.InterfaceHealth first = health.interfaces().get(0);
+        assertThat(first.bankCode()).isEqualTo("ICBC");
         assertThat(first.bankInterface()).isEqualTo("ICBC_PAY");
-        assertThat(first.callCount()).isEqualTo(1000L);
+        assertThat(first.totalCount()).isEqualTo(1000L);
         assertThat(first.successCount()).isEqualTo(980L);
-        assertThat(first.successRate()).isEqualByComparingTo("0.98");
-        assertThat(first.avgExecutionTime()).isEqualTo(120L);
+        assertThat(first.successRate()).isEqualByComparingTo("0.9800");
+        assertThat(first.avgExecutionTimeMs()).isEqualByComparingTo("120.50");
         // 返回码分布映射 + 顺序保留
         assertThat(first.returnCodes()).hasSize(2);
         assertThat(first.returnCodes().get(0).returnCode()).isEqualTo("000000");
         assertThat(first.returnCodes().get(0).count()).isEqualTo(980L);
         assertThat(first.returnCodes().get(1).returnCode()).isEqualTo("9999");
         // 第二个接口返回码为空列表（admin 透传空、非 null）
-        assertThat(health.bankInterfaces().get(1).bankInterface()).isEqualTo("WECHAT_QUERY");
-        assertThat(health.bankInterfaces().get(1).returnCodes()).isEmpty();
+        assertThat(health.interfaces().get(1).bankInterface()).isEqualTo("WECHAT_QUERY");
+        assertThat(health.interfaces().get(1).returnCodes()).isEmpty();
     }
 
     @Test
@@ -959,29 +966,31 @@ class PaymentBffIntegrationTest {
     // ========== getOperationsAudit · tier-1 统计透传契约（顶层 + 按审核人聚合） ==========
 
     @Test
-    void given_operationsAudit_when_getOperationsAudit_then_mapTopLevelAndAuditors() {
+    void given_operationsAudit_when_getOperationsAudit_then_mapTopLevelAndAuditorBreakdowns() {
         when(paymentClient.getOperationsAudit(STATS_FROM, STATS_TO)).thenReturn(new OperationsAuditWireResponse(
-                60L, new BigDecimal("0.90"), 1800L,
+                60L, 54L, 6L, new BigDecimal("0.9000"), new BigDecimal("30.50"),
                 List.of(
-                        new OperationsAuditWireResponse.AuditorStatWireResponse(
-                                1001L, "alice", 40L, 38L, new BigDecimal("0.95"), 1500L),
-                        new OperationsAuditWireResponse.AuditorStatWireResponse(
-                                2002L, "bob", 20L, 16L, new BigDecimal("0.80"), 2100L))));
+                        new OperationsAuditWireResponse.AuditorBreakdownWireResponse(
+                                1001L, "alice", 40L, 38L, 2L, new BigDecimal("0.9500")),
+                        new OperationsAuditWireResponse.AuditorBreakdownWireResponse(
+                                2002L, "bob", 20L, 16L, 4L, new BigDecimal("0.8000")))));
 
         OperationsAuditResponse audit = paymentAppService.getOperationsAudit(STATS_FROM, STATS_TO);
 
-        // 顶层映射
-        assertThat(audit.auditCount()).isEqualTo(60L);
-        assertThat(audit.approvalRate()).isEqualByComparingTo("0.90");
-        assertThat(audit.avgAuditDurationSeconds()).isEqualTo(1800L);
+        // 顶层映射（均值单位分钟、BigDecimal——provider 契约）
+        assertThat(audit.totalAudits()).isEqualTo(60L);
+        assertThat(audit.approvedCount()).isEqualTo(54L);
+        assertThat(audit.rejectedCount()).isEqualTo(6L);
+        assertThat(audit.approvalRate()).isEqualByComparingTo("0.9000");
+        assertThat(audit.avgAuditDurationMinutes()).isEqualByComparingTo("30.50");
         // 按审核人聚合映射 + 顺序保留
-        assertThat(audit.auditors()).hasSize(2);
-        assertThat(audit.auditors().get(0).auditorId()).isEqualTo(1001L);
-        assertThat(audit.auditors().get(0).auditorName()).isEqualTo("alice");
-        assertThat(audit.auditors().get(0).approvedCount()).isEqualTo(38L);
-        assertThat(audit.auditors().get(0).approvalRate()).isEqualByComparingTo("0.95");
-        assertThat(audit.auditors().get(1).auditorName()).isEqualTo("bob");
-        assertThat(audit.auditors().get(1).approvalRate()).isEqualByComparingTo("0.80");
+        assertThat(audit.byAuditor()).hasSize(2);
+        assertThat(audit.byAuditor().get(0).auditorId()).isEqualTo(1001L);
+        assertThat(audit.byAuditor().get(0).auditorName()).isEqualTo("alice");
+        assertThat(audit.byAuditor().get(0).approvedCount()).isEqualTo(38L);
+        assertThat(audit.byAuditor().get(0).approvalRate()).isEqualByComparingTo("0.9500");
+        assertThat(audit.byAuditor().get(1).auditorName()).isEqualTo("bob");
+        assertThat(audit.byAuditor().get(1).approvalRate()).isEqualByComparingTo("0.8000");
     }
 
     @Test
@@ -997,30 +1006,36 @@ class PaymentBffIntegrationTest {
     // ========== getByBusinessSystem · tier-2 统计透传契约（按业务系统聚合·不改序） ==========
 
     @Test
-    void given_businessSystemStats_when_getByBusinessSystem_then_mapSystemsAndPreserveOrder() {
+    void given_businessSystemStats_when_getByBusinessSystem_then_mapBreakdownsAndPreserveOrder() {
         when(paymentClient.getByBusinessSystem(STATS_FROM, STATS_TO)).thenReturn(new BusinessSystemStatsWireResponse(List.of(
-                new BusinessSystemStatsWireResponse.BusinessSystemStatWireResponse(
-                        "course-svc", 800L, new BigDecimal("64000.00"),
-                        20L, new BigDecimal("1600.00"),
-                        new BigDecimal("0.98"), new BigDecimal("0.025")),
-                new BusinessSystemStatsWireResponse.BusinessSystemStatWireResponse(
-                        "membership-svc", 400L, new BigDecimal("32000.00"),
-                        10L, new BigDecimal("800.00"),
-                        new BigDecimal("0.95"), new BigDecimal("0.025")))));
+                new BusinessSystemStatsWireResponse.BusinessSystemBreakdownWireResponse(
+                        "course-svc",
+                        new BusinessSystemStatsWireResponse.SummaryWireResponse(
+                                800L, 6400000L, 784L, 6272000L, new BigDecimal("0.9800")),
+                        new BusinessSystemStatsWireResponse.SummaryWireResponse(
+                                20L, 160000L, 16L, 128000L, new BigDecimal("0.8000")),
+                        new BigDecimal("0.0204")),
+                new BusinessSystemStatsWireResponse.BusinessSystemBreakdownWireResponse(
+                        "membership-svc",
+                        new BusinessSystemStatsWireResponse.SummaryWireResponse(
+                                400L, 3200000L, 380L, 3040000L, new BigDecimal("0.9500")),
+                        new BusinessSystemStatsWireResponse.SummaryWireResponse(
+                                10L, 80000L, 10L, 80000L, new BigDecimal("1.0000")),
+                        new BigDecimal("0.0263")))));
 
         BusinessSystemStatsResponse stats = paymentAppService.getByBusinessSystem(STATS_FROM, STATS_TO);
 
-        // 按业务系统聚合映射 + 顺序保留
-        assertThat(stats.systems()).hasSize(2);
-        BusinessSystemStatsResponse.BusinessSystemStat first = stats.systems().get(0);
+        // 按业务系统聚合映射（嵌套支付/退款摘要）+ 顺序保留
+        assertThat(stats.businessSystems()).hasSize(2);
+        BusinessSystemStatsResponse.BusinessSystemBreakdown first = stats.businessSystems().get(0);
         assertThat(first.businessSystemName()).isEqualTo("course-svc");
-        assertThat(first.paymentCount()).isEqualTo(800L);
-        assertThat(first.paymentAmount()).isEqualByComparingTo("64000.00");
-        assertThat(first.refundCount()).isEqualTo(20L);
-        assertThat(first.refundAmount()).isEqualByComparingTo("1600.00");
-        assertThat(first.successRate()).isEqualByComparingTo("0.98");
-        assertThat(first.refundRate()).isEqualByComparingTo("0.025");
-        assertThat(stats.systems().get(1).businessSystemName()).isEqualTo("membership-svc");
+        assertThat(first.payment().count()).isEqualTo(800L);
+        assertThat(first.payment().amount()).isEqualTo(6400000L);
+        assertThat(first.payment().successRate()).isEqualByComparingTo("0.9800");
+        assertThat(first.refund().count()).isEqualTo(20L);
+        assertThat(first.refund().amount()).isEqualTo(160000L);
+        assertThat(first.refundRate()).isEqualByComparingTo("0.0204");
+        assertThat(stats.businessSystems().get(1).businessSystemName()).isEqualTo("membership-svc");
     }
 
     @Test
@@ -1039,27 +1054,29 @@ class PaymentBffIntegrationTest {
     @Test
     void given_channelStats_when_getByChannel_then_mapBothDimensionsAndPreserveOrder() {
         when(paymentClient.getByChannel(STATS_FROM, STATS_TO)).thenReturn(new ChannelStatsWireResponse(
-                List.of(new ChannelStatsWireResponse.PayModeStatWireResponse(
-                                "WECHAT", 600L, new BigDecimal("48000.00"), new BigDecimal("0.98")),
-                        new ChannelStatsWireResponse.PayModeStatWireResponse(
-                                "ALIPAY", 400L, new BigDecimal("32000.00"), new BigDecimal("0.96"))),
-                List.of(new ChannelStatsWireResponse.AccessTypeStatWireResponse(
-                        "WEB", 700L, new BigDecimal("56000.00"), new BigDecimal("0.97")))));
+                List.of(new ChannelStatsWireResponse.ChannelBreakdownWireResponse(
+                                9, "微信", 600L, 4800000L, 588L, 4704000L, new BigDecimal("0.9800")),
+                        new ChannelStatsWireResponse.ChannelBreakdownWireResponse(
+                                10, "支付宝", 400L, 3200000L, 384L, 3072000L, new BigDecimal("0.9600"))),
+                List.of(new ChannelStatsWireResponse.ChannelBreakdownWireResponse(
+                        4, "H5", 700L, 5600000L, 679L, 5432000L, new BigDecimal("0.9700")))));
 
         ChannelStatsResponse stats = paymentAppService.getByChannel(STATS_FROM, STATS_TO);
 
-        // payMode 维度映射 + 顺序保留
+        // payMode 维度映射（枚举 code + 中文名）+ 顺序保留
         assertThat(stats.byPayMode()).hasSize(2);
-        assertThat(stats.byPayMode().get(0).payMode()).isEqualTo("WECHAT");
-        assertThat(stats.byPayMode().get(0).paymentCount()).isEqualTo(600L);
-        assertThat(stats.byPayMode().get(0).paymentAmount()).isEqualByComparingTo("48000.00");
-        assertThat(stats.byPayMode().get(0).successRate()).isEqualByComparingTo("0.98");
-        assertThat(stats.byPayMode().get(1).payMode()).isEqualTo("ALIPAY");
+        assertThat(stats.byPayMode().get(0).channelCode()).isEqualTo(9);
+        assertThat(stats.byPayMode().get(0).channelName()).isEqualTo("微信");
+        assertThat(stats.byPayMode().get(0).count()).isEqualTo(600L);
+        assertThat(stats.byPayMode().get(0).amount()).isEqualTo(4800000L);
+        assertThat(stats.byPayMode().get(0).successRate()).isEqualByComparingTo("0.9800");
+        assertThat(stats.byPayMode().get(1).channelName()).isEqualTo("支付宝");
         // accessType 维度映射
         assertThat(stats.byAccessType()).hasSize(1);
-        assertThat(stats.byAccessType().get(0).accessType()).isEqualTo("WEB");
-        assertThat(stats.byAccessType().get(0).paymentAmount()).isEqualByComparingTo("56000.00");
-        assertThat(stats.byAccessType().get(0).successRate()).isEqualByComparingTo("0.97");
+        assertThat(stats.byAccessType().get(0).channelCode()).isEqualTo(4);
+        assertThat(stats.byAccessType().get(0).channelName()).isEqualTo("H5");
+        assertThat(stats.byAccessType().get(0).amount()).isEqualTo(5600000L);
+        assertThat(stats.byAccessType().get(0).successRate()).isEqualByComparingTo("0.9700");
     }
 
     @Test
@@ -1076,16 +1093,25 @@ class PaymentBffIntegrationTest {
     // ========== getAnomalies · tier-2 统计透传契约（异常计数） ==========
 
     @Test
-    void given_anomalies_when_getAnomalies_then_mapCounts() {
-        when(paymentClient.getAnomalies()).thenReturn(
-                new AnomaliesWireResponse(12L, 3L, 8L));
+    void given_anomalies_when_getAnomalies_then_mapNestedStuckOrdersAndFailures() {
+        when(paymentClient.getAnomalies()).thenReturn(new AnomaliesWireResponse(
+                new AnomaliesWireResponse.StuckOrdersWireResponse(12L, 96000L),
+                new AnomaliesWireResponse.StuckOrdersWireResponse(3L, 24000L),
+                new AnomaliesWireResponse.RecentFailuresWireResponse(8L, List.of(
+                        new AnomaliesWireResponse.FailureCountWireResponse("PAYMENT_QUERY", 5L),
+                        new AnomaliesWireResponse.FailureCountWireResponse("REFUND_QUERY", 3L)))));
 
         AnomaliesResponse anomalies = paymentAppService.getAnomalies();
 
-        // 长时滞留 + 近期失败计数逐字段映射
-        assertThat(anomalies.longPendingCount()).isEqualTo(12L);
-        assertThat(anomalies.longRefundingCount()).isEqualTo(3L);
-        assertThat(anomalies.recentFailureCount()).isEqualTo(8L);
+        // 长时滞留（笔数 + 金额分）+ 近期失败（总数 + 按日志类型）嵌套逐字段映射
+        assertThat(anomalies.longPendingPayments().count()).isEqualTo(12L);
+        assertThat(anomalies.longPendingPayments().amount()).isEqualTo(96000L);
+        assertThat(anomalies.longRefundingRefunds().count()).isEqualTo(3L);
+        assertThat(anomalies.longRefundingRefunds().amount()).isEqualTo(24000L);
+        assertThat(anomalies.recentFailures().totalCount()).isEqualTo(8L);
+        assertThat(anomalies.recentFailures().byType()).hasSize(2);
+        assertThat(anomalies.recentFailures().byType().get(0).logType()).isEqualTo("PAYMENT_QUERY");
+        assertThat(anomalies.recentFailures().byType().get(0).failureCount()).isEqualTo(5L);
     }
 
     @Test
@@ -1101,36 +1127,43 @@ class PaymentBffIntegrationTest {
     // ========== getOperationsActivity · tier-2 统计透传契约（操作员活动 + 操作类型明细·不改序） ==========
 
     @Test
-    void given_operationsActivity_when_getOperationsActivity_then_mapOperatorsAndOperationCountsPreserveOrder() {
-        when(paymentClient.getOperationsActivity(STATS_FROM, STATS_TO)).thenReturn(new OperationsActivityWireResponse(List.of(
-                new OperationsActivityWireResponse.OperatorActivityStatWireResponse(
-                        1001L, "alice",
-                        List.of(new OperationsActivityWireResponse.OperationCountWireResponse("AUDIT_APPROVE", 38L),
-                                new OperationsActivityWireResponse.OperationCountWireResponse("AUDIT_REJECT", 2L)),
-                        5L),
-                new OperationsActivityWireResponse.OperatorActivityStatWireResponse(
-                        2002L, "bob",
-                        List.of(new OperationsActivityWireResponse.OperationCountWireResponse("NOTIFY_RESEND", 3L)),
-                        3L))));
+    void given_operationsActivity_when_getOperationsActivity_then_mapByOperatorAndNotifyResendPreserveOrder() {
+        when(paymentClient.getOperationsActivity(STATS_FROM, STATS_TO)).thenReturn(new OperationsActivityWireResponse(
+                List.of(
+                        new OperationsActivityWireResponse.OperatorActivityWireResponse(
+                                1001L, "alice", 40L,
+                                List.of(new OperationsActivityWireResponse.OperationCountWireResponse(1, "审核通过", 38L),
+                                        new OperationsActivityWireResponse.OperationCountWireResponse(2, "审核拒绝", 2L))),
+                        new OperationsActivityWireResponse.OperatorActivityWireResponse(
+                                2002L, "bob", 3L,
+                                List.of(new OperationsActivityWireResponse.OperationCountWireResponse(3, "通知重发", 3L)))),
+                new OperationsActivityWireResponse.NotifyResendActivityWireResponse(3L, List.of(
+                        new OperationsActivityWireResponse.SystemResendCountWireResponse("course-svc", 2L),
+                        new OperationsActivityWireResponse.SystemResendCountWireResponse(null, 1L)))));
 
         OperationsActivityResponse activity = paymentAppService.getOperationsActivity(STATS_FROM, STATS_TO);
 
         // 按操作员聚合映射 + 顺序保留
-        assertThat(activity.operators()).hasSize(2);
-        OperationsActivityResponse.OperatorActivityStat first = activity.operators().get(0);
+        assertThat(activity.byOperator()).hasSize(2);
+        OperationsActivityResponse.OperatorActivity first = activity.byOperator().get(0);
         assertThat(first.operatorId()).isEqualTo(1001L);
         assertThat(first.operatorName()).isEqualTo("alice");
-        assertThat(first.notificationResendCount()).isEqualTo(5L);
-        // 操作类型·笔数明细映射 + 顺序保留
+        assertThat(first.totalCount()).isEqualTo(40L);
+        // 操作类型·笔数明细（枚举 code + 中文名）映射 + 顺序保留
         assertThat(first.operations()).hasSize(2);
-        assertThat(first.operations().get(0).operation()).isEqualTo("AUDIT_APPROVE");
+        assertThat(first.operations().get(0).operation()).isEqualTo(1);
+        assertThat(first.operations().get(0).operationName()).isEqualTo("审核通过");
         assertThat(first.operations().get(0).count()).isEqualTo(38L);
-        assertThat(first.operations().get(1).operation()).isEqualTo("AUDIT_REJECT");
-        OperationsActivityResponse.OperatorActivityStat second = activity.operators().get(1);
+        assertThat(first.operations().get(1).operation()).isEqualTo(2);
+        OperationsActivityResponse.OperatorActivity second = activity.byOperator().get(1);
         assertThat(second.operatorName()).isEqualTo("bob");
         assertThat(second.operations()).hasSize(1);
-        assertThat(second.operations().get(0).operation()).isEqualTo("NOTIFY_RESEND");
-        assertThat(second.notificationResendCount()).isEqualTo(3L);
+        assertThat(second.operations().get(0).operation()).isEqualTo(3);
+        // 通知重发汇总：总数 + 按来源业务系统（含 null 系统组原样透传）
+        assertThat(activity.notifyResend().totalCount()).isEqualTo(3L);
+        assertThat(activity.notifyResend().byBusinessSystem()).hasSize(2);
+        assertThat(activity.notifyResend().byBusinessSystem().get(0).businessSystem()).isEqualTo("course-svc");
+        assertThat(activity.notifyResend().byBusinessSystem().get(1).businessSystem()).isNull();
     }
 
     @Test

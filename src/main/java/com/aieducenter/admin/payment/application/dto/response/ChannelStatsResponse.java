@@ -4,42 +4,42 @@ import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * 按通道细分的统计响应——由
+ * 按渠道维度细分的统计响应——由
  * {@link com.aieducenter.admin.payment.application.dto.wire.ChannelStatsWireResponse}
- * 映射而来，承载按 payMode / accessType 两个维度聚合的支付笔数·金额·成功率。
+ * 映射而来，逐字镜像 payment 的 {@code ByChannelResponse} 形状（ADR-0011 / issue #60）：
+ * payMode / accessType 两维度共用同一 {@link ChannelBreakdown}。
  *
- * <p>聚合/重算归 payment（spec「仪表盘」）；admin 透传不改序。最终字段以 payment 实现契约为准（issue #37）。</p>
+ * <p>聚合/重算归 payment（spec「仪表盘」）；admin 透传不改序。金额 {@code Long}（分）、比率
+ * {@code BigDecimal}——provider 契约的分型决定。</p>
  *
  * @since 0.1.0
  */
 public record ChannelStatsResponse(
 
-        List<PayModeStat> byPayMode,
+        List<ChannelBreakdown> byPayMode,
 
-        List<AccessTypeStat> byAccessType
+        List<ChannelBreakdown> byAccessType
 ) {
 
-    /** payMode 维度统计——单一支付方式的支付笔数·金额·成功率。 */
-    public record PayModeStat(
+    /**
+     * 渠道维度统计——单一渠道的支付笔数·金额·成功率。
+     *
+     * <p>枚举出口规则（ADR-0009）：{@code channelCode} 为 PayMode/AccessType 的 Integer code、配
+     * {@code channelName} 显示名。</p>
+     */
+    public record ChannelBreakdown(
 
-            String payMode,
+            Integer channelCode,
 
-            Long paymentCount,
+            String channelName,
 
-            BigDecimal paymentAmount,
+            Long count,
 
-            BigDecimal successRate
-    ) {
-    }
+            Long amount,
 
-    /** accessType 维度统计——单一接入类型的支付笔数·金额·成功率。 */
-    public record AccessTypeStat(
+            Long successCount,
 
-            String accessType,
-
-            Long paymentCount,
-
-            BigDecimal paymentAmount,
+            Long successAmount,
 
             BigDecimal successRate
     ) {
