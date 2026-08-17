@@ -1,94 +1,50 @@
 package com.aieducenter.admin.payment.application.dto.wire;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 /**
- * payment {@code GET /api/v1/orders/{orderNo}/lifecycle} 的 wire 镜像——订单生命周期读模型。
+ * payment {@code GET /api/v1/orders/{orderNo}/lifecycle} 的 wire 镜像——订单生命周期统一事件的<strong>单项</strong>。
  *
- * <p>payment 侧按 {@code orderNo} 把 {@code PaymentLog}（网关交互）与 {@code OperationLog}
- * （行为者操作）两表记录 <strong>union 后按时间排序</strong>返回（payment ADR-0002：不合表、合视图；
- * 合并在 payment 的 {@code OrderLifecycleAppService} 完成）。admin 作为 BFF 透传此<strong>已合并</strong>
- * 的时间线，不本地再合并——避免与 payment 双逻辑不一致。</p>
+ * <p>payment 实返 {@code ApiResponse<List<OrderLifecycleResponse>>}：{@code data} 为<strong>扁平事件数组</strong>
+ * （orderNo 是路径参数，响应无包装——issue #57 / ADR-0011 逐字镜像）。事件为跨来源的语义 9 字段抽象，
+ * {@code PaymentLog}（网关交互，{@code source=GATEWAY}）与 {@code OperationLog}（行为者操作，
+ * {@code source=OPERATION}）在 payment 侧按 {@code createdAt} 合并排序后逐条投出（payment ADR-0002：
+ * 不合表、合视图）；admin 透传此<strong>已合并</strong>的时间线，不本地再合并。</p>
  *
- * <p>每个事件以 {@link LifecycleEventWireResponse#source} 区分来源；当 source=PAYMENT_LOG 时网关字段有效、
- * source=OPERATION_LOG 时操作字段有效，另一组为 null（union 类型的平表投影）。最终字段以 payment
- * 实现契约为准（issue #37）。</p>
+ * <p>逐字镜像 payment 的 {@code OrderLifecycleResponse}（9 字段），无增删改（BFF 忠实透传，ADR-0011）。
+ * {@code id} 为 {@code Long}——payment 框架 {@code ToStringSerializer} 使其上 wire 为 string 形态
+ * （{@code "1001"}），Jackson 反序列化回 {@code Long}。</p>
  *
+ * @param id              源记录主键（PaymentLog.id / OperationLog.id；同时间排序的稳定键）
+ * @param source          来源标签：{@code "GATEWAY"}（网关交互）/ {@code "OPERATION"}（行为者操作）
+ * @param createdAt       事件时间（合并后的主排序键，payment 已排好序）
+ * @param action          动作稳定 token：GATEWAY→{@code logType}（PAYMENT_REQUEST…）；
+ *                        OPERATION→{@code operation} 枚举名（AUDIT_APPROVE…）
+ * @param actionName      动作显示名：GATEWAY→{@code logType} 原值；OPERATION→中文名（审核通过…）
+ * @param outcome         结果 token（SUCCESS/FAILED）：GATEWAY 由 success 派生；OPERATION 取 result
+ * @param performer       执行方：GATEWAY→{@code bankInterface}；OPERATION→{@code operatorName}
+ * @param performerSystem 执行方系统：GATEWAY→{@code bankCode}；OPERATION→{@code operatorSystem}
+ * @param detail          补充说明：GATEWAY→success 时 returnMsg / 失败时 errorMessage；OPERATION→remark
  * @since 0.1.0
  */
 public record OrderLifecycleWireResponse(
 
-        String orderNo,
+        Long id,
 
-        List<LifecycleEventWireResponse> events
+        String source,
+
+        LocalDateTime createdAt,
+
+        String action,
+
+        String actionName,
+
+        String outcome,
+
+        String performer,
+
+        String performerSystem,
+
+        String detail
 ) {
-
-    /**
-     * 生命周期事件——PaymentLog 或 OperationLog 经 payment 合并后的单条时间线条目。
-     *
-     * <p>平表投影：网关字段组（source=PAYMENT_LOG 时有效）与操作字段组（source=OPERATION_LOG 时有效）
-     * 共存于同一记录，非生效组为 null。</p>
-     *
-     * @param source          事件来源（PAYMENT_LOG / OPERATION_LOG）
-     * @param createdAt       发生时间（合并排序键，由 payment 排好序）
-     * @param logType         网关交互类型（PAYMENT_REQUEST / PAYMENT_QUERY / PAYMENT_CANCEL /
-     *                        REFUND_REQUEST / REFUND_QUERY / PAYMENT_CALLBACK）——source=PAYMENT_LOG 时有效
-     * @param paymentOrderNo  关联支付单号——source=PAYMENT_LOG 时有效
-     * @param refundOrderNo   关联退款单号——source=PAYMENT_LOG 时有效
-     * @param bankInterface   银行接口——source=PAYMENT_LOG 时有效
-     * @param returnCode      返回码——source=PAYMENT_LOG 时有效
-     * @param returnMsg       返回消息——source=PAYMENT_LOG 时有效
-     * @param executionTime   执行耗时（毫秒）——source=PAYMENT_LOG 时有效
-     * @param success         是否成功——source=PAYMENT_LOG 时有效
-     * @param targetType      操作目标类型（PAYMENT / REFUND）——source=OPERATION_LOG 时有效
-     * @param targetNo        操作目标单号——source=OPERATION_LOG 时有效
-     * @param operation       操作（AUDIT_APPROVE / AUDIT_REJECT / NOTIFY_RESEND / …）——source=OPERATION_LOG 时有效
-     * @param operatorId      操作人 ID——source=OPERATION_LOG 时有效
-     * @param operatorName    操作人姓名——source=OPERATION_LOG 时有效
-     * @param operatorSystem  操作来源系统——source=OPERATION_LOG 时有效
-     * @param result          操作结果——source=OPERATION_LOG 时有效
-     * @param remark          备注——source=OPERATION_LOG 时有效
-     */
-    public record LifecycleEventWireResponse(
-
-            String source,
-
-            LocalDateTime createdAt,
-
-            // ===== PaymentLog 字段（source=PAYMENT_LOG 时有效） =====
-            String logType,
-
-            String paymentOrderNo,
-
-            String refundOrderNo,
-
-            String bankInterface,
-
-            String returnCode,
-
-            String returnMsg,
-
-            Long executionTime,
-
-            Boolean success,
-
-            // ===== OperationLog 字段（source=OPERATION_LOG 时有效） =====
-            String targetType,
-
-            String targetNo,
-
-            String operation,
-
-            Long operatorId,
-
-            String operatorName,
-
-            String operatorSystem,
-
-            String result,
-
-            String remark
-    ) {
-    }
 }

@@ -187,8 +187,7 @@ class PaymentRbacEnforcementIntegrationTest {
         when(paymentClient.getRefund("RF-1")).thenReturn(
                 new RefundOrderDetailWireResponse("RF-1", null, null, null, 1, "待审核",
                         null, null, null, null, null, null, null));
-        when(paymentClient.getLifecycle("PAY-1")).thenReturn(
-                new OrderLifecycleWireResponse("PAY-1", List.of()));
+        when(paymentClient.getLifecycle("PAY-1")).thenReturn(List.of());
         // 退款审核 200 用例：mock 返回审核后退款单，证明写通路接通；出站 wire 请求体由 ArgumentCaptor 抓取
         when(paymentClient.auditRefund(eq("RF-1"), any(AuditRefundWireRequest.class))).thenReturn(
                 new RefundOrderDetailWireResponse("RF-1", null, null, null, 3, "已批准",

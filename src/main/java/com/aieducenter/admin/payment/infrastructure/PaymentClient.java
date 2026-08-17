@@ -31,6 +31,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * payment 签名 HTTP 客户端——封装 {@link OpenApiClient}，屏蔽 wire 层细节。
@@ -69,7 +70,9 @@ public class PaymentClient {
     private static final TypeReference<ApiResponse<RefundOrderDetailWireResponse>> REFUND_DETAIL_TYPEREF =
             new TypeReference<>() {};
 
-    private static final TypeReference<ApiResponse<OrderLifecycleWireResponse>> LIFECYCLE_TYPEREF =
+    // lifecycle 的 data 为扁平事件数组（无 orderNo 包装——orderNo 是路径参数）；若误按对象信封反序列化，
+    // 对数组直接抛 MismatchedInputException（issue #57 的报错根源）
+    private static final TypeReference<ApiResponse<List<OrderLifecycleWireResponse>>> LIFECYCLE_TYPEREF =
             new TypeReference<>() {};
 
     private static final TypeReference<ApiResponse<PaymentOverviewWireResponse>> PAYMENT_OVERVIEW_TYPEREF =
@@ -351,17 +354,18 @@ public class PaymentClient {
     /**
      * 查询订单生命周期（透传 payment）。
      *
-     * <p>payment 侧按 {@code orderNo} 把 PaymentLog + OperationLog union 后按时间排序返回
-     * （payment ADR-0002 读模型）；admin 透传此<strong>已合并</strong>的时间线，不本地合并。</p>
+     * <p>payment 返回 {@code ApiResponse<List<事件>>}——<strong>扁平事件数组</strong>（语义 9 字段，无 orderNo
+     * 包装），按 {@code orderNo} 把 PaymentLog + OperationLog 合并排序后投出（payment ADR-0002 读模型）；
+     * admin 透传此<strong>已合并</strong>的时间线，不本地合并。</p>
      *
      * @param orderNo 订单号（支付单号或退款单号）
-     * @return payment 返回的已合并生命周期时间线
+     * @return payment 返回的已合并生命周期事件列表（payment 已排序）
      * @throws com.cartisan.openapi.client.OpenApiClientException payment 404（订单不存在）等透传，由应用层翻译
      */
-    public OrderLifecycleWireResponse getLifecycle(String orderNo) {
+    public List<OrderLifecycleWireResponse> getLifecycle(String orderNo) {
         String url = baseUrl + "/api/v1/orders/" + encode(orderNo) + "/lifecycle";
         log.debug("PaymentClient.getLifecycle: {}", url);
-        ApiResponse<OrderLifecycleWireResponse> resp = openApiClient.get(url, LIFECYCLE_TYPEREF);
+        ApiResponse<List<OrderLifecycleWireResponse>> resp = openApiClient.get(url, LIFECYCLE_TYPEREF);
         return resp.data();
     }
 

@@ -548,54 +548,58 @@ class PaymentBffIntegrationTest {
     // ========== getLifecycle · 已合并时间线透传（payment 合并，admin 不改序） ==========
 
     @Test
-    void given_mergedTimeline_when_getLifecycle_then_preserveOrderAndMapBothSources() {
+    void given_mergedTimeline_when_getLifecycle_then_preserveOrderAndMapSemanticEvents() {
         LocalDateTime t1 = LocalDateTime.of(2026, 8, 12, 10, 0);
         LocalDateTime t2 = LocalDateTime.of(2026, 8, 12, 10, 5);
         // 故意让 payment 回传的顺序与时间序相反（t2 在前、t1 在后）——证明 admin 是透传、不重排：
         // 若 admin 偷偷按 createdAt 排序，事件顺序会变成 t1/t2（与输入相反），断言即失败。
         // 合并与排序归 payment（ADR-0002），admin 只 map 不 sort。
-        when(paymentClient.getLifecycle("PAY-1")).thenReturn(new OrderLifecycleWireResponse("PAY-1", List.of(
-                new OrderLifecycleWireResponse.LifecycleEventWireResponse(
-                        "OPERATION_LOG", t2,
-                        null, null, null, null, null, null, null, null,
-                        "PAYMENT", "PAY-1", "NOTIFY_RESEND", 1001L, "alice", "admin-console", "SUCCESS", "manual resend"),
-                new OrderLifecycleWireResponse.LifecycleEventWireResponse(
-                        "PAYMENT_LOG", t1,
-                        "PAYMENT_REQUEST", "PAY-1", null, "ICBC_PAY", "000000", "success", 120L, true,
-                        null, null, null, null, null, null, null, null)
-        )));
+        when(paymentClient.getLifecycle("PAY-1")).thenReturn(List.of(
+                new OrderLifecycleWireResponse(
+                        1001L, "OPERATION", t2,
+                        "AUDIT_APPROVE", "审核通过", "SUCCESS",
+                        "alice", "admin-console", "同意退款"),
+                new OrderLifecycleWireResponse(
+                        501L, "GATEWAY", t1,
+                        "PAYMENT_REQUEST", "PAYMENT_REQUEST", "SUCCESS",
+                        "ICBC_PAY", "ICBC", "交易成功")
+        ));
 
-        OrderLifecycleResponse lifecycle = paymentAppService.getLifecycle("PAY-1");
+        List<OrderLifecycleResponse> lifecycle = paymentAppService.getLifecycle("PAY-1");
 
-        assertThat(lifecycle.orderNo()).isEqualTo("PAY-1");
-        assertThat(lifecycle.events()).hasSize(2);
+        // 扁平事件列表，无 orderNo 包装（契约对齐 issue #57：payment 实返 ApiResponse<List<事件>>）
+        assertThat(lifecycle).hasSize(2);
         // 顺序原样保留（payment 给的 t2→t1，admin 不重排为 t1→t2）
-        OrderLifecycleResponse.LifecycleEvent first = lifecycle.events().get(0);
-        assertThat(first.source()).isEqualTo("OPERATION_LOG");
+        OrderLifecycleResponse first = lifecycle.get(0);
+        assertThat(first.id()).isEqualTo(1001L);
+        assertThat(first.source()).isEqualTo("OPERATION");
         assertThat(first.createdAt()).isEqualTo(t2);
-        // 操作字段组映射
-        assertThat(first.operation()).isEqualTo("NOTIFY_RESEND");
-        assertThat(first.operatorId()).isEqualTo(1001L);
-        assertThat(first.operatorName()).isEqualTo("alice");
-        assertThat(first.operatorSystem()).isEqualTo("admin-console");
-        assertThat(first.result()).isEqualTo("SUCCESS");
-        assertThat(first.remark()).isEqualTo("manual resend");
-        // 网关字段组为 null（union 另一半）
-        assertThat(first.logType()).isNull();
-        assertThat(first.bankInterface()).isNull();
+        // 语义 9 字段映射（action=operation 枚举名、actionName=中文名、performer=操作人、detail=备注）
+        assertThat(first.action()).isEqualTo("AUDIT_APPROVE");
+        assertThat(first.actionName()).isEqualTo("审核通过");
+        assertThat(first.outcome()).isEqualTo("SUCCESS");
+        assertThat(first.performer()).isEqualTo("alice");
+        assertThat(first.performerSystem()).isEqualTo("admin-console");
+        assertThat(first.detail()).isEqualTo("同意退款");
 
-        OrderLifecycleResponse.LifecycleEvent second = lifecycle.events().get(1);
-        assertThat(second.source()).isEqualTo("PAYMENT_LOG");
+        OrderLifecycleResponse second = lifecycle.get(1);
+        assertThat(second.id()).isEqualTo(501L);
+        assertThat(second.source()).isEqualTo("GATEWAY");
         assertThat(second.createdAt()).isEqualTo(t1);
-        // 网关字段组映射
-        assertThat(second.logType()).isEqualTo("PAYMENT_REQUEST");
-        assertThat(second.bankInterface()).isEqualTo("ICBC_PAY");
-        assertThat(second.returnCode()).isEqualTo("000000");
-        assertThat(second.executionTime()).isEqualTo(120L);
-        assertThat(second.success()).isTrue();
-        // 操作字段组为 null
-        assertThat(second.operation()).isNull();
-        assertThat(second.operatorId()).isNull();
+        // 网关事件：action=logType、performer=bankInterface、performerSystem=bankCode、detail=returnMsg
+        assertThat(second.action()).isEqualTo("PAYMENT_REQUEST");
+        assertThat(second.actionName()).isEqualTo("PAYMENT_REQUEST");
+        assertThat(second.outcome()).isEqualTo("SUCCESS");
+        assertThat(second.performer()).isEqualTo("ICBC_PAY");
+        assertThat(second.performerSystem()).isEqualTo("ICBC");
+        assertThat(second.detail()).isEqualTo("交易成功");
+    }
+
+    @Test
+    void given_lifecycleNullWireList_when_getLifecycle_then_emptyList() {
+        when(paymentClient.getLifecycle("PAY-1")).thenReturn(null);
+
+        assertThat(paymentAppService.getLifecycle("PAY-1")).isEmpty();
     }
 
     @Test

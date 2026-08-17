@@ -31,6 +31,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.time.LocalDateTime;
+import java.util.List;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -149,8 +150,8 @@ public class PaymentController {
             name = "支付管理 / 查看",
             scope = AdminScopes.ADMIN
     )
-    @Operation(summary = "查询订单生命周期（按时间合并的 PaymentLog + OperationLog 时间线）")
-    public ApiResponse<OrderLifecycleResponse> getLifecycle(
+    @Operation(summary = "查询订单生命周期（语义事件扁平列表——按时间合并的 PaymentLog + OperationLog 时间线）")
+    public ApiResponse<List<OrderLifecycleResponse>> getLifecycle(
             @PathVariable String orderNo) {
         return ApiResponse.ok(paymentAppService.getLifecycle(orderNo));
     }

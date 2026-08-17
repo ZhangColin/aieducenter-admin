@@ -110,6 +110,10 @@ _Avoid_: 在前端维护枚举 code→中文映射表；在 BFF 里手写 code�
 平台统一——凡 `PageResponse{items,total,page,size}` 外壳：**请求 `page` 0-based**（Spring `Pageable`）、**响应 `page` 1-based**（回显「页码+1」）；北向（前端↔admin BFF）与能力域服务（identity/payment）同约定。admin BFF 出站换算链：AppService `+1`（1-based 中间表示）→ `*Client` `-1` 上 wire（0-based）→ 能力域回显 1-based → BFF **原样透传（不得再 +1）**。造 mock/fixture 时 `page` 按「wire 请求页码 + 1」构造，勿以 wire 裸页码充回显。三域现状核实**均已符合**（[#56](https://github.com/ZhangColin/aieducenter-admin/issues/56) triage 逐环验证，「account 响应 0-based」系本仓 mock 误建模的错觉——曾误导前端 REQ-18 写出错向 +1 适配）。见 [ADR-0010](docs/adr/0010-platform-pagination-protocol.md)。横切规则，兄弟 BFF 子上下文与能力域新列表端点继承。
 _Avoid_: BFF 响应构造对已是 1-based 的回显再 +1（2-based 回归）；mock 建模下游回显用 wire 裸页码；能力域新列表端点自创分页语义（应请求 0-based + 回显 页码+1）；验证下游回显语义时拿本仓 mock 当证据（以兄弟仓服务端源码为准）。
 
+**BFF 忠实透传 provider 契约 (BFF mirrors provider contract verbatim, zero improvisation)**:
+第一轮对接外部服务接口（payment、identity、app-registry、未来钱包/Token计量）时，BFF 与 admin web **忠实按服务接口中转**：wire 镜像 DTO、北向 Response/Query 逐字镜像 provider 源码契约（`application/dto/response|query/*.java`，**非 spec 文档**）——不增删字段、不重命名、不换形状、不"顺手改善"。金额一律 `Long`（分）、比率 `BigDecimal`、枚举 Integer code + `*Name`（ADR-0009）、Long 字段出 JSON string（框架 `ToStringSerializer`）。provider 没有的字段（ghost）删；provider 实有而未暴露的字段**不主动补**。展现层诉求**后置**：联调联测通过后按测试体验从 UI 起单向提新需求（UI→BFF→provider），届时再决定在哪层改。provider 契约日后漂移不做前置门禁——发现问题开新票重新对接（#55 grill 定稿 2026-08-17）。
+_Avoid_: 按 spec 文档（而非服务源码）撰写 wire；给北向加 provider 没有的字段或自造包装信封；金额用 BigDecimal 承"分"（类型谎言）或换算成元（BFF 换算双逻辑）；为"金额像数字"把 Long 包 BigDecimal 出 number；在 BFF 侧做 OpenAPI 生成/跨仓门禁投资（defer）。
+
 **退款审核 (Refund Audit)**:
 运营对退款单的 approve/reject 操作（payment `POST /api/v1/refunds/{no}/audit`），落 payment `OperationLog`、`auditType=MANUAL`。admin 透传当前 operator 的 `auditorId`/`auditorName` 于请求体，**不改本地状态**。权限码 `admin:payment:refund:audit`（独立于 read）。
 

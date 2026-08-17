@@ -16,7 +16,8 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
  * 反序列化契约无关。{@code ObjectMapper} 对齐 Spring Boot 默认（{@code FAIL_ON_UNKNOWN_PROPERTIES=false} +
  * {@code JavaTimeModule}）。
  *
- * <p>供 {@link PaymentClientListEnvelopeContractTest} / {@link PaymentEnumNamePassThroughContractTest} 复用，
+ * <p>供 {@link PaymentClientListEnvelopeContractTest} / {@link PaymentEnumNamePassThroughContractTest} /
+ * {@link PaymentClientStatsQueryContractTest} / {@link PaymentClientLifecycleContractTest} 复用，
  * 避免脚手架重复。</p>
  *
  * @since 0.1.0

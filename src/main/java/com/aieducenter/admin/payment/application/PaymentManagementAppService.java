@@ -398,32 +398,26 @@ public class PaymentManagementAppService {
     /**
      * 查询订单生命周期（透传 payment）——payment 已合并（PaymentLog + OperationLog 按时间排序）的时间线。
      *
-     * <p>合并在 payment 完成（ADR-0002 读模型），admin 透传不改序、不本地合并——避免双逻辑不一致。
-     * payment 404（订单不存在）翻译为 {@link BaseCodeMessage#NOT_FOUND}（404）。</p>
+     * <p>payment 返回扁平事件列表（语义 9 字段、无 orderNo 包装，issue #57 契约对齐）；合并在 payment 完成
+     * （ADR-0002 读模型），admin 透传不改序、不本地合并——避免双逻辑不一致。payment 404（订单不存在）翻译为
+     * {@link BaseCodeMessage#NOT_FOUND}（404）。</p>
      */
-    public OrderLifecycleResponse getLifecycle(String orderNo) {
-        OrderLifecycleWireResponse wire;
+    public List<OrderLifecycleResponse> getLifecycle(String orderNo) {
+        List<OrderLifecycleWireResponse> wire;
         try {
             wire = paymentClient.getLifecycle(orderNo);
         } catch (OpenApiClientException e) {
             throw translatePaymentError(e);
         }
-        List<OrderLifecycleResponse.LifecycleEvent> events =
-                wire.events() == null ? List.of()
-                        : wire.events().stream().map(PaymentManagementAppService::toLifecycleEvent).toList();
-        return new OrderLifecycleResponse(wire.orderNo(), events);
+        return wire == null ? List.of()
+                : wire.stream().map(PaymentManagementAppService::toLifecycleEvent).toList();
     }
 
-    private static OrderLifecycleResponse.LifecycleEvent toLifecycleEvent(
-            OrderLifecycleWireResponse.LifecycleEventWireResponse wire) {
-        return new OrderLifecycleResponse.LifecycleEvent(
-                wire.source(), wire.createdAt(),
-                wire.logType(), wire.paymentOrderNo(), wire.refundOrderNo(),
-                wire.bankInterface(), wire.returnCode(), wire.returnMsg(),
-                wire.executionTime(), wire.success(),
-                wire.targetType(), wire.targetNo(), wire.operation(),
-                wire.operatorId(), wire.operatorName(), wire.operatorSystem(),
-                wire.result(), wire.remark());
+    private static OrderLifecycleResponse toLifecycleEvent(OrderLifecycleWireResponse wire) {
+        return new OrderLifecycleResponse(
+                wire.id(), wire.source(), wire.createdAt(),
+                wire.action(), wire.actionName(), wire.outcome(),
+                wire.performer(), wire.performerSystem(), wire.detail());
     }
 
     /**
