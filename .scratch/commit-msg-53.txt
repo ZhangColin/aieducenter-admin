@@ -1,0 +1,23 @@
+feat(admin): account-admin T2 管理详情 + 状态操作（封号/解封/解锁）（issue #53）
+
+复用 #52 打通的 AccountClient / AppService / 集成测试范式，补齐账号管理详情 + 三个状态写端点。
+
+- GET /api/admin/accounts/{userId}/management：透传 identity 管理详情，wire→detail 映射
+  （identity AccountManagementView 与列表项同构，wire 复用 AccountWireResponse，北向单列
+  AccountManagementDetailResponse）。挂 admin:account:read。
+- POST disable（reason @NotBlank + @Size(max=500)）/ activate / unlock（reason 可选、@Size(max=500)）→
+  identity raw 204。三写端点挂 admin:account:write；三端点均 @Valid（激活 @Size 校验）。
+  纯透传（spec「纯透传」）：identity 写端点返 204 无 body，admin 不回读——返回成功 ack（ApiResponse<Void>），
+  前端自行回读详情刷新抽屉（避免「成功操作却因二次读抖动误报」的歧义）。
+  operator 身份经框架 RequestContext→X-User-Id/X-User-Name 自动透传（identity 管理端点从 RequestContext
+  读 operator 审计，不在 body——与 payment 退款审核身份进 body 不同），故 admin 应用层不显式注入 operator。
+- identity 错误按 HTTP 状态翻译 ADMIN_* DomainException（404→NOT_FOUND / 400→BAD_REQUEST /
+  5xx→THIRD_PARTY_ERROR），复用 translateAccountError。
+- 集成测试：AccountBffIntegrationTest 覆盖详情映射 + 三写纯透传 wire + 错误翻译（断言写操作不回读）；
+  AccountRbacEnforcementIntegrationTest 覆盖详情/三写权限三态（401/403/200）+ reason 必填/超长校验（400）
+  + 操作者身份透传契约（真实登录 + mocked client 边界抓 RequestContext == 登录 operator）。
+- 204 消费契约测试 AccountClientWriteVoidContractTest：本地 HttpServer 回真实 204 空 body → 真实
+  AccountClient → 真实 OpenApiClient 全路径（含 readBody）不抛 + 出站 {reason} body 正确。钉死 admin 写
+  路径消费 identity raw 204（cartisan-boot #19 已修 OpenApiClient 容忍空 body；本测试曾因该缺口无法写）。
+
+Co-Authored-By: Claude <noreply@anthropic.com>

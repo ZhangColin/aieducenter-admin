@@ -1,0 +1,13 @@
+## Parent
+#38
+
+## What to build
+运营人员在「统计概览」看 tier-1 仪表盘：支付总览 / 状态分布 / 通道健康 / 审核统计。4 个 tier-1 stats 端点**纯透传** payment（不做 admin 侧聚合/重算）。加 `GET /stats/payments/overview`、`/stats/orders/status-distribution`、`/stats/gateway/health`、`/stats/operations/audit`。点亮已种的「统计概览」叶子（sort=1）。架构留跨服务聚合余地（不焊死端点↔widget 1:1）。
+
+## Acceptance criteria
+- [ ] 4 个 tier-1 stats 端点透传 payment 返回
+- [ ] 挂 `admin:payment:read`
+- [ ] BFF 集成测试覆盖透传契约/错误翻译
+
+## Blocked by
+#39

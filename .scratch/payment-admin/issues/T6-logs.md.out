@@ -1,0 +1,13 @@
+## Parent
+#38
+
+## What to build
+运营人员在「通道交互日志」「订单操作记录」分别查看 payment PaymentLog（与银行/通道网关的机机交互留痕）与 OperationLog（行为者对订单的操作留痕）。加 `GET /api/admin/payment/payment-logs`（paymentOrderNo/refundOrderNo/logType 多选/bankInterface/success/returnCode/createdAt 区间）+ `GET /api/admin/payment/operation-logs`（targetType/targetNo/operation 多选/operatorId/operatorSystem/result/createdAt 区间）。点亮已种的对应叶子。
+
+## Acceptance criteria
+- [ ] 两个日志列表端点返回分页+筛选结果
+- [ ] 挂 `admin:payment:read`
+- [ ] BFF 集成测试覆盖两类日志筛选映射/分页/错误翻译
+
+## Blocked by
+#39

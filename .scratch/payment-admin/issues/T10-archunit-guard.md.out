@@ -1,0 +1,13 @@
+## Parent
+#38
+
+## What to build
+在 `ArchitectureTest` 加一条 ArchUnit 规则——infrastructure 出站服务客户端为 `@Component`、非 `@Port/@Adapter`，钉 ADR-0007、防回退。加进现有测试类（非新类）。
+
+## Acceptance criteria
+- [ ] 新规则断言 infrastructure 出站服务客户端标 @Component、不标 @Port/@Adapter
+- [ ] 既有 AppRegistryClient + 新 PaymentClient 均通过
+- [ ] 不破坏既有框架 15 条规则
+
+## Blocked by
+#39
