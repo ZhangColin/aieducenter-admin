@@ -6,6 +6,8 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -29,9 +31,16 @@ import org.springframework.test.annotation.DirtiesContext;
 
 import com.aieducenter.admin.aiplatform.application.AiplatformUpstreamException;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformAccountProfileWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformConversationEntryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderBriefWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionWireResponse;
 import com.aieducenter.admin.aiplatform.infrastructure.AiplatformClient;
 import com.aieducenter.admin.application.AdminUserManagementAppService;
 import com.aieducenter.admin.application.RoleManagementAppService;
@@ -49,10 +58,10 @@ import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.config.SaTokenConfig;
 
 /**
- * aiplatform BFF 端点 RBAC 强制执行集成测试（issue #63 T1 账号 + #64 订单读路径）——真实 Sa-Token
- * 过滤链，断言 {@code admin:aiplatform:account:read} / {@code admin:aiplatform:order:read} 独立权限码
- * 对未登录（401）/ 无权者（403）/ 有权者（200）的行为，并钉死北向出口形状、二进制透传与
- * provider 错误信封透传。
+ * aiplatform BFF 端点 RBAC 强制执行集成测试（issue #63 T1 账号 + #64 订单读路径 + #65 项目核心读路径）
+ * ——真实 Sa-Token 过滤链，断言 {@code admin:aiplatform:account:read} / {@code admin:aiplatform:order:read} /
+ * {@code admin:aiplatform:project:read} 独立权限码对未登录（401）/ 无权者（403）/ 有权者（200）的行为，
+ * 并钉死北向出口形状、二进制透传与 provider 错误信封透传。
  *
  * <p>镜像 {@code AccountRbacEnforcementIntegrationTest}（登录/鉴权辅助沿用
  * {@code RbacEnforcementIntegrationTest}）。200 用例 mock {@link AiplatformClient}，证明权限放行后
@@ -73,12 +82,21 @@ class AiplatformRbacEnforcementIntegrationTest {
     private static final String PASSWORD = "Test1234";
     private static final String READ_PERMISSION = "admin:aiplatform:account:read";
     private static final String ORDER_READ_PERMISSION = "admin:aiplatform:order:read";
+    private static final String PROJECT_READ_PERMISSION = "admin:aiplatform:project:read";
     private static final String EXTERNAL_ID = "auth0|65f2c8a1b3d4e5f6a7b8c9d0";
     private static final String PROFILE_ENDPOINT = "/api/admin/aiplatform/accounts/" + EXTERNAL_ID;
     private static final String ORDER_ID = "3829492001234567";
     private static final String ORDERS_ENDPOINT = "/api/admin/aiplatform/orders";
     private static final String ORDER_DETAIL_ENDPOINT = ORDERS_ENDPOINT + "/" + ORDER_ID;
     private static final String SOURCE_PACKAGE_ENDPOINT = ORDER_DETAIL_ENDPOINT + "/source-package";
+    private static final String PROJECT_ID = "3829492007654321";
+    private static final String PROJECTS_ENDPOINT = "/api/admin/aiplatform/projects";
+    private static final String PROJECT_DETAIL_ENDPOINT = PROJECTS_ENDPOINT + "/" + PROJECT_ID;
+    private static final String CONVERSATION_ENDPOINT = PROJECT_DETAIL_ENDPOINT + "/conversation";
+    private static final String PRD_ENDPOINT = PROJECT_DETAIL_ENDPOINT + "/prd";
+    private static final String VERSIONS_ENDPOINT = PROJECT_DETAIL_ENDPOINT + "/versions";
+    private static final String VERSION_HASH = "3f9c1a2b7d84e5f6a0b1c2d3e4f5a6b7c8d9e0f1";
+    private static final String VERSION_DETAIL_ENDPOINT = VERSIONS_ENDPOINT + "/" + VERSION_HASH;
 
     private final AdminUserManagementAppService userAppService;
     private final RoleManagementAppService roleAppService;
@@ -114,9 +132,10 @@ class AiplatformRbacEnforcementIntegrationTest {
 
         Long readRoleId = roleAppService.create(
                 new CreateRoleCommand("AI平台读权限_" + suffix, "AIPLAREAD_" + suffix,
-                        "AI 平台账号档案 + 订单读权限", 80, null));
+                        "AI 平台账号档案 + 订单 + 项目读权限", 80, null));
         roleAppService.assignPermissions(readRoleId,
-                new AssignPermissionsCommand(List.of(READ_PERMISSION, ORDER_READ_PERMISSION)));
+                new AssignPermissionsCommand(List.of(READ_PERMISSION, ORDER_READ_PERMISSION,
+                        PROJECT_READ_PERMISSION)));
 
         Long userWithReadId = userAppService.create(
                 new CreateAdminUserCommand(usernameWithReadPermission, PASSWORD, "只读运营_" + suffix, null, null, null));
@@ -151,6 +170,37 @@ class AiplatformRbacEnforcementIntegrationTest {
                         "Content-Disposition", List.of("attachment; filename=\"" + ORDER_ID + "-source.tar.gz\"")),
                         (a, b) -> true),
                 new byte[] {(byte) 0x1f, (byte) 0x8b, 0x08, 0x00, (byte) 0xff, 0x41, 0x00}));
+        when(aiplatformClient.listProjects(any(), anyInt(), anyInt())).thenReturn(new PageResponse<>(List.of(
+                new AiplatformProjectSummaryWireResponse(
+                        PROJECT_ID, "英语学习助手", "文野",
+                        1, "官网", 3, "已归档", true,
+                        LocalDateTime.of(2026, 8, 1, 9, 0, 0),
+                        LocalDateTime.of(2026, 9, 1, 12, 0, 0))), 7, 2, 50));
+        when(aiplatformClient.getProject(eq(PROJECT_ID))).thenReturn(new AiplatformProjectDetailWireResponse(
+                PROJECT_ID, "英语学习助手", "文野", "3829492009999999",
+                1, "官网", 1, "进行中", false,
+                LocalDateTime.of(2026, 9, 10, 14, 20, 0), LocalDateTime.of(2026, 9, 14, 18, 30, 0),
+                LocalDateTime.of(2026, 9, 10, 20, 0, 0), LocalDateTime.of(2026, 9, 11, 8, 0, 0),
+                new AiplatformOrderBriefWireResponse(ORDER_ID, 2, "已报价"),
+                new AiplatformOrderBriefWireResponse("3829492005555444", 4, "已归档"),
+                new AiplatformProjectDetailWireResponse.CostSummary(Map.of("CNY", new BigDecimal("12.3456")), true)));
+        when(aiplatformClient.getConversation(eq(PROJECT_ID))).thenReturn(List.of(
+                new AiplatformConversationEntryWireResponse(
+                        90001L, 1, "用户发言", null, "首页加一个轮播图",
+                        null, null, null, false, LocalDateTime.of(2026, 9, 12, 10, 0, 0)),
+                new AiplatformConversationEntryWireResponse(
+                        90003L, 5, "收尾卡", "run-abc123", null,
+                        null, Map.of("runId", "run-abc123", "commitHash", VERSION_HASH), null, false,
+                        LocalDateTime.of(2026, 9, 12, 11, 30, 0))));
+        when(aiplatformClient.getPrd(eq(PROJECT_ID))).thenReturn(new AiplatformPrdWireResponse(
+                PROJECT_ID, "# PRD\n\n做一个英语学习助手……", Instant.parse("2026-09-12T08:30:00Z")));
+        when(aiplatformClient.listVersions(eq(PROJECT_ID))).thenReturn(List.of(new AiplatformVersionWireResponse(
+                VERSION_HASH, "轮播图上线", "run-abc123", null, LocalDateTime.of(2026, 9, 12, 11, 30, 0))));
+        when(aiplatformClient.getVersion(eq(PROJECT_ID), eq(VERSION_HASH))).thenReturn(
+                new AiplatformVersionDetailWireResponse(
+                        VERSION_HASH, "轮播图上线", "run-abc123", null,
+                        LocalDateTime.of(2026, 9, 12, 11, 30, 0),
+                        Map.of("runId", "run-abc123", "commitHash", VERSION_HASH)));
     }
 
     // ========== 账号档案（admin:aiplatform:account:read）· 权限三态 + 北向出口形状 ==========
@@ -280,6 +330,128 @@ class AiplatformRbacEnforcementIntegrationTest {
         JsonNode root = objectMapper.readTree(response.getBody());
         assertThat(root.path("code").asInt()).isEqualTo(5001);
         assertThat(root.path("message").asText()).isEqualTo("订单不存在");
+        assertThat(root.path("data").isNull()).isTrue();
+    }
+
+    // ========== 项目（admin:aiplatform:project:read）· 权限三态 + 北向出口形状 ==========
+
+    @Test
+    @DisplayName("非超管且拥有 admin:aiplatform:project:read → 清单 200，分页回显 provider 值、status 单选")
+    void given_nonSuperAdminWithProjectRead_when_listProjects_then_200AndPageShapeMirrorsProvider() throws Exception {
+        String token = login(usernameWithReadPermission);
+        // 四维过滤（status 三档单选）+ 分页 1-based 直传
+        ResponseEntity<String> response = getWithToken(
+                PROJECTS_ENDPOINT + "?status=3&externalId=auth0%7C65f2c8a1&page=2&size=50", token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode data = objectMapper.readTree(response.getBody()).path("data");
+        // PageResponse 形状：items/total/page/size，回显 provider 回报值（page=2——1-based 原值）
+        assertThat(data.path("total").asLong()).isEqualTo(7L);
+        assertThat(data.path("page").asInt()).isEqualTo(2);
+        assertThat(data.path("size").asInt()).isEqualTo(50);
+        JsonNode row = data.path("items").get(0);
+        // 归档行照读：type/status Integer + *Name、archived 原始事实位
+        assertThat(row.path("id").asText()).isEqualTo(PROJECT_ID);
+        assertThat(row.path("type").asInt()).isEqualTo(1);
+        assertThat(row.path("typeName").asText()).isEqualTo("官网");
+        assertThat(row.path("status").asInt()).isEqualTo(3);
+        assertThat(row.path("statusName").asText()).isEqualTo("已归档");
+        assertThat(row.path("archived").asBoolean()).isTrue();
+        assertThat(row.path("ownerDisplayName").asText()).isEqualTo("文野");
+    }
+
+    @Test
+    @DisplayName("非超管且拥有 project:read → 详情 200，订单引用 + 成本指针嵌套镜像 provider")
+    void given_nonSuperAdminWithProjectRead_when_getDetail_then_200WithOrderRefsAndCostSummary() throws Exception {
+        String token = login(usernameWithReadPermission);
+        ResponseEntity<String> response = getWithToken(PROJECT_DETAIL_ENDPOINT, token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode data = objectMapper.readTree(response.getBody()).path("data");
+        assertThat(data.path("id").asText()).isEqualTo(PROJECT_ID);
+        assertThat(data.path("workspaceId").asText()).isEqualTo("3829492009999999");
+        assertThat(data.path("status").asInt()).isEqualTo(1);
+        assertThat(data.path("statusName").asText()).isEqualTo("进行中");
+        // 订单引用：activeOrder（未终结已报价——有值即冻结迭代）+ latestOrder（最近一张已归档）
+        assertThat(data.path("activeOrder").path("id").asText()).isEqualTo(ORDER_ID);
+        assertThat(data.path("activeOrder").path("status").asInt()).isEqualTo(2);
+        assertThat(data.path("activeOrder").path("statusName").asText()).isEqualTo("已报价");
+        assertThat(data.path("latestOrder").path("statusName").asText()).isEqualTo("已归档");
+        // 成本指针：cost 按币种（JSON 数字）+ unpriced 标记
+        assertThat(data.path("costSummary").path("cost").path("CNY").asDouble()).isEqualTo(12.3456);
+        assertThat(data.path("costSummary").path("unpriced").asBoolean()).isTrue();
+    }
+
+    @Test
+    @DisplayName("非超管且拥有 project:read → 对话史/PRD/版本 200，kind+kindName 随行、载荷原样")
+    void given_nonSuperAdminWithProjectRead_when_deepRead_then_200AndPayloadsMirrored() throws Exception {
+        String token = login(usernameWithReadPermission);
+
+        // 对话史：kind Integer code + kindName 中文名随行（aiplatform#186 已落——provider 出口提供）
+        ResponseEntity<String> conversation = getWithToken(CONVERSATION_ENDPOINT, token);
+        assertThat(conversation.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode entries = objectMapper.readTree(conversation.getBody()).path("data");
+        assertThat(entries.size()).isEqualTo(2);
+        assertThat(entries.get(0).path("kind").asInt()).isEqualTo(1);
+        assertThat(entries.get(0).path("kindName").asText()).isEqualTo("用户发言");
+        assertThat(entries.get(1).path("closing").path("commitHash").asText()).isEqualTo(VERSION_HASH);
+
+        // PRD：markdown 正文 + updatedAt（Instant，ISO-8601 UTC 带 Z）
+        ResponseEntity<String> prd = getWithToken(PRD_ENDPOINT, token);
+        assertThat(prd.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode prdData = objectMapper.readTree(prd.getBody()).path("data");
+        assertThat(prdData.path("content").asText()).startsWith("# PRD");
+        assertThat(prdData.path("updatedAt").asText()).isEqualTo("2026-09-12T08:30:00Z");
+
+        // 版本列表（新→旧）+ 版本详情（ref＝hex 40 位，closing 载荷原样）
+        ResponseEntity<String> versions = getWithToken(VERSIONS_ENDPOINT, token);
+        assertThat(versions.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(objectMapper.readTree(versions.getBody()).path("data").size()).isEqualTo(1);
+        ResponseEntity<String> versionDetail = getWithToken(VERSION_DETAIL_ENDPOINT, token);
+        assertThat(versionDetail.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode versionData = objectMapper.readTree(versionDetail.getBody()).path("data");
+        assertThat(versionData.path("commitHash").asText()).isEqualTo(VERSION_HASH);
+        assertThat(versionData.path("closing").path("runId").asText()).isEqualTo("run-abc123");
+    }
+
+    @Test
+    @DisplayName("非超管且缺少权限 → 项目六端点 403（独立权限码 project:read，深读三组同码）")
+    void given_nonSuperAdminWithoutPermission_when_projectEndpoints_then_403() {
+        String token = login(usernameWithoutPermission);
+        assertThat(getWithToken(PROJECTS_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(getWithToken(PROJECT_DETAIL_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(getWithToken(CONVERSATION_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(getWithToken(PRD_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(getWithToken(VERSIONS_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(getWithToken(VERSION_DETAIL_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("未登录访问项目六端点返回 401")
+    void given_unauthenticated_when_projectEndpoints_then_401() {
+        assertThat(getWithToken(PROJECTS_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(getWithToken(PROJECT_DETAIL_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(getWithToken(CONVERSATION_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(getWithToken(PRD_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(getWithToken(VERSIONS_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(getWithToken(VERSION_DETAIL_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    @DisplayName("项目详情下游 PRJ_001 → 北向 HTTP 404 + 信封 code=4001 + message 原文（不映射）")
+    void given_prj001FromDownstream_when_getProjectDetail_then_errorEnvelopePassedThrough() throws Exception {
+        when(aiplatformClient.getProject(eq("3829499999999999"))).thenThrow(
+                AiplatformUpstreamException.from(
+                        new OpenApiClientException(404, "{\"code\":4001,\"message\":\"项目不存在\",\"data\":null}")));
+
+        String token = login(usernameWithReadPermission);
+        ResponseEntity<String> response = getWithToken(PROJECTS_ENDPOINT + "/3829499999999999", token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        JsonNode root = objectMapper.readTree(response.getBody());
+        // 信封 code＝数字业务码 4001（PRJ_001），而非映射后的 404——前端比对 aiplatform 业务码的分支活
+        assertThat(root.path("code").asInt()).isEqualTo(4001);
+        assertThat(root.path("message").asText()).isEqualTo("项目不存在");
         assertThat(root.path("data").isNull()).isTrue();
     }
 

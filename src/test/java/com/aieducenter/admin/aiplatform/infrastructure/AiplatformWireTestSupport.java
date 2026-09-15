@@ -2,6 +2,7 @@ package com.aieducenter.admin.aiplatform.infrastructure;
 
 import com.aieducenter.admin.aiplatform.application.AiplatformAccountAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformOrderAppService;
+import com.aieducenter.admin.aiplatform.application.AiplatformProjectAppService;
 import com.cartisan.openapi.client.BinaryResponse;
 import com.cartisan.openapi.client.OpenApiClient;
 import com.cartisan.openapi.client.OpenApiClientException;
@@ -20,9 +21,9 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
  * 会绕过反序列化路径，是已知反例）。{@code ObjectMapper} 对齐 Spring Boot 默认
  * （{@code FAIL_ON_UNKNOWN_PROPERTIES=false} + {@code JavaTimeModule}）。
  *
- * <p>供 {@code AiplatformAccountClientContractTest} / {@code AiplatformOrderClientContractTest}
- * 复用；后续项目/沙箱/成本/单价表/知识素材各域 {@code *ContractTest} 沿用本脚手架扩展
- * （各域 AppService 重载）。</p>
+ * <p>供 {@code AiplatformAccountClientContractTest} / {@code AiplatformOrderClientContractTest} /
+ * {@code AiplatformProjectClientContractTest} 复用；后续沙箱/成本/单价表/知识素材各域
+ * {@code *ContractTest} 沿用本脚手架扩展（各域 AppService 重载）。</p>
  *
  * @since 0.1.0
  */
@@ -120,6 +121,42 @@ final class AiplatformWireTestSupport {
             }
         };
         return new AiplatformOrderAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
+    }
+
+    /**
+     * 项目域版 {@link #accountAppServiceWithStubTransport}——六读口（清单/详情/对话史/PRD/版本
+     * 列表/版本详情）全走 {@code get}，按真实 {@link TypeReference} 反序列化。
+     */
+    static AiplatformProjectAppService projectAppServiceWithStubTransport(String envelopeBody, String[] wireUrlSink) {
+        ObjectMapper mapper = bootDefaultMapper();
+        OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, mapper) {
+            @Override
+            public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                try {
+                    return mapper.readValue(envelopeBody, typeReference);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        };
+        return new AiplatformProjectAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
+    }
+
+    /**
+     * 项目域版 {@link #accountAppServiceWithErrorTransport}——{@code get} 始终抛
+     * {@link OpenApiClientException}（框架对 ≥400 的行为复刻）。
+     */
+    static AiplatformProjectAppService projectAppServiceWithErrorTransport(
+            int statusCode, String errorBody, String[] wireUrlSink) {
+        OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, bootDefaultMapper()) {
+            @Override
+            public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                throw new OpenApiClientException(statusCode, errorBody);
+            }
+        };
+        return new AiplatformProjectAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
     }
 
     private static ObjectMapper bootDefaultMapper() {

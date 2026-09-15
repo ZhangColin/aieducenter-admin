@@ -7,7 +7,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.math.BigDecimal;
 import java.net.http.HttpHeaders;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -21,22 +23,34 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 
 import com.aieducenter.admin.aiplatform.application.AiplatformAccountAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformOrderAppService;
+import com.aieducenter.admin.aiplatform.application.AiplatformProjectAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformUpstreamException;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformOrderQuery;
+import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformProjectQuery;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformAccountProfileResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformOrderSummaryResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectDetailResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectSummaryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformAccountProfileWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformConversationEntryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderBriefWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectListWireRequest;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionWireResponse;
 import com.aieducenter.admin.aiplatform.infrastructure.AiplatformClient;
 import com.cartisan.openapi.client.BinaryResponse;
 import com.cartisan.openapi.client.OpenApiClientException;
 import com.cartisan.web.response.PageResponse;
 
 /**
- * aiplatform BFF 集成测试（issue #63 T1 账号首批 + #64 订单读路径）——mock {@link AiplatformClient}，
- * 验证 AppService 在 Spring 上下文中的完整接线（DI、query→wire 映射、wire→response DTO 映射、
- * 分页 1-based 透传、二进制载体保全、下游错误透传不映射）。
+ * aiplatform BFF 集成测试（issue #63 T1 账号首批 + #64 订单读路径 + #65 项目核心读路径）——
+ * mock {@link AiplatformClient}，验证 AppService 在 Spring 上下文中的完整接线（DI、query→wire 映射、
+ * wire→response DTO 映射、分页 1-based 透传、二进制载体保全、下游错误透传不映射）。
  *
  * <p>镜像 {@code AccountBffIntegrationTest} / {@code PaymentBffIntegrationTest}。不模拟安全层
  * （权限在 {@code AiplatformRbacEnforcementIntegrationTest} 覆盖）；不直测 {@link AiplatformClient}
@@ -61,6 +75,9 @@ class AiplatformBffIntegrationTest {
 
     @Autowired
     private AiplatformOrderAppService orderAppService;
+
+    @Autowired
+    private AiplatformProjectAppService projectAppService;
 
     @MockBean
     private AiplatformClient aiplatformClient;
@@ -178,5 +195,146 @@ class AiplatformBffIntegrationTest {
         assertThat(pkg.content()).containsExactly(tarGz);
         assertThat(pkg.contentType()).isEqualTo("application/gzip");
         assertThat(pkg.contentDisposition()).isEqualTo("attachment; filename=\"3829492001234567-source.tar.gz\"");
+    }
+
+    // ========== 项目清单 · query→wire 映射（status 单选）+ 分页 1-based 透传 ==========
+
+    @Test
+    void given_projectQueryAndPage_when_list_then_wireRequestMappedAndPageEchoedFromProvider() {
+        when(aiplatformClient.listProjects(any(), eq(3), eq(20))).thenReturn(new PageResponse<>(List.of(
+                new AiplatformProjectSummaryWireResponse(
+                        "3829492007654321", "英语学习助手", "文野",
+                        1, "官网", 3, "已归档", true,
+                        LocalDateTime.of(2026, 8, 1, 9, 0, 0),
+                        LocalDateTime.of(2026, 9, 1, 12, 0, 0))), 7, 3, 20));
+
+        PageResponse<AiplatformProjectSummaryResponse> page = projectAppService.list(
+                new AiplatformProjectQuery(3,
+                        LocalDateTime.of(2026, 9, 1, 0, 0, 0),
+                        LocalDateTime.of(2026, 9, 15, 23, 59, 59),
+                        "auth0|65f2c8a1", "3829492007654321"), 3, 20);
+
+        // 出站参数：北向 query → wire 过滤记录逐字段映射（status 三档单选单值）；page 1-based 直传（3→3，无 ±1）
+        ArgumentCaptor<AiplatformProjectListWireRequest> wireCaptor =
+                ArgumentCaptor.forClass(AiplatformProjectListWireRequest.class);
+        verify(aiplatformClient).listProjects(wireCaptor.capture(), eq(3), eq(20));
+        assertThat(wireCaptor.getValue()).isEqualTo(new AiplatformProjectListWireRequest(
+                3,
+                LocalDateTime.of(2026, 9, 1, 0, 0, 0),
+                LocalDateTime.of(2026, 9, 15, 23, 59, 59),
+                "auth0|65f2c8a1", "3829492007654321"));
+
+        // 回显取 provider 回报值；wire → response 逐字段（type/status Integer + *Name、archived Boolean）
+        assertThat(page.total()).isEqualTo(7L);
+        assertThat(page.page()).isEqualTo(3);
+        var row = page.items().get(0);
+        assertThat(row.id()).isEqualTo("3829492007654321");
+        assertThat(row.type()).isEqualTo(1);
+        assertThat(row.typeName()).isEqualTo("官网");
+        assertThat(row.status()).isEqualTo(3);
+        assertThat(row.statusName()).isEqualTo("已归档");
+        assertThat(row.archived()).isTrue();
+    }
+
+    // ========== 项目详情 · 订单引用 + 成本指针映射 ==========
+
+    @Test
+    void given_projectDetailWire_when_getDetail_then_orderRefsAndCostSummaryMapped() {
+        when(aiplatformClient.getProject("3829492007654321")).thenReturn(
+                new AiplatformProjectDetailWireResponse(
+                        "3829492007654321", "英语学习助手", "文野", "3829492009999999",
+                        1, "官网", 1, "进行中", false,
+                        LocalDateTime.of(2026, 9, 10, 14, 20, 0),
+                        LocalDateTime.of(2026, 9, 14, 18, 30, 0),
+                        LocalDateTime.of(2026, 9, 10, 20, 0, 0),
+                        LocalDateTime.of(2026, 9, 11, 8, 0, 0),
+                        new AiplatformOrderBriefWireResponse("3829492001234567", 2, "已报价"),
+                        new AiplatformOrderBriefWireResponse("3829492005555444", 4, "已归档"),
+                        new AiplatformProjectDetailWireResponse.CostSummary(
+                                Map.of("CNY", new BigDecimal("12.3456")), true)));
+
+        AiplatformProjectDetailResponse detail = projectAppService.getDetail("3829492007654321");
+
+        // wire → response 逐字段：订单引用（activeOrder 未终结/latestOrder 最近）+ 成本指针（Map 原样 + unpriced）
+        assertThat(detail.workspaceId()).isEqualTo("3829492009999999");
+        assertThat(detail.activeOrder().id()).isEqualTo("3829492001234567");
+        assertThat(detail.activeOrder().status()).isEqualTo(2);
+        assertThat(detail.latestOrder().statusName()).isEqualTo("已归档");
+        assertThat(detail.costSummary().cost()).containsEntry("CNY", new BigDecimal("12.3456"));
+        assertThat(detail.costSummary().unpriced()).isTrue();
+        assertThat(detail.prdProducedAt()).isEqualTo(LocalDateTime.of(2026, 9, 10, 20, 0, 0));
+    }
+
+    // ========== 深读三组 · 对话史 / PRD / 版本 ==========
+
+    @Test
+    void given_conversationWire_when_getConversation_then_kindsAndPayloadsMapped() {
+        when(aiplatformClient.getConversation("3829492007654321")).thenReturn(List.of(
+                new AiplatformConversationEntryWireResponse(
+                        90001L, 1, "用户发言", null, "首页加一个轮播图",
+                        null, null, List.of(Map.of("type", "circle")), false,
+                        LocalDateTime.of(2026, 9, 12, 10, 0, 0)),
+                new AiplatformConversationEntryWireResponse(
+                        90003L, 5, "收尾卡", "run-abc123", null,
+                        null, Map.of("runId", "run-abc123", "commitHash", "abc"), null, false,
+                        LocalDateTime.of(2026, 9, 12, 11, 30, 0))));
+
+        var entries = projectAppService.getConversation("3829492007654321");
+
+        // kind Integer code + kindName 随行（aiplatform#186 provider 出口提供）；载荷 Map/List 原样透传
+        assertThat(entries).hasSize(2);
+        var user = entries.get(0);
+        assertThat(user.kind()).isEqualTo(1);
+        assertThat(user.kindName()).isEqualTo("用户发言");
+        assertThat(user.attachments()).hasSize(1);
+        var closing = entries.get(1);
+        assertThat(closing.kind()).isEqualTo(5);
+        assertThat(closing.closing()).containsEntry("commitHash", "abc");
+    }
+
+    @Test
+    void given_prdAndVersionsWire_when_deepRead_then_mappedVerbatim() {
+        when(aiplatformClient.getPrd("3829492007654321")).thenReturn(new AiplatformPrdWireResponse(
+                "3829492007654321", "# PRD\n\n做一个英语学习助手……", Instant.parse("2026-09-12T08:30:00Z")));
+        when(aiplatformClient.listVersions("3829492007654321")).thenReturn(List.of(
+                new AiplatformVersionWireResponse(
+                        "abc", "轮播图上线", "run-abc123", null, LocalDateTime.of(2026, 9, 12, 11, 30, 0))));
+        when(aiplatformClient.getVersion("3829492007654321", "abc")).thenReturn(
+                new AiplatformVersionDetailWireResponse(
+                        "abc", "轮播图上线", "run-abc123", null,
+                        LocalDateTime.of(2026, 9, 12, 11, 30, 0), Map.of("runId", "run-abc123")));
+
+        // PRD：markdown 正文 + updatedAt Instant 原样
+        var prd = projectAppService.getPrd("3829492007654321");
+        assertThat(prd.content()).startsWith("# PRD");
+        assertThat(prd.updatedAt()).isEqualTo(Instant.parse("2026-09-12T08:30:00Z"));
+
+        // 版本列表：run 版本 runId 非空 / rollbackFrom null
+        var versions = projectAppService.listVersions("3829492007654321");
+        assertThat(versions).hasSize(1);
+        assertThat(versions.get(0).runId()).isEqualTo("run-abc123");
+        assertThat(versions.get(0).rollbackFrom()).isNull();
+
+        // 版本详情：closing 载荷原样
+        var version = projectAppService.getVersion("3829492007654321", "abc");
+        assertThat(version.closing()).containsEntry("runId", "run-abc123");
+    }
+
+    // ========== 项目详情错误 · 透传不映射 ==========
+
+    @Test
+    void given_prj001FromDownstream_when_getProject_then_propagateWithoutMapping() {
+        when(aiplatformClient.getProject("3829499999999999")).thenThrow(
+                AiplatformUpstreamException.from(
+                        new OpenApiClientException(404, "{\"code\":4001,\"message\":\"项目不存在\",\"data\":null}")));
+
+        assertThatThrownBy(() -> projectAppService.getDetail("3829499999999999"))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    assertThat(upstream.httpStatus()).isEqualTo(404);
+                    assertThat(upstream.envelopeCode()).isEqualTo(4001);
+                    assertThat(upstream.getMessage()).isEqualTo("项目不存在");
+                });
     }
 }
