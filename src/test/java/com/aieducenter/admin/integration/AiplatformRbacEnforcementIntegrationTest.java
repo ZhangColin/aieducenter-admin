@@ -33,14 +33,20 @@ import org.springframework.test.annotation.DirtiesContext;
 
 import com.aieducenter.admin.aiplatform.application.AiplatformUpstreamException;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformAccountProfileWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostOverviewWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostWindowWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformConversationEntryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderBriefWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformTokenUsageWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnpricedUsageWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceDetailWireResponse;
@@ -64,11 +70,13 @@ import cn.dev33.satoken.config.SaTokenConfig;
 
 /**
  * aiplatform BFF 端点 RBAC 强制执行集成测试（issue #63 T1 账号 + #64 订单读路径 + #65 项目核心读路径 +
- * #66 沙箱观测与四干预动作）
+ * #66 沙箱观测与四干预动作 + #67 成本四读口）
  * ——真实 Sa-Token 过滤链，断言 {@code admin:aiplatform:account:read} / {@code admin:aiplatform:order:read} /
- * {@code admin:aiplatform:project:read} / {@code admin:aiplatform:workspace:read} + 沙箱四独立写码
+ * {@code admin:aiplatform:project:read} / {@code admin:aiplatform:workspace:read} /
+ * {@code admin:aiplatform:cost:read} + 沙箱四独立写码
  * （{@code workspace:wake|hibernate|rebuild|seal}）对未登录（401）/ 无权者（403）/ 有权者（200）的行为，
- * 并钉死北向出口形状、二进制透传与 provider 错误信封透传。
+ * 并钉死北向出口形状、二进制透传与 provider 错误信封透传。成本域另钉死时间窗 from/to 北向必填
+ * （缺参 400 / 非 Instant 404 均在本服务绑定层裁决、不到 provider，issue #67：不设默认窗口）。
  *
  * <p>镜像 {@code AccountRbacEnforcementIntegrationTest}（登录/鉴权辅助沿用
  * {@code RbacEnforcementIntegrationTest}）。200 用例 mock {@link AiplatformClient}，证明权限放行后
@@ -122,6 +130,11 @@ class AiplatformRbacEnforcementIntegrationTest {
     private static final String HIBERNATE_ENDPOINT = WORKSPACE_DETAIL_ENDPOINT + "/hibernate";
     private static final String REBUILD_ENDPOINT = WORKSPACE_DETAIL_ENDPOINT + "/rebuild";
     private static final String SEAL_ENDPOINT = WORKSPACE_DETAIL_ENDPOINT + "/seal";
+    private static final String COST_READ_PERMISSION = "admin:aiplatform:cost:read";
+    private static final String COSTS_ENDPOINT = "/api/admin/aiplatform/costs";
+    private static final String COST_FROM = "2026-09-01T00:00:00Z";
+    private static final String COST_TO = "2026-09-16T00:00:00Z";
+    private static final String COST_WINDOW_QUERY = "?from=" + COST_FROM + "&to=" + COST_TO;
 
     private final AdminUserManagementAppService userAppService;
     private final RoleManagementAppService roleAppService;
@@ -171,10 +184,10 @@ class AiplatformRbacEnforcementIntegrationTest {
 
         Long readRoleId = roleAppService.create(
                 new CreateRoleCommand("AI平台读权限_" + suffix, "AIPLAREAD_" + suffix,
-                        "AI 平台账号档案 + 订单 + 项目 + 沙箱读权限", 80, null));
+                        "AI 平台账号档案 + 订单 + 项目 + 沙箱 + 成本读权限", 80, null));
         roleAppService.assignPermissions(readRoleId,
                 new AssignPermissionsCommand(List.of(READ_PERMISSION, ORDER_READ_PERMISSION,
-                        PROJECT_READ_PERMISSION, WORKSPACE_READ_PERMISSION)));
+                        PROJECT_READ_PERMISSION, WORKSPACE_READ_PERMISSION, COST_READ_PERMISSION)));
 
         Long userWithReadId = userAppService.create(
                 new CreateAdminUserCommand(usernameWithReadPermission, PASSWORD, "只读运营_" + suffix, null, null, null));
@@ -298,6 +311,48 @@ class AiplatformRbacEnforcementIntegrationTest {
             return workspaceActionReceiptWire(3, "封存", 3, "无容器",
                     "workspace-archives/" + WORKSPACE_ID + ".tar.gz", 89128960L);
         }).when(aiplatformClient).sealWorkspace(eq(WORKSPACE_ID));
+        // 成本四读口 mock：总览（五档总量 + 币种分桶 + 双分解）/ unpriced 警示 / 项目成本清单 / 单项目下钻
+        Instant costFrom = Instant.parse(COST_FROM);
+        Instant costTo = Instant.parse(COST_TO);
+        when(aiplatformClient.getCostOverview(eq(new AiplatformCostWindowWireRequest(costFrom, costTo))))
+                .thenReturn(new AiplatformCostOverviewWireResponse(
+                        costFrom, costTo,
+                        new AiplatformTokenUsageWireResponse(5000, 1200, 300, 0, 800),
+                        Map.of("CNY", new BigDecimal("12.3456")),
+                        List.of(new AiplatformCostOverviewWireResponse.ModelUsage(
+                                "anthropic", "claude-fable-5",
+                                new AiplatformTokenUsageWireResponse(3000, 1000, 300, 0, 800))),
+                        List.of(new AiplatformCostOverviewWireResponse.AgentKindUsage(
+                                "naming", null,
+                                new AiplatformTokenUsageWireResponse(1000, 200, 0, 0, 0)))));
+        when(aiplatformClient.getUnpricedUsage(eq(new AiplatformCostWindowWireRequest(costFrom, costTo))))
+                .thenReturn(new AiplatformUnpricedUsageWireResponse(
+                        costFrom, costTo,
+                        List.of(new AiplatformUnpricedUsageWireResponse.UnpricedTier(
+                                "openai", "gpt-5.2", 1, "输入", 700))));
+        when(aiplatformClient.listProjectCosts(any(), anyInt(), anyInt())).thenReturn(new PageResponse<>(List.of(
+                new AiplatformProjectCostWireResponse(
+                        PROJECT_ID,
+                        new AiplatformTokenUsageWireResponse(3000, 1000, 300, 0, 800),
+                        Map.of("CNY", new BigDecimal("12.3456")), false),
+                new AiplatformProjectCostWireResponse(
+                        "3829492005555444",
+                        new AiplatformTokenUsageWireResponse(1000, 200, 0, 0, 0),
+                        Map.of(), true)), 2, 1, 20));
+        when(aiplatformClient.getProjectCostDetail(eq(PROJECT_ID),
+                eq(new AiplatformCostWindowWireRequest(costFrom, costTo))))
+                .thenReturn(new AiplatformProjectCostDetailWireResponse(
+                        PROJECT_ID, costFrom, costTo,
+                        new AiplatformTokenUsageWireResponse(3000, 1000, 300, 0, 800),
+                        Map.of("CNY", new BigDecimal("12.3456")),
+                        List.of(new AiplatformProjectCostDetailWireResponse.UnpricedTier(
+                                "openai", "gpt-5.2", 1, "输入")),
+                        List.of(new AiplatformProjectCostDetailWireResponse.ModelUsage(
+                                "anthropic", "claude-fable-5",
+                                new AiplatformTokenUsageWireResponse(3000, 1000, 300, 0, 800))),
+                        List.of(new AiplatformProjectCostDetailWireResponse.AgentKindUsage(
+                                "executor", "执行智能体",
+                                new AiplatformTokenUsageWireResponse(3000, 1000, 300, 0, 800)))));
     }
 
     /**
@@ -729,6 +784,127 @@ class AiplatformRbacEnforcementIntegrationTest {
         // 信封 code＝数字业务码 1015（WSP_015），而非映射后的 409——前端比对 aiplatform 业务码的分支活
         assertThat(root.path("code").asInt()).isEqualTo(1015);
         assertThat(root.path("message").asText()).isEqualTo("编码 run 进行中，沙箱动作被拒（先取消 run 或等收口）");
+        assertThat(root.path("data").isNull()).isTrue();
+    }
+
+    // ========== 成本观测（admin:aiplatform:cost:read）· 权限三态 + 北向出口形状 + 时间窗必填 ==========
+
+    @Test
+    @DisplayName("非超管且拥有 admin:aiplatform:cost:read → 总览/unpriced 200，五档+币种分桶+分解镜像 provider")
+    void given_nonSuperAdminWithCostRead_when_overviewAndUnpriced_then_200AndShapeMirrorsProvider() throws Exception {
+        String token = login(usernameWithReadPermission);
+
+        // 全局总览：窗口回显 + 五档总量（JSON 数字）+ 币种分桶 + 分智能体（agentKind 裸维度串 +
+        // agentKindName 随行——aiplatform#186 已落，辅助标记为 null 如实出 JSON null）
+        ResponseEntity<String> overview = getWithToken(COSTS_ENDPOINT + "/overview" + COST_WINDOW_QUERY, token);
+        assertThat(overview.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode overviewData = objectMapper.readTree(overview.getBody()).path("data");
+        assertThat(overviewData.path("from").asText()).isEqualTo(COST_FROM);
+        assertThat(overviewData.path("to").asText()).isEqualTo(COST_TO);
+        JsonNode total = overviewData.path("total");
+        assertThat(total.path("input").asLong()).isEqualTo(5000L);
+        assertThat(total.path("output").asLong()).isEqualTo(1200L);
+        assertThat(total.path("cacheRead").asLong()).isEqualTo(300L);
+        assertThat(total.path("cacheWrite").asLong()).isEqualTo(0L);
+        assertThat(total.path("reasoning").asLong()).isEqualTo(800L);
+        assertThat(overviewData.path("cost").path("CNY").asDouble()).isEqualTo(12.3456);
+        JsonNode agentKind = overviewData.path("byAgentKind").get(0);
+        assertThat(agentKind.path("agentKind").asText()).isEqualTo("naming");
+        assertThat(agentKind.path("agentKindName").isNull()).isTrue();
+
+        // unpriced 全局警示：tokenKind Integer code + tokenKindName + tokens 只计无价分量
+        ResponseEntity<String> unpriced = getWithToken(COSTS_ENDPOINT + "/unpriced" + COST_WINDOW_QUERY, token);
+        assertThat(unpriced.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode tier = objectMapper.readTree(unpriced.getBody()).path("data").path("items").get(0);
+        assertThat(tier.path("provider").asText()).isEqualTo("openai");
+        assertThat(tier.path("tokenKind").asInt()).isEqualTo(1);
+        assertThat(tier.path("tokenKindName").asText()).isEqualTo("输入");
+        assertThat(tier.path("tokens").asLong()).isEqualTo(700L);
+    }
+
+    @Test
+    @DisplayName("非超管且拥有 cost:read → 项目成本清单/单项目下钻 200，分页 1-based 回显 + allUnpriced 标记")
+    void given_nonSuperAdminWithCostRead_when_projectCosts_then_200AndPageEchoed() throws Exception {
+        String token = login(usernameWithReadPermission);
+
+        // 项目成本清单：PageResponse 形状（total JSON string 口径在 Long 字段），回显 provider 回报值
+        ResponseEntity<String> projects = getWithToken(
+                COSTS_ENDPOINT + "/projects" + COST_WINDOW_QUERY + "&page=1&size=20", token);
+        assertThat(projects.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode page = objectMapper.readTree(projects.getBody()).path("data");
+        assertThat(page.path("total").asLong()).isEqualTo(2L);
+        assertThat(page.path("page").asInt()).isEqualTo(1);
+        JsonNode row = page.path("items").get(0);
+        assertThat(row.path("projectId").asText()).isEqualTo(PROJECT_ID);
+        assertThat(row.path("cost").path("CNY").asDouble()).isEqualTo(12.3456);
+        assertThat(row.path("allUnpriced").asBoolean()).isFalse();
+
+        // 单项目下钻：subject 原值回显 + unpriced 档位（bySubject 口径无计数）+ 双分解
+        ResponseEntity<String> detail = getWithToken(
+                COSTS_ENDPOINT + "/projects/" + PROJECT_ID + COST_WINDOW_QUERY, token);
+        assertThat(detail.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode detailData = objectMapper.readTree(detail.getBody()).path("data");
+        assertThat(detailData.path("projectId").asText()).isEqualTo(PROJECT_ID);
+        JsonNode tier = detailData.path("unpriced").get(0);
+        assertThat(tier.path("tokenKind").asInt()).isEqualTo(1);
+        assertThat(tier.path("tokenKindName").asText()).isEqualTo("输入");
+        assertThat(detailData.path("byAgentKind").get(0).path("agentKindName").asText()).isEqualTo("执行智能体");
+    }
+
+    @Test
+    @DisplayName("成本端点时间窗 from/to 必填 → 缺参 400 / 非 Instant 404（框架绑定层裁决，不到 provider）")
+    void given_missingOrInvalidWindow_when_costEndpoints_then_bindingLayerRejects() {
+        String token = login(usernameWithReadPermission);
+        // 缺 to（必填）→ 400（MissingServletRequestParameterException）；非 Instant（无时区态）→ 404
+        // （框架 handleTypeMismatch → NOT_FOUND 既定口径）——均在本服务绑定层，不到 provider
+        assertThat(getWithToken(COSTS_ENDPOINT + "/overview?from=" + COST_FROM, token)
+                .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(getWithToken(COSTS_ENDPOINT + "/overview?from=2026-09-01&to=" + COST_TO, token)
+                .getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("非超管且缺少权限 → 成本四端点 403（独立权限码 cost:read）")
+    void given_nonSuperAdminWithoutPermission_when_costEndpoints_then_403() {
+        String token = login(usernameWithoutPermission);
+        assertThat(getWithToken(COSTS_ENDPOINT + "/overview" + COST_WINDOW_QUERY, token)
+                .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(getWithToken(COSTS_ENDPOINT + "/unpriced" + COST_WINDOW_QUERY, token)
+                .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(getWithToken(COSTS_ENDPOINT + "/projects" + COST_WINDOW_QUERY, token)
+                .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(getWithToken(COSTS_ENDPOINT + "/projects/" + PROJECT_ID + COST_WINDOW_QUERY, token)
+                .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("未登录访问成本四端点返回 401")
+    void given_unauthenticated_when_costEndpoints_then_401() {
+        assertThat(getWithToken(COSTS_ENDPOINT + "/overview" + COST_WINDOW_QUERY, null)
+                .getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(getWithToken(COSTS_ENDPOINT + "/unpriced" + COST_WINDOW_QUERY, null)
+                .getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(getWithToken(COSTS_ENDPOINT + "/projects" + COST_WINDOW_QUERY, null)
+                .getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(getWithToken(COSTS_ENDPOINT + "/projects/" + PROJECT_ID + COST_WINDOW_QUERY, null)
+                .getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    @DisplayName("成本查询下游 METER_011 → 北向 HTTP 400 + 信封 code=3011 + message 原文（不映射）")
+    void given_meter011FromDownstream_when_getOverview_then_errorEnvelopePassedThrough() throws Exception {
+        when(aiplatformClient.getCostOverview(any())).thenThrow(
+                AiplatformUpstreamException.from(new OpenApiClientException(400,
+                        "{\"code\":3011,\"message\":\"无效的成本查询参数\",\"data\":null}")));
+
+        String token = login(usernameWithReadPermission);
+        ResponseEntity<String> response = getWithToken(COSTS_ENDPOINT + "/overview" + COST_WINDOW_QUERY, token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        JsonNode root = objectMapper.readTree(response.getBody());
+        // 信封 code＝数字业务码 3011（METER_011＝域码 3×1000＋11），而非映射后的 400——前端比对业务码的分支活
+        assertThat(root.path("code").asInt()).isEqualTo(3011);
+        assertThat(root.path("message").asText()).isEqualTo("无效的成本查询参数");
         assertThat(root.path("data").isNull()).isTrue();
     }
 

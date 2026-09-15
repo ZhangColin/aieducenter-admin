@@ -22,25 +22,37 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 
 import com.aieducenter.admin.aiplatform.application.AiplatformAccountAppService;
+import com.aieducenter.admin.aiplatform.application.AiplatformCostAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformOrderAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformProjectAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformUpstreamException;
 import com.aieducenter.admin.aiplatform.application.AiplatformWorkspaceAppService;
+import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformCostQuery;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformOrderQuery;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformProjectQuery;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformWorkspaceQuery;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformAccountProfileResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformCostOverviewResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformOrderSummaryResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectCostDetailResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectCostResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformUnpricedUsageResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectDetailResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectSummaryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformWorkspaceDetailResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformWorkspaceSummaryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformAccountProfileWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostOverviewWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostWindowWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformConversationEntryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderBriefWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformTokenUsageWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnpricedUsageWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
@@ -56,7 +68,7 @@ import com.cartisan.web.response.PageResponse;
 
 /**
  * aiplatform BFF 集成测试（issue #63 T1 账号首批 + #64 订单读路径 + #65 项目核心读路径 +
- * #66 沙箱观测与四干预动作）——
+ * #66 沙箱观测与四干预动作 + #67 成本四读口）——
  * mock {@link AiplatformClient}，验证 AppService 在 Spring 上下文中的完整接线（DI、query→wire 映射、
  * wire→response DTO 映射、分页 1-based 透传、二进制载体保全、下游错误透传不映射）。
  *
@@ -89,6 +101,9 @@ class AiplatformBffIntegrationTest {
 
     @Autowired
     private AiplatformWorkspaceAppService workspaceAppService;
+
+    @Autowired
+    private AiplatformCostAppService costAppService;
 
     @MockBean
     private AiplatformClient aiplatformClient;
@@ -456,6 +471,154 @@ class AiplatformBffIntegrationTest {
                     assertThat(upstream.httpStatus()).isEqualTo(409);
                     assertThat(upstream.envelopeCode()).isEqualTo(1015);
                     assertThat(upstream.getMessage()).isEqualTo("编码 run 进行中，沙箱动作被拒（先取消 run 或等收口）");
+                });
+    }
+
+    // ========== 成本总览 · query→wire 映射 + 分解嵌套映射 ==========
+
+    @Test
+    void given_costWindow_when_getOverview_then_windowMappedAndBreakdownsMapped() {
+        Instant from = Instant.parse("2026-09-01T00:00:00Z");
+        Instant to = Instant.parse("2026-09-16T00:00:00Z");
+        when(aiplatformClient.getCostOverview(new AiplatformCostWindowWireRequest(from, to)))
+                .thenReturn(new AiplatformCostOverviewWireResponse(
+                        from, to,
+                        new AiplatformTokenUsageWireResponse(5000, 1200, 300, 0, 800),
+                        Map.of("CNY", new BigDecimal("12.3456")),
+                        List.of(new AiplatformCostOverviewWireResponse.ModelUsage(
+                                "anthropic", "claude-fable-5",
+                                new AiplatformTokenUsageWireResponse(3000, 1000, 300, 0, 800))),
+                        List.of(new AiplatformCostOverviewWireResponse.AgentKindUsage(
+                                "naming", null,
+                                new AiplatformTokenUsageWireResponse(1000, 200, 0, 0, 0)))));
+
+        AiplatformCostOverviewResponse overview = costAppService.overview(new AiplatformCostQuery(from, to));
+
+        // 出站参数：北向 query → wire 时间窗逐字段映射（from/to Instant 原值）
+        verify(aiplatformClient).getCostOverview(new AiplatformCostWindowWireRequest(from, to));
+
+        // wire → response 逐字段：窗口回显 + 五档总量 + 币种分桶 + 双分解
+        // （agentKind 裸维度串原值透传、辅助标记 agentKindName=null 不臆造）
+        assertThat(overview.from()).isEqualTo(from);
+        assertThat(overview.to()).isEqualTo(to);
+        assertThat(overview.total().input()).isEqualTo(5000L);
+        assertThat(overview.total().reasoning()).isEqualTo(800L);
+        assertThat(overview.cost()).containsEntry("CNY", new BigDecimal("12.3456"));
+        assertThat(overview.byModel().get(0).model()).isEqualTo("claude-fable-5");
+        assertThat(overview.byModel().get(0).tokens().cacheRead()).isEqualTo(300L);
+        assertThat(overview.byAgentKind().get(0).agentKind()).isEqualTo("naming");
+        assertThat(overview.byAgentKind().get(0).agentKindName()).isNull();
+    }
+
+    // ========== unpriced 警示 · 档位映射 ==========
+
+    @Test
+    void given_unpricedWire_when_getUnpriced_then_tiersMapped() {
+        Instant from = Instant.parse("2026-09-01T00:00:00Z");
+        Instant to = Instant.parse("2026-09-16T00:00:00Z");
+        when(aiplatformClient.getUnpricedUsage(new AiplatformCostWindowWireRequest(from, to)))
+                .thenReturn(new AiplatformUnpricedUsageWireResponse(
+                        from, to,
+                        List.of(new AiplatformUnpricedUsageWireResponse.UnpricedTier(
+                                "openai", "gpt-5.2", 1, "输入", 700))));
+
+        AiplatformUnpricedUsageResponse unpriced = costAppService.unpriced(new AiplatformCostQuery(from, to));
+
+        // tokenKind Integer code + tokenKindName + tokens 只计无价分量
+        assertThat(unpriced.items()).hasSize(1);
+        assertThat(unpriced.items().get(0).tokenKind()).isEqualTo(1);
+        assertThat(unpriced.items().get(0).tokenKindName()).isEqualTo("输入");
+        assertThat(unpriced.items().get(0).tokens()).isEqualTo(700L);
+    }
+
+    // ========== 项目成本清单 · query→wire + 分页 1-based 透传 ==========
+
+    @Test
+    void given_costWindowAndPage_when_listProjectCosts_then_pageEchoedFromProvider() {
+        Instant from = Instant.parse("2026-09-01T00:00:00Z");
+        Instant to = Instant.parse("2026-09-16T00:00:00Z");
+        when(aiplatformClient.listProjectCosts(any(), eq(1), eq(20))).thenReturn(new PageResponse<>(List.of(
+                new AiplatformProjectCostWireResponse(
+                        "3829492007654321",
+                        new AiplatformTokenUsageWireResponse(3000, 1000, 300, 0, 800),
+                        Map.of("CNY", new BigDecimal("12.3456")), false),
+                new AiplatformProjectCostWireResponse(
+                        "3829492005555444",
+                        new AiplatformTokenUsageWireResponse(1000, 200, 0, 0, 0),
+                        Map.of(), true)), 2, 1, 20));
+
+        PageResponse<AiplatformProjectCostResponse> page =
+                costAppService.listProjectCosts(new AiplatformCostQuery(from, to), 1, 20);
+
+        // 出站参数：北向 query → wire 时间窗映射；page 1-based 直传（1→1，无 ±1）
+        verify(aiplatformClient).listProjectCosts(
+                eq(new AiplatformCostWindowWireRequest(from, to)), eq(1), eq(20));
+
+        // 回显取 provider 回报值；wire → response 逐字段（全未配价行 cost 空 + allUnpriced=true）
+        assertThat(page.total()).isEqualTo(2L);
+        assertThat(page.page()).isEqualTo(1);
+        var costly = page.items().get(0);
+        assertThat(costly.projectId()).isEqualTo("3829492007654321");
+        assertThat(costly.total().input()).isEqualTo(3000L);
+        assertThat(costly.allUnpriced()).isFalse();
+        var allUnpriced = page.items().get(1);
+        assertThat(allUnpriced.cost()).isEmpty();
+        assertThat(allUnpriced.allUnpriced()).isTrue();
+    }
+
+    // ========== 单项目下钻 · 分解 + unpriced 档位（无计数）映射 ==========
+
+    @Test
+    void given_projectCostDetailWire_when_getProjectCostDetail_then_breakdownsMapped() {
+        Instant from = Instant.parse("2026-09-01T00:00:00Z");
+        Instant to = Instant.parse("2026-09-16T00:00:00Z");
+        when(aiplatformClient.getProjectCostDetail(eq("3829492007654321"),
+                eq(new AiplatformCostWindowWireRequest(from, to))))
+                .thenReturn(new AiplatformProjectCostDetailWireResponse(
+                        "3829492007654321", from, to,
+                        new AiplatformTokenUsageWireResponse(3000, 1000, 300, 0, 800),
+                        Map.of("CNY", new BigDecimal("12.3456")),
+                        List.of(new AiplatformProjectCostDetailWireResponse.UnpricedTier(
+                                "openai", "gpt-5.2", 1, "输入")),
+                        List.of(new AiplatformProjectCostDetailWireResponse.ModelUsage(
+                                "anthropic", "claude-fable-5",
+                                new AiplatformTokenUsageWireResponse(3000, 1000, 300, 0, 800))),
+                        List.of(new AiplatformProjectCostDetailWireResponse.AgentKindUsage(
+                                "executor", "执行智能体",
+                                new AiplatformTokenUsageWireResponse(3000, 1000, 300, 0, 800)))));
+
+        AiplatformProjectCostDetailResponse detail =
+                costAppService.getProjectCostDetail("3829492007654321", new AiplatformCostQuery(from, to));
+
+        // wire → response 逐字段：subject/窗口回显 + unpriced 档位（bySubject 口径无计数）+ 双分解
+        assertThat(detail.projectId()).isEqualTo("3829492007654321");
+        assertThat(detail.from()).isEqualTo(from);
+        assertThat(detail.cost()).containsEntry("CNY", new BigDecimal("12.3456"));
+        assertThat(detail.unpriced().get(0).tokenKind()).isEqualTo(1);
+        assertThat(detail.unpriced().get(0).tokenKindName()).isEqualTo("输入");
+        assertThat(detail.byModel().get(0).provider()).isEqualTo("anthropic");
+        assertThat(detail.byAgentKind().get(0).agentKind()).isEqualTo("executor");
+        assertThat(detail.byAgentKind().get(0).agentKindName()).isEqualTo("执行智能体");
+    }
+
+    // ========== 成本域错误 · 透传不映射 ==========
+
+    @Test
+    void given_meter011FromDownstream_when_getOverview_then_propagateWithoutMapping() {
+        when(aiplatformClient.getCostOverview(any())).thenThrow(
+                AiplatformUpstreamException.from(
+                        new OpenApiClientException(400, "{\"code\":3011,\"message\":\"无效的成本查询参数\",\"data\":null}")));
+
+        assertThatThrownBy(() -> costAppService.overview(
+                new AiplatformCostQuery(Instant.parse("2026-09-01T00:00:00Z"),
+                        Instant.parse("2026-09-16T00:00:00Z"))))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    // METER_011 → HTTP 400 + 数字业务码 3011（域码 3×1000＋11）
+                    assertThat(upstream.httpStatus()).isEqualTo(400);
+                    assertThat(upstream.envelopeCode()).isEqualTo(3011);
+                    assertThat(upstream.getMessage()).isEqualTo("无效的成本查询参数");
                 });
     }
 }

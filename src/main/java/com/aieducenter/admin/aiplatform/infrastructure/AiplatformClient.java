@@ -8,15 +8,20 @@ import java.util.stream.Collectors;
 import com.aieducenter.admin.aiplatform.application.AiplatformUpstreamException;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformAccountProfileWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformConversationEntryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostOverviewWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostWindowWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnpricedUsageWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceSummaryWireResponse;
@@ -93,6 +98,19 @@ public class AiplatformClient {
             new TypeReference<>() {};
 
     private static final TypeReference<ApiResponse<AiplatformWorkspaceDetailWireResponse>> WORKSPACE_DETAIL_TYPEREF =
+            new TypeReference<>() {};
+
+    // 成本域（#161/#164 观测）同为 ApiResponse<T> 信封；四端点均为读口（时间窗 + 可选分页）
+    private static final TypeReference<ApiResponse<AiplatformCostOverviewWireResponse>> COST_OVERVIEW_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<AiplatformUnpricedUsageWireResponse>> UNPRICED_USAGE_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<PageResponse<AiplatformProjectCostWireResponse>>> PROJECT_COST_PAGE_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<AiplatformProjectCostDetailWireResponse>> PROJECT_COST_DETAIL_TYPEREF =
             new TypeReference<>() {};
 
     // 出站时间参数定长格式（秒恒在场）：LocalDateTime.toString() 会省略零秒（"T00:00"），
@@ -514,12 +532,140 @@ public class AiplatformClient {
         }
     }
 
+    /**
+     * 平台成本全局总览（透传 aiplatform）——全平台跨项目观测模型开销构成：五档总量 + 平台成本
+     * （token × 事件时点生效单价，币种分桶直读不折算）+ 分模型 + 分智能体（agentKind 裸维度串
+     * + agentKindName 随行——aiplatform#186 已落）。
+     *
+     * <p>对接 aiplatform {@code GET /api/backoffice/costs/overview}（#161 成本运营）：返回
+     * {@code ApiResponse<BackofficeCostOverviewResponse>}。空窗/无数据返回全零 total 与空分桶
+     * （不是错误）；查询参数绑定失败 400 METER_011（数字业务码 3011）原样透传。</p>
+     *
+     * <p>时间窗 {@code [from, to)} 半开、ISO-8601 Instant（UTC 带 Z）；provider 侧可缺省，北向
+     * <strong>必填</strong>（issue #67：不设默认窗口）——出站恒带双参。Instant 出站取
+     * {@code Instant.toString()}（ISO_INSTANT 确定形，秒恒在场、UTC 带 Z），provider 的
+     * {@code @RequestParam Instant} 同形解析。</p>
+     *
+     * @param window wire 层时间窗（由应用层从 {@code AiplatformCostQuery} 映射而来）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（400 METER_011 等，不做映射）
+     */
+    public AiplatformCostOverviewWireResponse getCostOverview(AiplatformCostWindowWireRequest window) {
+        StringBuilder url = new StringBuilder(baseUrl).append("/api/backoffice/costs/overview");
+        appendWindow(url, window);
+        log.debug("AiplatformClient.getCostOverview: {}", url);
+        try {
+            ApiResponse<AiplatformCostOverviewWireResponse> resp =
+                    openApiClient.get(url.toString(), COST_OVERVIEW_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * unpriced 全局警示（透传 aiplatform，用量驱动）——窗口内有 token 用量且事件时点无生效单价
+     * 的 (provider, model, 档位) 按档位汇总 token（只计无价分量）。静态配价缺口不做（无用量＝
+     * 无实际损失）；据此发现漏配价并及时补价（历史成本不漂移）。
+     *
+     * <p>对接 aiplatform {@code GET /api/backoffice/costs/unpriced}（#161）：返回
+     * {@code ApiResponse<BackofficeUnpricedUsageResponse>}；空窗/无未配价用量返回空 items
+     * （不是错误）；绑定失败 400 METER_011（3011）原样透传。</p>
+     *
+     * @param window wire 层时间窗
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（400 METER_011 等，不做映射）
+     */
+    public AiplatformUnpricedUsageWireResponse getUnpricedUsage(AiplatformCostWindowWireRequest window) {
+        StringBuilder url = new StringBuilder(baseUrl).append("/api/backoffice/costs/unpriced");
+        appendWindow(url, window);
+        log.debug("AiplatformClient.getUnpricedUsage: {}", url);
+        try {
+            ApiResponse<AiplatformUnpricedUsageWireResponse> resp =
+                    openApiClient.get(url.toString(), UNPRICED_USAGE_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 分页查询项目成本清单（透传 aiplatform，成本降序）——窗口内有 token 用量的各项目成本汇总；
+     * 排序服务端定死成本降序（全未配价项目排后且 allUnpriced=true、同序按 projectId 升序稳定）；
+     * 已删项目的历史花费照列（成本观测不抹历史）。
+     *
+     * <p>对接 aiplatform {@code GET /api/backoffice/costs/projects}（#164）：返回
+     * {@code ApiResponse<PageResponse<BackofficeProjectCostResponse>>}（page 1-based、total JSON
+     * string——cartisan-web 全局 Long→ToStringSerializer）。page 1-based 直传零换算（同订单/
+     * 项目/沙箱），provider clamp（page≥1、size∈[1,100] 默认 20）行为透传、本客户端不重复夹取。</p>
+     *
+     * @param window wire 层时间窗
+     * @param page   页码，<strong>1-based</strong>（北向原样直传）
+     * @param size   每页大小
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（400 METER_011 等，不做映射）
+     */
+    public PageResponse<AiplatformProjectCostWireResponse> listProjectCosts(
+            AiplatformCostWindowWireRequest window, int page, int size) {
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/backoffice/costs/projects?page=").append(page)
+                .append("&size=").append(size);
+        appendWindow(url, window);
+        log.debug("AiplatformClient.listProjectCosts: {}", url);
+        try {
+            ApiResponse<PageResponse<AiplatformProjectCostWireResponse>> resp =
+                    openApiClient.get(url.toString(), PROJECT_COST_PAGE_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 单项目成本下钻（透传 aiplatform）——byModel/byAgentKind 分解 + 未配价档位（与 cost 互补
+     * 不重叠，bySubject 口径无 token 计数）。{@code projectId} 为计量 subject 原值（写侧口径
+     * projectId 十进制串，provider 不解释存在性）：无用量/查无此号返回全零 total 与空结构
+     * （明确空态，非错误、不 404）。
+     *
+     * <p>对接 aiplatform {@code GET /api/backoffice/costs/projects/{projectId}}（#164）：返回
+     * {@code ApiResponse<BackofficeProjectCostDetailResponse>}；绑定失败 400 METER_011（3011）
+     * 原样透传。</p>
+     *
+     * @param projectId 项目标识（计量 subject 原值，provider 不解释存在性）
+     * @param window    wire 层时间窗
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（400 METER_011 等，不做映射）
+     */
+    public AiplatformProjectCostDetailWireResponse getProjectCostDetail(
+            String projectId, AiplatformCostWindowWireRequest window) {
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/backoffice/costs/projects/").append(encode(projectId));
+        appendWindow(url, window);
+        log.debug("AiplatformClient.getProjectCostDetail: {}", url);
+        try {
+            ApiResponse<AiplatformProjectCostDetailWireResponse> resp =
+                    openApiClient.get(url.toString(), PROJECT_COST_DETAIL_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 成本域四读口共用的时间窗拼接：{@code from}/{@code to} 半开 [from, to)。纯委托
+     * {@link #appendParam}——Instant 取其默认分支 {@code Instant.toString()}（ISO_INSTANT：
+     * 秒恒在场、UTC 带 Z），null 统一省略；总览/unpriced/单项目下钻无既有查询参数（首参前缀
+     * {@code ?}）、项目成本清单在 page/size 之后（前缀 {@code &}），分隔符由 appendParam 裁决。
+     */
+    private static void appendWindow(StringBuilder url, AiplatformCostWindowWireRequest window) {
+        appendParam(url, "from", window.from());
+        appendParam(url, "to", window.to());
+    }
+
     private static void appendParam(StringBuilder url, String name, Object value) {
         if (value != null) {
+            // 首个查询参数前缀 ?、后续前缀 &（各域清单端点 page/size 恒在先，成本域时间窗可在首）
+            url.append(url.indexOf("?") < 0 ? '?' : '&');
             if (value instanceof LocalDateTime time) {
-                url.append('&').append(name).append('=').append(encode(time.format(ISO_SECONDS)));
+                url.append(name).append('=').append(encode(time.format(ISO_SECONDS)));
             } else {
-                url.append('&').append(name).append('=').append(encode(value.toString()));
+                url.append(name).append('=').append(encode(value.toString()));
             }
         }
     }
