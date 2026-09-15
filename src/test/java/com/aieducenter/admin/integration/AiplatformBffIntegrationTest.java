@@ -2,38 +2,53 @@ package com.aieducenter.admin.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.net.http.HttpHeaders;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 
 import com.aieducenter.admin.aiplatform.application.AiplatformAccountAppService;
+import com.aieducenter.admin.aiplatform.application.AiplatformOrderAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformUpstreamException;
+import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformOrderQuery;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformAccountProfileResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformOrderSummaryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformAccountProfileWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderListWireRequest;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.infrastructure.AiplatformClient;
+import com.cartisan.openapi.client.BinaryResponse;
 import com.cartisan.openapi.client.OpenApiClientException;
+import com.cartisan.web.response.PageResponse;
 
 /**
- * aiplatform BFF 集成测试（issue #63 T1 首批用例）——mock {@link AiplatformClient}，验证
- * {@link AiplatformAccountAppService} 在 Spring 上下文中的完整接线（DI、wire→response DTO 映射、
- * 下游错误透传不映射）。
+ * aiplatform BFF 集成测试（issue #63 T1 账号首批 + #64 订单读路径）——mock {@link AiplatformClient}，
+ * 验证 AppService 在 Spring 上下文中的完整接线（DI、query→wire 映射、wire→response DTO 映射、
+ * 分页 1-based 透传、二进制载体保全、下游错误透传不映射）。
  *
  * <p>镜像 {@code AccountBffIntegrationTest} / {@code PaymentBffIntegrationTest}。不模拟安全层
  * （权限在 {@code AiplatformRbacEnforcementIntegrationTest} 覆盖）；不直测 {@link AiplatformClient}
- * （wire 反序列化契约在 {@code AiplatformAccountClientContractTest} 以真实传输 stub 钉死，
- * 方法边界 mock 会绕过反序列化——已知反例）。</p>
+ * （wire 反序列化契约在 {@code AiplatformAccountClientContractTest} /
+ * {@code AiplatformOrderClientContractTest} 以真实传输 stub 钉死，方法边界 mock 会绕过
+ * 反序列化——已知反例）。</p>
  *
- * <p>mock 数据按 aiplatform {@code BackofficeAccountProfileResponse} 真实形状构造：
- * {@code id} 为 String（TSID 十进制串——区别于 identity 的 Long）、{@code createdAt} 为
- * {@code LocalDateTime}。错误路径断言 <strong>透传</strong>（{@link AiplatformUpstreamException}
- * 携带 provider 的 HTTP 状态 + 数字业务码 + message），而非 payment/identity 式的
- * {@code BaseCodeMessage} 映射（spec #62 定稿：aiplatform 不做映射翻译）。</p>
+ * <p>mock 数据按 aiplatform 真实响应形状构造（{@code id} 为 String TSID 十进制串、
+ * {@code status} Integer code + {@code statusName}、金额 Long 分、时间 ISO）。错误路径断言
+ * <strong>透传</strong>（{@link AiplatformUpstreamException} 携带 provider 的 HTTP 状态 +
+ * 数字业务码 + message），而非 payment/identity 式的 {@code BaseCodeMessage} 映射
+ * （spec #62 定稿：aiplatform 不做映射翻译）。</p>
  *
  * @since 0.1.0
  */
@@ -43,6 +58,9 @@ class AiplatformBffIntegrationTest {
 
     @Autowired
     private AiplatformAccountAppService accountAppService;
+
+    @Autowired
+    private AiplatformOrderAppService orderAppService;
 
     @MockBean
     private AiplatformClient aiplatformClient;
@@ -81,5 +99,84 @@ class AiplatformBffIntegrationTest {
                     assertThat(upstream.envelopeCode()).isEqualTo(6004);
                     assertThat(upstream.getMessage()).isEqualTo("账号不存在");
                 });
+    }
+
+    // ========== 订单清单 · query→wire 映射 + 分页 1-based 透传 ==========
+
+    @Test
+    void given_orderQueryAndPage_when_list_then_wireRequestMappedAndPageEchoedFromProvider() {
+        when(aiplatformClient.listOrders(any(), eq(3), eq(20))).thenReturn(
+                new PageResponse<>(List.of(
+                        new AiplatformOrderSummaryWireResponse(
+                                "3829492001234567", "3829492007654321", "英语学习助手", "文野",
+                                3, "已支付", 1999000L, "CNY",
+                                LocalDateTime.of(2026, 9, 10, 14, 20, 0),
+                                LocalDateTime.of(2026, 9, 11, 9, 0, 0))), 42, 3, 20));
+
+        PageResponse<AiplatformOrderSummaryResponse> page = orderAppService.list(
+                new AiplatformOrderQuery(List.of(1, 5),
+                        LocalDateTime.of(2026, 9, 1, 0, 0, 0),
+                        LocalDateTime.of(2026, 9, 15, 23, 59, 59),
+                        "auth0|65f2c8a1", "3829492001234567"), 3, 20);
+
+        // 出站参数：北向 query → wire 过滤记录逐字段映射；page 1-based 直传（3→3，无 ±1）
+        ArgumentCaptor<AiplatformOrderListWireRequest> wireCaptor =
+                ArgumentCaptor.forClass(AiplatformOrderListWireRequest.class);
+        verify(aiplatformClient).listOrders(wireCaptor.capture(), eq(3), eq(20));
+        assertThat(wireCaptor.getValue()).isEqualTo(new AiplatformOrderListWireRequest(
+                List.of(1, 5),
+                LocalDateTime.of(2026, 9, 1, 0, 0, 0),
+                LocalDateTime.of(2026, 9, 15, 23, 59, 59),
+                "auth0|65f2c8a1", "3829492001234567"));
+
+        // 回显取 provider 回报值（含 clamp 后值）——不是北向入参回声；wire → response 逐字段
+        assertThat(page.total()).isEqualTo(42L);
+        assertThat(page.page()).isEqualTo(3);
+        assertThat(page.size()).isEqualTo(20);
+        var row = page.items().get(0);
+        assertThat(row.id()).isEqualTo("3829492001234567");
+        assertThat(row.status()).isEqualTo(3);
+        assertThat(row.statusName()).isEqualTo("已支付");
+        assertThat(row.amount()).isEqualTo(1999000L);
+        assertThat(row.currency()).isEqualTo("CNY");
+        assertThat(row.createdAt()).isEqualTo(LocalDateTime.of(2026, 9, 10, 14, 20, 0));
+    }
+
+    // ========== 订单详情错误 · 透传不映射 ==========
+
+    @Test
+    void given_ord001FromDownstream_when_getDetail_then_propagateWithoutMapping() {
+        when(aiplatformClient.getOrder("3829499999999999")).thenThrow(
+                AiplatformUpstreamException.from(
+                        new OpenApiClientException(404, "{\"code\":5001,\"message\":\"订单不存在\",\"data\":null}")));
+
+        assertThatThrownBy(() -> orderAppService.getDetail("3829499999999999"))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    assertThat(upstream.httpStatus()).isEqualTo(404);
+                    assertThat(upstream.envelopeCode()).isEqualTo(5001);
+                    assertThat(upstream.getMessage()).isEqualTo("订单不存在");
+                });
+    }
+
+    // ========== 源码包 · 二进制载体保全 ==========
+
+    @Test
+    void given_tarGzFromDownstream_when_getSourcePackage_then_bytesAndRawHeadersPreserved() {
+        byte[] tarGz = {(byte) 0x1f, (byte) 0x8b, 0x08, 0x00, (byte) 0xff, 0x41, 0x00};
+        HttpHeaders providerHeaders = HttpHeaders.of(Map.of(
+                "Content-Type", List.of("application/gzip"),
+                "Content-Disposition", List.of("attachment; filename=\"3829492001234567-source.tar.gz\"")),
+                (a, b) -> true);
+        when(aiplatformClient.downloadSourcePackage("3829492001234567"))
+                .thenReturn(new BinaryResponse(200, providerHeaders, tarGz));
+
+        var pkg = orderAppService.getSourcePackage("3829492001234567");
+
+        // 字节逐位保全 + provider 响应头 raw 值透传（application/gzip + attachment 文件名）
+        assertThat(pkg.content()).containsExactly(tarGz);
+        assertThat(pkg.contentType()).isEqualTo("application/gzip");
+        assertThat(pkg.contentDisposition()).isEqualTo("attachment; filename=\"3829492001234567-source.tar.gz\"");
     }
 }

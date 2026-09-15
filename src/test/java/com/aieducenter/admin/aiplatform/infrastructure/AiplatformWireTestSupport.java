@@ -1,6 +1,8 @@
 package com.aieducenter.admin.aiplatform.infrastructure;
 
 import com.aieducenter.admin.aiplatform.application.AiplatformAccountAppService;
+import com.aieducenter.admin.aiplatform.application.AiplatformOrderAppService;
+import com.cartisan.openapi.client.BinaryResponse;
 import com.cartisan.openapi.client.OpenApiClient;
 import com.cartisan.openapi.client.OpenApiClientException;
 import com.cartisan.openapi.config.CartisanOpenapiProperties;
@@ -14,12 +16,13 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
  * aiplatform wire 契约测试共享脚手架——子类化 {@link OpenApiClient} 仅替换 HTTP 传输（先例
  * {@code PaymentWireTestSupport}）：用对齐 Spring Boot 默认的 {@link ObjectMapper} 反序列化给定的
  * aiplatform 信封 JSON，其余全真实（真实 {@link AiplatformClient} + 真实 Jackson 反序列化 +
- * 真实 {@link AiplatformAccountAppService} 映射）。唯一被替换的是网络传输——对 wire 反序列化
- * 契约无关（方法边界 mock 会绕过反序列化路径，是已知反例）。{@code ObjectMapper} 对齐
- * Spring Boot 默认（{@code FAIL_ON_UNKNOWN_PROPERTIES=false} + {@code JavaTimeModule}）。
+ * 真实 AppService 映射）。唯一被替换的是网络传输——对 wire 反序列化契约无关（方法边界 mock
+ * 会绕过反序列化路径，是已知反例）。{@code ObjectMapper} 对齐 Spring Boot 默认
+ * （{@code FAIL_ON_UNKNOWN_PROPERTIES=false} + {@code JavaTimeModule}）。
  *
- * <p>供 {@code AiplatformAccountClientContractTest} 复用；后续订单/项目/沙箱/成本/单价表/知识素材
- * 各域 {@code *ContractTest} 沿用本脚手架扩展（各域 AppService 重载）。</p>
+ * <p>供 {@code AiplatformAccountClientContractTest} / {@code AiplatformOrderClientContractTest}
+ * 复用；后续项目/沙箱/成本/单价表/知识素材各域 {@code *ContractTest} 沿用本脚手架扩展
+ * （各域 AppService 重载）。</p>
  *
  * @since 0.1.0
  */
@@ -66,6 +69,57 @@ final class AiplatformWireTestSupport {
             }
         };
         return new AiplatformAccountAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
+    }
+
+    /**
+     * 订单域版 {@link #accountAppServiceWithStubTransport}——{@code get}（清单/详情）走真实
+     * {@link TypeReference} 反序列化，{@code download}（源码包）返回给定 {@link BinaryResponse}：
+     * 二进制无反序列化路径，stub 只需保全字节与响应头。
+     */
+    static AiplatformOrderAppService orderAppServiceWithStubTransport(
+            String envelopeBody, BinaryResponse downloadStub, String[] wireUrlSink) {
+        ObjectMapper mapper = bootDefaultMapper();
+        OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, mapper) {
+            @Override
+            public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                try {
+                    return mapper.readValue(envelopeBody, typeReference);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            public BinaryResponse download(String url) {
+                wireUrlSink[0] = url;
+                return downloadStub;
+            }
+        };
+        return new AiplatformOrderAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
+    }
+
+    /**
+     * 订单域版 {@link #accountAppServiceWithErrorTransport}——{@code get} 与 {@code download}
+     * 都始终抛 {@link OpenApiClientException}（框架对 ≥400 的行为复刻：download 的错误信封
+     * 在 body 里、以 UTF-8 解码后入异常）。
+     */
+    static AiplatformOrderAppService orderAppServiceWithErrorTransport(
+            int statusCode, String errorBody, String[] wireUrlSink) {
+        OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, bootDefaultMapper()) {
+            @Override
+            public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                throw new OpenApiClientException(statusCode, errorBody);
+            }
+
+            @Override
+            public BinaryResponse download(String url) {
+                wireUrlSink[0] = url;
+                throw new OpenApiClientException(statusCode, errorBody);
+            }
+        };
+        return new AiplatformOrderAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
     }
 
     private static ObjectMapper bootDefaultMapper() {
