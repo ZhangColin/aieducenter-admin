@@ -33,3 +33,5 @@ admin:
     base-url: http://localhost:8082
   identity:
     base-url: http://localhost:10001
+  aiplatform:
+    base-url: http://localhost:8888

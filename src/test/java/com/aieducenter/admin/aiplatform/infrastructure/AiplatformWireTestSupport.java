@@ -1,0 +1,77 @@
+package com.aieducenter.admin.aiplatform.infrastructure;
+
+import com.aieducenter.admin.aiplatform.application.AiplatformAccountAppService;
+import com.cartisan.openapi.client.OpenApiClient;
+import com.cartisan.openapi.client.OpenApiClientException;
+import com.cartisan.openapi.config.CartisanOpenapiProperties;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
+/**
+ * aiplatform wire 契约测试共享脚手架——子类化 {@link OpenApiClient} 仅替换 HTTP 传输（先例
+ * {@code PaymentWireTestSupport}）：用对齐 Spring Boot 默认的 {@link ObjectMapper} 反序列化给定的
+ * aiplatform 信封 JSON，其余全真实（真实 {@link AiplatformClient} + 真实 Jackson 反序列化 +
+ * 真实 {@link AiplatformAccountAppService} 映射）。唯一被替换的是网络传输——对 wire 反序列化
+ * 契约无关（方法边界 mock 会绕过反序列化路径，是已知反例）。{@code ObjectMapper} 对齐
+ * Spring Boot 默认（{@code FAIL_ON_UNKNOWN_PROPERTIES=false} + {@code JavaTimeModule}）。
+ *
+ * <p>供 {@code AiplatformAccountClientContractTest} 复用；后续订单/项目/沙箱/成本/单价表/知识素材
+ * 各域 {@code *ContractTest} 沿用本脚手架扩展（各域 AppService 重载）。</p>
+ *
+ * @since 0.1.0
+ */
+final class AiplatformWireTestSupport {
+
+    private AiplatformWireTestSupport() {
+    }
+
+    /**
+     * 用给定 aiplatform 成功信封 JSON 构造一个 HTTP 传输被替换的 {@link AiplatformAccountAppService}。
+     * 其 {@link AiplatformClient} 的 {@code get} 忽略 url、把 envelopeBody 按 {@code AiplatformClient}
+     * 真实传入的 {@link TypeReference} 反序列化——真实反序列化路径完整保留；wire URL 记入 wireUrlSink
+     * （断言出站路径）。
+     */
+    static AiplatformAccountAppService accountAppServiceWithStubTransport(String envelopeBody, String[] wireUrlSink) {
+        ObjectMapper mapper = bootDefaultMapper();
+        OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, mapper) {
+            @Override
+            public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                try {
+                    return mapper.readValue(envelopeBody, typeReference);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        };
+        return new AiplatformAccountAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
+    }
+
+    /**
+     * 用给定的下游错误（HTTP 状态 + 错误信封 body）构造一个传输始终抛 {@link OpenApiClientException}
+     * 的 {@link AiplatformAccountAppService}——框架 {@code OpenApiClient.validateResponse} 对 ≥400 响应
+     * 抛 {@code OpenApiClientException(statusCode, body)}，本 stub 在传输层复刻该行为，
+     * 让 {@link AiplatformClient} 的错误信封解析（透传翻译）打到真实路径。
+     */
+    static AiplatformAccountAppService accountAppServiceWithErrorTransport(
+            int statusCode, String errorBody, String[] wireUrlSink) {
+        OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, bootDefaultMapper()) {
+            @Override
+            public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                throw new OpenApiClientException(statusCode, errorBody);
+            }
+        };
+        return new AiplatformAccountAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
+    }
+
+    private static ObjectMapper bootDefaultMapper() {
+        return new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);   // Spring Boot 默认
+    }
+}

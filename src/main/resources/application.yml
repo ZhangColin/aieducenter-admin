@@ -54,6 +54,10 @@ admin:
   # identity 能力域地址（联调前默认值占位，真实部署经 IDENTITY_SERVICE_URL 覆盖）
   identity:
     base-url: ${IDENTITY_SERVICE_URL:http://localhost:10001}
+  # aiplatform 能力域地址（联调前默认值占位，真实部署经 AIPLATFORM_SERVICE_URL 覆盖；
+  # 凭证走全局单 key admin-console，零额外配置——#63）
+  aiplatform:
+    base-url: ${AIPLATFORM_SERVICE_URL:http://localhost:8888}
 
 management:
   endpoints:
