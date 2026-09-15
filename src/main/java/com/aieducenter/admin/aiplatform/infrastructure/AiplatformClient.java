@@ -17,6 +17,9 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectLi
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceListWireRequest;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceSummaryWireResponse;
 import com.cartisan.openapi.client.BinaryResponse;
 import com.cartisan.openapi.client.OpenApiClient;
 import com.cartisan.openapi.client.OpenApiClientException;
@@ -83,6 +86,13 @@ public class AiplatformClient {
             new TypeReference<>() {};
 
     private static final TypeReference<ApiResponse<AiplatformVersionDetailWireResponse>> VERSION_DETAIL_TYPEREF =
+            new TypeReference<>() {};
+
+    // 沙箱域（#173 观测 + #174 动作）同为 ApiResponse<T> 信封；四干预动作无请求体、回执＝详情 DTO
+    private static final TypeReference<ApiResponse<PageResponse<AiplatformWorkspaceSummaryWireResponse>>> WORKSPACE_PAGE_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<AiplatformWorkspaceDetailWireResponse>> WORKSPACE_DETAIL_TYPEREF =
             new TypeReference<>() {};
 
     // 出站时间参数定长格式（秒恒在场）：LocalDateTime.toString() 会省略零秒（"T00:00"），
@@ -357,6 +367,147 @@ public class AiplatformClient {
         log.debug("AiplatformClient.getVersion: {}", url);
         try {
             ApiResponse<AiplatformVersionDetailWireResponse> resp = openApiClient.get(url, VERSION_DETAIL_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 分页查询沙箱清单（透传 aiplatform，期望态/实态两维过滤——漂移发现口径）。
+     *
+     * <p>对接 aiplatform {@code GET /api/backoffice/workspaces}（#173 观测面已冻结）：返回
+     * {@code ApiResponse<PageResponse<BackofficeWorkspaceSummaryResponse>>}。两维均<strong>单选</strong>
+     * Integer code、可组合、可缺省（null＝该维不过滤）：{@code desired} 期望态（1=运行 2=休眠 3=封存，
+     * DB 意图侧）、{@code actual} 容器实态（1=运行中 2=已停止 3=无容器 4=未知——docker 现场探查、
+     * 探查后内存过滤，total 如实＝筛后计数；{@code actual=3} 即捞「期望运行而实态已亡」漂移清单）。
+     * 过滤参数绑定失败 400 WSP_014（数字业务码 1014）原样透传。</p>
+     *
+     * <p>page 1-based 直传零换算（同订单/项目），provider clamp（page≥1、size∈[1,100]）行为透传。
+     * 实态与卷大小逐行现场探查（docker 子进程）——页越大越慢，provider 侧语义、本客户端不干预。</p>
+     *
+     * @param filter wire 层过滤参数（由应用层从 {@code AiplatformWorkspaceQuery} 映射而来）
+     * @param page   页码，<strong>1-based</strong>（北向原样直传）
+     * @param size   每页大小
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（400 WSP_014 等，不做映射）
+     */
+    public PageResponse<AiplatformWorkspaceSummaryWireResponse> listWorkspaces(
+            AiplatformWorkspaceListWireRequest filter, int page, int size) {
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/backoffice/workspaces?page=").append(page)
+                .append("&size=").append(size);
+        appendParam(url, "desired", filter.desired());
+        appendParam(url, "actual", filter.actual());
+        log.debug("AiplatformClient.listWorkspaces: {}", url);
+        try {
+            ApiResponse<PageResponse<AiplatformWorkspaceSummaryWireResponse>> resp =
+                    openApiClient.get(url.toString(), WORKSPACE_PAGE_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 查询沙箱详情（透传 aiplatform）——清单行超集：全量字段＋所属项目引用＋中间件资源清单
+     * （连接串原文，容器内回环形态）＋置备失败原因/封存包寻址键/审计列。
+     *
+     * <p>对接 aiplatform {@code GET /api/backoffice/workspaces/{id}}（#173 观测面）：返回
+     * {@code ApiResponse<BackofficeWorkspaceDetailResponse>}；工作区不存在（含畸形 id——provider 侧
+     * lenient 解析）时 HTTP 404 + 数字业务码 1001（WSP_001）原样透传。</p>
+     *
+     * @param id 工作区标识（TSID 十进制字符串，provider 侧 lenient 解析：非数值同 404 WSP_001）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（404 WSP_001 等，不做映射）
+     */
+    public AiplatformWorkspaceDetailWireResponse getWorkspace(String id) {
+        String url = baseUrl + "/api/backoffice/workspaces/" + encode(id);
+        log.debug("AiplatformClient.getWorkspace: {}", url);
+        try {
+            ApiResponse<AiplatformWorkspaceDetailWireResponse> resp = openApiClient.get(url, WORKSPACE_DETAIL_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 唤醒沙箱（透传 aiplatform）——收敛到 READY＋（已生成项目）应用在服，同步等结果；容器缺失/
+     * 被杀走幂等重建（卷保留）；封存态走深度唤醒（解包回卷＋依赖重装，分钟级）。
+     *
+     * <p>对接 aiplatform {@code POST /api/backoffice/workspaces/{id}/wake}（#174 动作面）：<strong>无
+     * 请求体</strong>，返回 {@code ApiResponse<BackofficeWorkspaceDetailResponse>}（动作后的观测详情）。
+     * 操作者身份经框架 {@code OpenApiClient} 自动带 {@code X-User-Id/X-User-Name} 头（RequestContext
+     * →provider 落痕动作行，缺头落空）。工作区不存在 404 WSP_001（1001）、非 DEV 400 WSP_007（1007）、
+     * 封存包不可读 404 WSP_016（1016）、置备等待超时 500 WSP_011（1011）——均原样透传。</p>
+     *
+     * @param id 工作区标识（TSID 十进制字符串）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（404 WSP_001 等，不做映射）
+     */
+    public AiplatformWorkspaceDetailWireResponse wakeWorkspace(String id) {
+        return postWorkspaceAction(id, "wake");
+    }
+
+    /**
+     * 强制休眠沙箱（透传 aiplatform）——管理员的即时止损口：删容器保卷、期望态置休眠（不等闲置
+     * 阈值）；已休眠＝幂等成功（补删残留容器）。
+     *
+     * <p>对接 aiplatform {@code POST /api/backoffice/workspaces/{id}/hibernate}（#174）：无请求体，
+     * 回执＝动作后的观测详情。封存态拒 400 WSP_009（1009，卷已删先唤醒）、run 在途拒 409
+     * WSP_015（1015）、收敛任务在途 409 WSP_017（1017）——均原样透传。操作者透传头落痕同唤醒。</p>
+     *
+     * @param id 工作区标识（TSID 十进制字符串）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（400 WSP_009、409 WSP_015 等，不做映射）
+     */
+    public AiplatformWorkspaceDetailWireResponse hibernateWorkspace(String id) {
+        return postWorkspaceAction(id, "hibernate");
+    }
+
+    /**
+     * 强制重建沙箱（透传 aiplatform）——「预览死了」型漂移的标准化处置（替代手工 docker 拉）：
+     * 在跑但坏了的容器也杀（卷保留、数据不动），走唤醒内核同一重建路径收敛回 READY。
+     *
+     * <p>对接 aiplatform {@code POST /api/backoffice/workspaces/{id}/rebuild}（#174）：无请求体，
+     * 回执＝动作后的观测详情。封存态拒 400 WSP_009（1009，空卷重建＝掩埋数据丢失——先唤醒）、
+     * run 在途拒 409 WSP_015（1015）、收敛任务在途 409 WSP_017（1017）、重建重试上限落 FAILED
+     * 时 500 WSP_010（1010，可再触发）——均原样透传。操作者透传头落痕同唤醒。</p>
+     *
+     * @param id 工作区标识（TSID 十进制字符串）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（400 WSP_009、500 WSP_010 等，不做映射）
+     */
+    public AiplatformWorkspaceDetailWireResponse rebuildWorkspace(String id) {
+        return postWorkspaceAction(id, "rebuild");
+    }
+
+    /**
+     * 封存沙箱（透传 aiplatform）——动作序同闲置满期的自动封存：删容器→整卷打包（仅排可重建缓存）
+     * 落平台存储→期望态置封存＋包元数据→删卷（失败由扫描下轮收敛）；RUNNING 起点可用（即时深回收）。
+     *
+     * <p>对接 aiplatform {@code POST /api/backoffice/workspaces/{id}/seal}（#174）：无请求体，回执＝
+     * 动作后的观测详情（含封存包元数据）。重复封存拒 400 WSP_009（1009，走「唤醒→休眠→封存」周期）、
+     * run 在途拒 409 WSP_015（1015）、收敛任务在途 409 WSP_017（1017）——均原样透传。
+     * 操作者透传头落痕同唤醒。</p>
+     *
+     * @param id 工作区标识（TSID 十进制字符串）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（400 WSP_009、409 WSP_015 等，不做映射）
+     */
+    public AiplatformWorkspaceDetailWireResponse sealWorkspace(String id) {
+        return postWorkspaceAction(id, "seal");
+    }
+
+    /**
+     * 四干预动作共用的出站形状（#174）：{@code POST /api/backoffice/workspaces/{id}/{action}}——
+     * 无请求体（框架 {@code OpenApiClient.post} 对 null body 发空 body），返回
+     * {@code ApiResponse<BackofficeWorkspaceDetailResponse>} 信封取 {@code .data()}；操作者身份由
+     * 框架经 {@code RequestContext}→{@code X-User-Id/X-User-Name} 自动透传（identity 同款）。
+     */
+    private AiplatformWorkspaceDetailWireResponse postWorkspaceAction(String id, String action) {
+        String url = baseUrl + "/api/backoffice/workspaces/" + encode(id) + "/" + action;
+        log.debug("AiplatformClient.workspaceAction[{}]: {}", action, url);
+        try {
+            // 无请求体：框架 OpenApiClient.post 对 null body 发空 body（POST 仍带 application/json），
+            // provider 端只读路径参数（同 payment 主动查行先例）
+            ApiResponse<AiplatformWorkspaceDetailWireResponse> resp =
+                    openApiClient.post(url, null, WORKSPACE_DETAIL_TYPEREF);
             return resp.data();
         } catch (OpenApiClientException e) {
             throw AiplatformUpstreamException.from(e);

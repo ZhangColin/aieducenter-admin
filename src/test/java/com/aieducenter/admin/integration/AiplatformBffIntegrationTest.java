@@ -25,12 +25,16 @@ import com.aieducenter.admin.aiplatform.application.AiplatformAccountAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformOrderAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformProjectAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformUpstreamException;
+import com.aieducenter.admin.aiplatform.application.AiplatformWorkspaceAppService;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformOrderQuery;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformProjectQuery;
+import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformWorkspaceQuery;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformAccountProfileResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformOrderSummaryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectDetailResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectSummaryResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformWorkspaceDetailResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformWorkspaceSummaryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformAccountProfileWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformConversationEntryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderBriefWireResponse;
@@ -42,13 +46,17 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectLi
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceListWireRequest;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.infrastructure.AiplatformClient;
 import com.cartisan.openapi.client.BinaryResponse;
 import com.cartisan.openapi.client.OpenApiClientException;
 import com.cartisan.web.response.PageResponse;
 
 /**
- * aiplatform BFF 集成测试（issue #63 T1 账号首批 + #64 订单读路径 + #65 项目核心读路径）——
+ * aiplatform BFF 集成测试（issue #63 T1 账号首批 + #64 订单读路径 + #65 项目核心读路径 +
+ * #66 沙箱观测与四干预动作）——
  * mock {@link AiplatformClient}，验证 AppService 在 Spring 上下文中的完整接线（DI、query→wire 映射、
  * wire→response DTO 映射、分页 1-based 透传、二进制载体保全、下游错误透传不映射）。
  *
@@ -78,6 +86,9 @@ class AiplatformBffIntegrationTest {
 
     @Autowired
     private AiplatformProjectAppService projectAppService;
+
+    @Autowired
+    private AiplatformWorkspaceAppService workspaceAppService;
 
     @MockBean
     private AiplatformClient aiplatformClient;
@@ -335,6 +346,116 @@ class AiplatformBffIntegrationTest {
                     assertThat(upstream.httpStatus()).isEqualTo(404);
                     assertThat(upstream.envelopeCode()).isEqualTo(4001);
                     assertThat(upstream.getMessage()).isEqualTo("项目不存在");
+                });
+    }
+
+    // ========== 沙箱清单 · query→wire 映射（期望态/实态两维）+ 分页 1-based 透传 ==========
+
+    @Test
+    void given_workspaceQueryAndPage_when_list_then_wireRequestMappedAndPageEchoedFromProvider() {
+        when(aiplatformClient.listWorkspaces(any(), eq(2), eq(20))).thenReturn(new PageResponse<>(List.of(
+                new AiplatformWorkspaceSummaryWireResponse(
+                        "3829492009999999", "ws-3829492009999999",
+                        1, "开发", 2, "就绪", 1, "运行", 3, "无容器",
+                        LocalDateTime.of(2026, 9, 14, 22, 10, 0),
+                        2147483648L, null, null,
+                        new AiplatformWorkspaceSummaryWireResponse.ProjectRef(
+                                "3829492007654321", "英语学习助手", false))), 17, 2, 20));
+
+        PageResponse<AiplatformWorkspaceSummaryResponse> page = workspaceAppService.list(
+                new AiplatformWorkspaceQuery(1, 3), 2, 20);
+
+        // 出站参数：北向 query → wire 过滤记录逐字段映射（漂移清单口径：desired=1 期望运行 + actual=3 实态无容器）；
+        // page 1-based 直传（2→2，无 ±1）
+        ArgumentCaptor<AiplatformWorkspaceListWireRequest> wireCaptor =
+                ArgumentCaptor.forClass(AiplatformWorkspaceListWireRequest.class);
+        verify(aiplatformClient).listWorkspaces(wireCaptor.capture(), eq(2), eq(20));
+        assertThat(wireCaptor.getValue()).isEqualTo(new AiplatformWorkspaceListWireRequest(1, 3));
+
+        // 回显取 provider 回报值；wire → response 逐字段（四枚举 code+*Name、卷大小 Long、项目引用嵌套）
+        assertThat(page.total()).isEqualTo(17L);
+        assertThat(page.page()).isEqualTo(2);
+        var drift = page.items().get(0);
+        assertThat(drift.workspaceId()).isEqualTo("3829492009999999");
+        assertThat(drift.desiredState()).isEqualTo(1);
+        assertThat(drift.desiredStateName()).isEqualTo("运行");
+        assertThat(drift.containerState()).isEqualTo(3);
+        assertThat(drift.containerStateName()).isEqualTo("无容器");
+        assertThat(drift.volumeSizeBytes()).isEqualTo(2147483648L);
+        assertThat(drift.project().projectId()).isEqualTo("3829492007654321");
+        assertThat(drift.project().archived()).isFalse();
+    }
+
+    // ========== 沙箱详情 · 资源观测 + 项目引用映射 ==========
+
+    @Test
+    void given_workspaceDetailWire_when_getDetail_then_resourcesAndProjectRefMapped() {
+        when(aiplatformClient.getWorkspace("3829492007777777")).thenReturn(
+                new AiplatformWorkspaceDetailWireResponse(
+                        "3829492007777777", "ws-3829492007777777", "net-3829492007777777",
+                        1, "开发", 2, "就绪", null, 3, "封存", 3, "无容器",
+                        LocalDateTime.of(2026, 9, 13, 18, 0, 0), null,
+                        LocalDateTime.of(2026, 9, 13, 18, 0, 0),
+                        "workspace-archives/3829492007777777.tar.gz", 89128960L,
+                        LocalDateTime.of(2026, 9, 8, 10, 0, 0),
+                        LocalDateTime.of(2026, 9, 13, 18, 0, 0),
+                        List.of(new AiplatformWorkspaceDetailWireResponse.MiddlewareResourceObservation(
+                                1, "mw-3829492007777777-pg",
+                                "postgresql://aiedu:secret@mw-3829492007777777-pg:5432/aiedu")),
+                        new AiplatformWorkspaceSummaryWireResponse.ProjectRef(
+                                "3829492007654321", "英语学习助手", false)));
+
+        AiplatformWorkspaceDetailResponse detail = workspaceAppService.getDetail("3829492007777777");
+
+        // wire → response 逐字段：封存态全量（封存包寻址键/审计列）+ 资源观测 + 项目引用
+        assertThat(detail.networkName()).isEqualTo("net-3829492007777777");
+        assertThat(detail.provisionError()).isNull();
+        assertThat(detail.desiredStateName()).isEqualTo("封存");
+        assertThat(detail.archivePath()).isEqualTo("workspace-archives/3829492007777777.tar.gz");
+        assertThat(detail.archiveSizeBytes()).isEqualTo(89128960L);
+        assertThat(detail.resources()).hasSize(1);
+        assertThat(detail.resources().get(0).kind()).isEqualTo(1);
+        assertThat(detail.resources().get(0).internalUrl()).startsWith("postgresql://");
+        assertThat(detail.project().name()).isEqualTo("英语学习助手");
+    }
+
+    // ========== 四干预动作 · 委托 + 回执映射 + 错误透传 ==========
+
+    @Test
+    void given_wakeReceipt_when_wake_then_delegatedAndDetailMapped() {
+        when(aiplatformClient.wakeWorkspace("3829492009999999")).thenReturn(
+                new AiplatformWorkspaceDetailWireResponse(
+                        "3829492009999999", "ws-3829492009999999", "net-3829492009999999",
+                        1, "开发", 2, "就绪", null, 1, "运行", 1, "运行中",
+                        LocalDateTime.of(2026, 9, 16, 9, 0, 0), 1073741824L,
+                        null, null, null,
+                        LocalDateTime.of(2026, 9, 8, 10, 0, 0),
+                        LocalDateTime.of(2026, 9, 16, 9, 0, 0),
+                        List.of(), null));
+
+        AiplatformWorkspaceDetailResponse receipt = workspaceAppService.wake("3829492009999999");
+
+        // 回执＝动作后的观测详情：期望运行 + 实态运行中（收敛完成的新事实）
+        assertThat(receipt.desiredState()).isEqualTo(1);
+        assertThat(receipt.containerState()).isEqualTo(1);
+        assertThat(receipt.containerStateName()).isEqualTo("运行中");
+        assertThat(receipt.project()).isNull();
+    }
+
+    @Test
+    void given_wsp015FromDownstream_when_hibernate_then_propagateWithoutMapping() {
+        when(aiplatformClient.hibernateWorkspace("3829492009999999")).thenThrow(
+                AiplatformUpstreamException.from(
+                        new OpenApiClientException(409,
+                                "{\"code\":1015,\"message\":\"编码 run 进行中，沙箱动作被拒（先取消 run 或等收口）\",\"data\":null}")));
+
+        assertThatThrownBy(() -> workspaceAppService.hibernate("3829492009999999"))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    assertThat(upstream.httpStatus()).isEqualTo(409);
+                    assertThat(upstream.envelopeCode()).isEqualTo(1015);
+                    assertThat(upstream.getMessage()).isEqualTo("编码 run 进行中，沙箱动作被拒（先取消 run 或等收口）");
                 });
     }
 }

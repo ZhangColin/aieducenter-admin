@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -12,6 +13,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -41,6 +43,8 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectDe
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.infrastructure.AiplatformClient;
 import com.aieducenter.admin.application.AdminUserManagementAppService;
 import com.aieducenter.admin.application.RoleManagementAppService;
@@ -48,6 +52,7 @@ import com.aieducenter.admin.application.dto.command.AssignPermissionsCommand;
 import com.aieducenter.admin.application.dto.command.AssignRolesCommand;
 import com.aieducenter.admin.application.dto.command.CreateAdminUserCommand;
 import com.aieducenter.admin.application.dto.command.CreateRoleCommand;
+import com.cartisan.core.context.RequestContext;
 import com.cartisan.openapi.client.BinaryResponse;
 import com.cartisan.openapi.client.OpenApiClientException;
 import com.cartisan.web.response.PageResponse;
@@ -58,14 +63,22 @@ import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.config.SaTokenConfig;
 
 /**
- * aiplatform BFF 端点 RBAC 强制执行集成测试（issue #63 T1 账号 + #64 订单读路径 + #65 项目核心读路径）
+ * aiplatform BFF 端点 RBAC 强制执行集成测试（issue #63 T1 账号 + #64 订单读路径 + #65 项目核心读路径 +
+ * #66 沙箱观测与四干预动作）
  * ——真实 Sa-Token 过滤链，断言 {@code admin:aiplatform:account:read} / {@code admin:aiplatform:order:read} /
- * {@code admin:aiplatform:project:read} 独立权限码对未登录（401）/ 无权者（403）/ 有权者（200）的行为，
+ * {@code admin:aiplatform:project:read} / {@code admin:aiplatform:workspace:read} + 沙箱四独立写码
+ * （{@code workspace:wake|hibernate|rebuild|seal}）对未登录（401）/ 无权者（403）/ 有权者（200）的行为，
  * 并钉死北向出口形状、二进制透传与 provider 错误信封透传。
  *
  * <p>镜像 {@code AccountRbacEnforcementIntegrationTest}（登录/鉴权辅助沿用
  * {@code RbacEnforcementIntegrationTest}）。200 用例 mock {@link AiplatformClient}，证明权限放行后
  * 整条 controller→appservice→client 通路接通。超管 bypass 由框架级测试钉住，此处不重复。</p>
+ *
+ * <p><strong>操作者身份透传契约</strong>（issue #66 断言必带）：沙箱四干预动作从 {@code RequestContext}
+ * 读 operator 审计，admin 不在 body 塞身份——框架 cartisan-openapi 自动从 {@code RequestContext} 带
+ * {@code X-User-Id/X-User-Name} 出站 header。本测试在 mocked {@link AiplatformClient} 边界用
+ * {@code doAnswer} 在调用瞬间抓取 {@link RequestContext#getUserId()} / {@link RequestContext#getUserName()}，
+ * 断言其 == 登录沙箱治理运营的 id / 昵称（{@code AccountRbacEnforcementIntegrationTest} 同款手法）。</p>
  *
  * <p><strong>错误信封透传（spec #62 定稿）</strong>：下游 IDN_004（HTTP 404 + 数字业务码 6004）经
  * {@link AiplatformUpstreamException} 抵达 {@code AiplatformUpstreamErrorAdvice}，北向还原 provider
@@ -97,6 +110,18 @@ class AiplatformRbacEnforcementIntegrationTest {
     private static final String VERSIONS_ENDPOINT = PROJECT_DETAIL_ENDPOINT + "/versions";
     private static final String VERSION_HASH = "3f9c1a2b7d84e5f6a0b1c2d3e4f5a6b7c8d9e0f1";
     private static final String VERSION_DETAIL_ENDPOINT = VERSIONS_ENDPOINT + "/" + VERSION_HASH;
+    private static final String WORKSPACE_READ_PERMISSION = "admin:aiplatform:workspace:read";
+    private static final String WORKSPACE_WAKE_PERMISSION = "admin:aiplatform:workspace:wake";
+    private static final String WORKSPACE_HIBERNATE_PERMISSION = "admin:aiplatform:workspace:hibernate";
+    private static final String WORKSPACE_REBUILD_PERMISSION = "admin:aiplatform:workspace:rebuild";
+    private static final String WORKSPACE_SEAL_PERMISSION = "admin:aiplatform:workspace:seal";
+    private static final String WORKSPACE_ID = "3829492007777777";
+    private static final String WORKSPACES_ENDPOINT = "/api/admin/aiplatform/workspaces";
+    private static final String WORKSPACE_DETAIL_ENDPOINT = WORKSPACES_ENDPOINT + "/" + WORKSPACE_ID;
+    private static final String WAKE_ENDPOINT = WORKSPACE_DETAIL_ENDPOINT + "/wake";
+    private static final String HIBERNATE_ENDPOINT = WORKSPACE_DETAIL_ENDPOINT + "/hibernate";
+    private static final String REBUILD_ENDPOINT = WORKSPACE_DETAIL_ENDPOINT + "/rebuild";
+    private static final String SEAL_ENDPOINT = WORKSPACE_DETAIL_ENDPOINT + "/seal";
 
     private final AdminUserManagementAppService userAppService;
     private final RoleManagementAppService roleAppService;
@@ -109,6 +134,15 @@ class AiplatformRbacEnforcementIntegrationTest {
 
     private String usernameWithReadPermission;
     private String usernameWithoutPermission;
+    private String usernameWithWorkspaceWrite;
+    private String usernameWithHibernateOnly;
+
+    // 在 mocked client 调用瞬间抓取 RequestContext——证明 operator 身份抵达出站调用点
+    // （供 OpenApiClient 带 X-User-Id/X-User-Name 出站头，issue #66 断言必带）
+    private final AtomicReference<Long> capturedOperatorId = new AtomicReference<>();
+    private final AtomicReference<String> capturedOperatorName = new AtomicReference<>();
+    private Long workspaceWriteUserId;
+    private String workspaceWriteUserNickname;
 
     @Autowired
     AiplatformRbacEnforcementIntegrationTest(
@@ -126,16 +160,21 @@ class AiplatformRbacEnforcementIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        capturedOperatorId.set(null);
+        capturedOperatorName.set(null);
+
         String suffix = uuidSuffix();
         usernameWithReadPermission = "aiplaread" + suffix;
         usernameWithoutPermission = "aiplanone" + suffix;
+        usernameWithWorkspaceWrite = "aiplawspr" + suffix;
+        usernameWithHibernateOnly = "aiplahibr" + suffix;
 
         Long readRoleId = roleAppService.create(
                 new CreateRoleCommand("AI平台读权限_" + suffix, "AIPLAREAD_" + suffix,
-                        "AI 平台账号档案 + 订单 + 项目读权限", 80, null));
+                        "AI 平台账号档案 + 订单 + 项目 + 沙箱读权限", 80, null));
         roleAppService.assignPermissions(readRoleId,
                 new AssignPermissionsCommand(List.of(READ_PERMISSION, ORDER_READ_PERMISSION,
-                        PROJECT_READ_PERMISSION)));
+                        PROJECT_READ_PERMISSION, WORKSPACE_READ_PERMISSION)));
 
         Long userWithReadId = userAppService.create(
                 new CreateAdminUserCommand(usernameWithReadPermission, PASSWORD, "只读运营_" + suffix, null, null, null));
@@ -143,6 +182,30 @@ class AiplatformRbacEnforcementIntegrationTest {
 
         userAppService.create(
                 new CreateAdminUserCommand(usernameWithoutPermission, PASSWORD, "无权限运营_" + suffix, null, null, null));
+
+        // 沙箱四写码专用运营（全四写码，无读码）——操作者透传断言用其 id/昵称
+        Long workspaceWriteRoleId = roleAppService.create(
+                new CreateRoleCommand("AI平台沙箱写操作_" + suffix, "AIPLAWSWR_" + suffix,
+                        "AI 平台沙箱四干预动作权限", 90, null));
+        roleAppService.assignPermissions(workspaceWriteRoleId, new AssignPermissionsCommand(List.of(
+                WORKSPACE_WAKE_PERMISSION, WORKSPACE_HIBERNATE_PERMISSION,
+                WORKSPACE_REBUILD_PERMISSION, WORKSPACE_SEAL_PERMISSION)));
+        workspaceWriteUserNickname = "沙箱治理运营_" + suffix;
+        workspaceWriteUserId = userAppService.create(
+                new CreateAdminUserCommand(usernameWithWorkspaceWrite, PASSWORD,
+                        workspaceWriteUserNickname, null, null, null));
+        userAppService.assignRoles(workspaceWriteUserId, new AssignRolesCommand(List.of(workspaceWriteRoleId)));
+
+        // 仅 hibernate 单写码——钉死四写码彼此独立（spec #62 最小授权）
+        Long hibernateOnlyRoleId = roleAppService.create(
+                new CreateRoleCommand("AI平台沙箱休眠_" + suffix, "AIPLAHIBR_" + suffix,
+                        "AI 平台沙箱仅强制休眠权限", 95, null));
+        roleAppService.assignPermissions(hibernateOnlyRoleId,
+                new AssignPermissionsCommand(List.of(WORKSPACE_HIBERNATE_PERMISSION)));
+        Long hibernateOnlyUserId = userAppService.create(
+                new CreateAdminUserCommand(usernameWithHibernateOnly, PASSWORD,
+                        "休眠专员_" + suffix, null, null, null));
+        userAppService.assignRoles(hibernateOnlyUserId, new AssignRolesCommand(List.of(hibernateOnlyRoleId)));
 
         // 200 用例：aiplatform 下游 mock，证明通路接通（不依赖真实 aiplatform 服务）
         when(aiplatformClient.getAccountProfile(eq(EXTERNAL_ID))).thenReturn(
@@ -201,6 +264,62 @@ class AiplatformRbacEnforcementIntegrationTest {
                         VERSION_HASH, "轮播图上线", "run-abc123", null,
                         LocalDateTime.of(2026, 9, 12, 11, 30, 0),
                         Map.of("runId", "run-abc123", "commitHash", VERSION_HASH)));
+        // 沙箱观测面 mock：漂移行（期望运行而实态无容器）+ 封存态详情（资源观测 + 项目引用）
+        when(aiplatformClient.listWorkspaces(any(), anyInt(), anyInt())).thenReturn(new PageResponse<>(List.of(
+                new AiplatformWorkspaceSummaryWireResponse(
+                        WORKSPACE_ID, "ws-" + WORKSPACE_ID,
+                        1, "开发", 2, "就绪", 1, "运行", 3, "无容器",
+                        LocalDateTime.of(2026, 9, 14, 22, 10, 0),
+                        2147483648L, null, null,
+                        new AiplatformWorkspaceSummaryWireResponse.ProjectRef(
+                                PROJECT_ID, "英语学习助手", false))), 17, 2, 20));
+        when(aiplatformClient.getWorkspace(eq(WORKSPACE_ID))).thenReturn(
+                workspaceActionReceiptWire(3, "封存", 3, "无容器",
+                        "workspace-archives/" + WORKSPACE_ID + ".tar.gz", 89128960L));
+        // 四干预动作 mock：回执详情 + 抓取 RequestContext（操作者透传契约证据——issue #66 断言必带）
+        Runnable capture = () -> {
+            capturedOperatorId.set(RequestContext.getUserId());
+            capturedOperatorName.set(RequestContext.getUserName());
+        };
+        doAnswer(inv -> {
+            capture.run();
+            return workspaceActionReceiptWire(1, "运行", 1, "运行中", null, null);
+        }).when(aiplatformClient).wakeWorkspace(eq(WORKSPACE_ID));
+        doAnswer(inv -> {
+            capture.run();
+            return workspaceActionReceiptWire(2, "休眠", 3, "无容器", null, null);
+        }).when(aiplatformClient).hibernateWorkspace(eq(WORKSPACE_ID));
+        doAnswer(inv -> {
+            capture.run();
+            return workspaceActionReceiptWire(1, "运行", 1, "运行中", null, null);
+        }).when(aiplatformClient).rebuildWorkspace(eq(WORKSPACE_ID));
+        doAnswer(inv -> {
+            capture.run();
+            return workspaceActionReceiptWire(3, "封存", 3, "无容器",
+                    "workspace-archives/" + WORKSPACE_ID + ".tar.gz", 89128960L);
+        }).when(aiplatformClient).sealWorkspace(eq(WORKSPACE_ID));
+    }
+
+    /**
+     * 四动作回执/详情共用的 wire 载荷工厂：按动作后的新事实（期望态/实态/封存包元数据）参数化，
+     * 其余字段固定（资源观测一行 + 项目引用——详情全量形状的代表面）。
+     */
+    private static AiplatformWorkspaceDetailWireResponse workspaceActionReceiptWire(
+            Integer desiredState, String desiredStateName,
+            Integer containerState, String containerStateName,
+            String archivePath, Long archiveSizeBytes) {
+        return new AiplatformWorkspaceDetailWireResponse(
+                WORKSPACE_ID, "ws-" + WORKSPACE_ID, "net-" + WORKSPACE_ID,
+                1, "开发", 2, "就绪", null,
+                desiredState, desiredStateName, containerState, containerStateName,
+                LocalDateTime.of(2026, 9, 16, 9, 0, 0), 1073741824L,
+                archivePath == null ? null : LocalDateTime.of(2026, 9, 16, 9, 0, 0),
+                archivePath, archiveSizeBytes,
+                LocalDateTime.of(2026, 9, 8, 10, 0, 0), LocalDateTime.of(2026, 9, 16, 9, 0, 0),
+                List.of(new AiplatformWorkspaceDetailWireResponse.MiddlewareResourceObservation(
+                        1, "mw-" + WORKSPACE_ID + "-pg",
+                        "postgresql://aiedu:secret@mw-" + WORKSPACE_ID + "-pg:5432/aiedu")),
+                new AiplatformWorkspaceSummaryWireResponse.ProjectRef(PROJECT_ID, "英语学习助手", false));
     }
 
     // ========== 账号档案（admin:aiplatform:account:read）· 权限三态 + 北向出口形状 ==========
@@ -455,6 +574,164 @@ class AiplatformRbacEnforcementIntegrationTest {
         assertThat(root.path("data").isNull()).isTrue();
     }
 
+    // ========== 沙箱观测（admin:aiplatform:workspace:read）· 权限三态 + 北向出口形状 ==========
+
+    @Test
+    @DisplayName("非超管且拥有 admin:aiplatform:workspace:read → 清单 200，期望态/实态漂移两列镜像 provider")
+    void given_nonSuperAdminWithWorkspaceRead_when_listWorkspaces_then_200AndDriftColumnsMirrorProvider()
+            throws Exception {
+        String token = login(usernameWithReadPermission);
+        // 漂移清单口径：desired=1（期望运行）+ actual=3（实态无容器）+ 分页 1-based 直传
+        ResponseEntity<String> response = getWithToken(
+                WORKSPACES_ENDPOINT + "?desired=1&actual=3&page=2&size=20", token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode data = objectMapper.readTree(response.getBody()).path("data");
+        // PageResponse 形状：items/total/page/size，回显 provider 回报值（page=2——1-based 原值）
+        assertThat(data.path("total").asLong()).isEqualTo(17L);
+        assertThat(data.path("page").asInt()).isEqualTo(2);
+        assertThat(data.path("size").asInt()).isEqualTo(20);
+        JsonNode row = data.path("items").get(0);
+        // 漂移行两列分示：期望运行（1/运行）而实态无容器（3/无容器）+ 四枚举 code+*Name 成对
+        assertThat(row.path("workspaceId").asText()).isEqualTo(WORKSPACE_ID);
+        assertThat(row.path("kind").asInt()).isEqualTo(1);
+        assertThat(row.path("kindName").asText()).isEqualTo("开发");
+        assertThat(row.path("statusName").asText()).isEqualTo("就绪");
+        assertThat(row.path("desiredState").asInt()).isEqualTo(1);
+        assertThat(row.path("desiredStateName").asText()).isEqualTo("运行");
+        assertThat(row.path("containerState").asInt()).isEqualTo(3);
+        assertThat(row.path("containerStateName").asText()).isEqualTo("无容器");
+        // 卷用量 Long（JSON string）+ 项目引用三字段（跳转项目详情的锚）
+        assertThat(row.path("volumeSizeBytes").asLong()).isEqualTo(2147483648L);
+        assertThat(row.path("project").path("projectId").asText()).isEqualTo(PROJECT_ID);
+        assertThat(row.path("project").path("name").asText()).isEqualTo("英语学习助手");
+        assertThat(row.path("project").path("archived").asBoolean()).isFalse();
+        // 未封存字段如实出 JSON null（全局 Jackson 含 null）
+        assertThat(row.path("sealedAt").isNull()).isTrue();
+        assertThat(row.path("archiveSizeBytes").isNull()).isTrue();
+    }
+
+    @Test
+    @DisplayName("非超管且拥有 workspace:read → 详情 200，资源观测清单 + 封存包元数据镜像 provider")
+    void given_nonSuperAdminWithWorkspaceRead_when_getWorkspaceDetail_then_200AndResourcesMirrored()
+            throws Exception {
+        String token = login(usernameWithReadPermission);
+        ResponseEntity<String> response = getWithToken(WORKSPACE_DETAIL_ENDPOINT, token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode data = objectMapper.readTree(response.getBody()).path("data");
+        assertThat(data.path("workspaceId").asText()).isEqualTo(WORKSPACE_ID);
+        assertThat(data.path("networkName").asText()).isEqualTo("net-" + WORKSPACE_ID);
+        assertThat(data.path("desiredState").asInt()).isEqualTo(3);
+        assertThat(data.path("desiredStateName").asText()).isEqualTo("封存");
+        // 封存包寻址键 + 包大小（Long JSON string）
+        assertThat(data.path("archivePath").asText()).isEqualTo("workspace-archives/" + WORKSPACE_ID + ".tar.gz");
+        assertThat(data.path("archiveSizeBytes").asLong()).isEqualTo(89128960L);
+        // 中间件资源清单：kind Integer code（provider 出口无 *Name——忠实镜像）+ 连接串原文
+        JsonNode pg = data.path("resources").get(0);
+        assertThat(pg.path("kind").asInt()).isEqualTo(1);
+        assertThat(pg.path("containerName").asText()).isEqualTo("mw-" + WORKSPACE_ID + "-pg");
+        assertThat(pg.path("internalUrl").asText()).startsWith("postgresql://");
+        assertThat(data.path("project").path("projectId").asText()).isEqualTo(PROJECT_ID);
+    }
+
+    @Test
+    @DisplayName("非超管且缺少权限 → 沙箱读两端点 403（独立权限码 workspace:read）")
+    void given_nonSuperAdminWithoutPermission_when_workspaceReadEndpoints_then_403() {
+        String token = login(usernameWithoutPermission);
+        assertThat(getWithToken(WORKSPACES_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(getWithToken(WORKSPACE_DETAIL_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("未登录访问沙箱观测/动作端点返回 401")
+    void given_unauthenticated_when_workspaceEndpoints_then_401() {
+        assertThat(getWithToken(WORKSPACES_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(getWithToken(WORKSPACE_DETAIL_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(postWithToken(WAKE_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    // ========== 沙箱四干预动作（四个独立写码）· 权限三态 + 操作者身份透传 ==========
+
+    @Test
+    @DisplayName("非超管且拥有四写码 → 唤醒/休眠/重建/封存 200，回执=详情 DTO 且 RequestContext 透传登录 operator")
+    void given_nonSuperAdminWithFourWriteCodes_when_fourActions_then_200_andRequestContextCarriesOperator()
+            throws Exception {
+        String token = login(usernameWithWorkspaceWrite);
+
+        // 唤醒：回执＝动作后的观测详情（期望运行 + 实态运行中的新事实）
+        ResponseEntity<String> wake = postWithToken(WAKE_ENDPOINT, token);
+        assertThat(wake.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode wakeData = objectMapper.readTree(wake.getBody()).path("data");
+        assertThat(wakeData.path("desiredState").asInt()).isEqualTo(1);
+        assertThat(wakeData.path("containerState").asInt()).isEqualTo(1);
+        assertThat(wakeData.path("containerStateName").asText()).isEqualTo("运行中");
+        assertThat(wakeData.path("resources").size()).isEqualTo(1);
+
+        // 休眠：期望休眠 + 实态无容器（删容器保卷）
+        ResponseEntity<String> hibernate = postWithToken(HIBERNATE_ENDPOINT, token);
+        assertThat(hibernate.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode hibernateData = objectMapper.readTree(hibernate.getBody()).path("data");
+        assertThat(hibernateData.path("desiredStateName").asText()).isEqualTo("休眠");
+        assertThat(hibernateData.path("containerStateName").asText()).isEqualTo("无容器");
+
+        // 重建：同唤醒收敛（期望运行 + 实态运行中）
+        ResponseEntity<String> rebuild = postWithToken(REBUILD_ENDPOINT, token);
+        assertThat(rebuild.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(objectMapper.readTree(rebuild.getBody()).path("data")
+                .path("containerStateName").asText()).isEqualTo("运行中");
+
+        // 封存：期望封存 + 封存包元数据（寻址键/大小）
+        ResponseEntity<String> seal = postWithToken(SEAL_ENDPOINT, token);
+        assertThat(seal.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode sealData = objectMapper.readTree(seal.getBody()).path("data");
+        assertThat(sealData.path("desiredStateName").asText()).isEqualTo("封存");
+        assertThat(sealData.path("archivePath").asText()).isEqualTo("workspace-archives/" + WORKSPACE_ID + ".tar.gz");
+
+        // 操作者身份不经 body——经 RequestContext 抵达出站调用点（OpenApiClient 据此带
+        // X-User-Id/X-User-Name 出站头，issue #66 断言必带）：== 登录沙箱治理运营的 id/昵称
+        assertThat(capturedOperatorId.get()).isEqualTo(workspaceWriteUserId);
+        assertThat(capturedOperatorName.get()).isEqualTo(workspaceWriteUserNickname);
+    }
+
+    @Test
+    @DisplayName("仅有 workspace:read（无写码）→ 四动作 403（read ≠ 四写码）")
+    void given_nonSuperAdminWithReadOnly_when_workspaceActions_then_403() {
+        String token = login(usernameWithReadPermission);
+        assertThat(postWithToken(WAKE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(HIBERNATE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(REBUILD_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(SEAL_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("仅有 workspace:hibernate 单写码 → 休眠 200、唤醒/重建/封存 403（四写码彼此独立，最小授权）")
+    void given_nonSuperAdminWithHibernateOnly_when_actions_then_hibernate200Others403() {
+        String token = login(usernameWithHibernateOnly);
+        assertThat(postWithToken(HIBERNATE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(postWithToken(WAKE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(REBUILD_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(SEAL_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("沙箱动作下游 WSP_015 → 北向 HTTP 409 + 信封 code=1015 + message 原文（不映射）")
+    void given_wsp015FromDownstream_when_hibernate_then_errorEnvelopePassedThrough() throws Exception {
+        when(aiplatformClient.hibernateWorkspace(eq(WORKSPACE_ID))).thenThrow(
+                AiplatformUpstreamException.from(new OpenApiClientException(409,
+                        "{\"code\":1015,\"message\":\"编码 run 进行中，沙箱动作被拒（先取消 run 或等收口）\",\"data\":null}")));
+
+        String token = login(usernameWithWorkspaceWrite);
+        ResponseEntity<String> response = postWithToken(HIBERNATE_ENDPOINT, token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        JsonNode root = objectMapper.readTree(response.getBody());
+        // 信封 code＝数字业务码 1015（WSP_015），而非映射后的 409——前端比对 aiplatform 业务码的分支活
+        assertThat(root.path("code").asInt()).isEqualTo(1015);
+        assertThat(root.path("message").asText()).isEqualTo("编码 run 进行中，沙箱动作被拒（先取消 run 或等收口）");
+        assertThat(root.path("data").isNull()).isTrue();
+    }
+
     // ========== 错误信封透传（忠实透传，不做映射） ==========
 
     @Test
@@ -495,6 +772,18 @@ class AiplatformRbacEnforcementIntegrationTest {
     }
 
     private ResponseEntity<String> getWithToken(String path, String token) {
+        return restTemplate.exchange(url(path), HttpMethod.GET,
+                new HttpEntity<>(jsonHeadersWithToken(token)), String.class);
+    }
+
+    /** 无请求体 POST（沙箱四干预动作同形——provider 端只读路径参数，body 为空）。 */
+    private ResponseEntity<String> postWithToken(String path, String token) {
+        return restTemplate.exchange(url(path), HttpMethod.POST,
+                new HttpEntity<>(null, jsonHeadersWithToken(token)), String.class);
+    }
+
+    /** JSON 请求头 + Sa-Token 头（前缀按框架配置拼装；token null 则只带内容类型）。 */
+    private HttpHeaders jsonHeadersWithToken(String token) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         if (token != null) {
@@ -504,7 +793,7 @@ class AiplatformRbacEnforcementIntegrationTest {
                     : cfg.getTokenPrefix() + " " + token;
             headers.set(cfg.getTokenName(), value);
         }
-        return restTemplate.exchange(url(path), HttpMethod.GET, new HttpEntity<>(headers), String.class);
+        return headers;
     }
 
     /** 二进制端点取回（byte[] body——不把 gzip 字节流经 String 解码，透传断言的前提）。 */

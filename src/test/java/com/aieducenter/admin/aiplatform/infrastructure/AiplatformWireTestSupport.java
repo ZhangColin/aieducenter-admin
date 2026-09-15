@@ -3,6 +3,7 @@ package com.aieducenter.admin.aiplatform.infrastructure;
 import com.aieducenter.admin.aiplatform.application.AiplatformAccountAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformOrderAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformProjectAppService;
+import com.aieducenter.admin.aiplatform.application.AiplatformWorkspaceAppService;
 import com.cartisan.openapi.client.BinaryResponse;
 import com.cartisan.openapi.client.OpenApiClient;
 import com.cartisan.openapi.client.OpenApiClientException;
@@ -22,8 +23,8 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
  * （{@code FAIL_ON_UNKNOWN_PROPERTIES=false} + {@code JavaTimeModule}）。
  *
  * <p>供 {@code AiplatformAccountClientContractTest} / {@code AiplatformOrderClientContractTest} /
- * {@code AiplatformProjectClientContractTest} 复用；后续沙箱/成本/单价表/知识素材各域
- * {@code *ContractTest} 沿用本脚手架扩展（各域 AppService 重载）。</p>
+ * {@code AiplatformProjectClientContractTest} / {@code AiplatformWorkspaceClientContractTest} 复用；
+ * 后续成本/单价表/知识素材各域 {@code *ContractTest} 沿用本脚手架扩展（各域 AppService 重载）。</p>
  *
  * @since 0.1.0
  */
@@ -157,6 +158,60 @@ final class AiplatformWireTestSupport {
             }
         };
         return new AiplatformProjectAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
+    }
+
+    /**
+     * 沙箱域版 {@link #accountAppServiceWithStubTransport}——读口（清单/详情）走 {@code get}、
+     * 四干预动作（唤醒/休眠/重建/封存）走 {@code post}（无请求体），均按真实 {@link TypeReference}
+     * 反序列化；post 的 wire URL 记入 wireUrlSink 后复用同一 sink（读写同域断言各自调用）。
+     */
+    static AiplatformWorkspaceAppService workspaceAppServiceWithStubTransport(
+            String envelopeBody, String[] wireUrlSink) {
+        ObjectMapper mapper = bootDefaultMapper();
+        OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, mapper) {
+            @Override
+            public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                try {
+                    return mapper.readValue(envelopeBody, typeReference);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            public <T> T post(String url, Object body, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                try {
+                    return mapper.readValue(envelopeBody, typeReference);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        };
+        return new AiplatformWorkspaceAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
+    }
+
+    /**
+     * 沙箱域版 {@link #accountAppServiceWithErrorTransport}——{@code get} 与 {@code post} 都始终抛
+     * {@link OpenApiClientException}（框架对 ≥400 的行为复刻：四动作的错误信封同读口）。
+     */
+    static AiplatformWorkspaceAppService workspaceAppServiceWithErrorTransport(
+            int statusCode, String errorBody, String[] wireUrlSink) {
+        OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, bootDefaultMapper()) {
+            @Override
+            public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                throw new OpenApiClientException(statusCode, errorBody);
+            }
+
+            @Override
+            public <T> T post(String url, Object body, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                throw new OpenApiClientException(statusCode, errorBody);
+            }
+        };
+        return new AiplatformWorkspaceAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
     }
 
     private static ObjectMapper bootDefaultMapper() {
