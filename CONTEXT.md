@@ -138,6 +138,21 @@ _Avoid_: 按 spec 文档（而非服务源码）撰写 wire；给北向加 provi
 
 ID：directory=80；leaves=100/110/120/130/140（支付/退款详情不种）。route_name/component 为提案，admin-web UI issue 对齐。「通道交互日志」= payment `PaymentLog`（与银行/通道网关的机机交互留痕）；「订单操作记录」= payment `OperationLog`（行为者对订单的操作留痕）。（2026-08-11 issue #37 grill 定稿）
 
+**AI 平台菜单 (AI Platform Menu)**:
+新增一级目录「AI 平台」（`directory`, sort_order=3——与支付管理同序、id 82>80 兜底排其后，即应用管理之后、账号管理/系统管理之前），其下六域二级菜单（订单/项目/沙箱/成本/单价表/知识素材，sort 1-6）。**账号读口不种页面**（按 externalId 极简档案，嵌订单/项目详情抽屉用；权限码 `admin:aiplatform:account:read` 照常独立——有码无页）；订单/项目/沙箱/素材详情同为抽屉、不种菜单（见上「详情页 = 弹窗/抽屉优先」）。V15 迁移种子，`ON CONFLICT (id) DO NOTHING`，**不写种子快照测试**（V12 已删，脆性高；迁移链正确性由 `RoleAssignmentFlywaySchemaIntegrationTest` 兜底；种子可见性行为由 `AiplatformMenuSeedVisibilityIntegrationTest` 在独立 Flyway schema 以 HTTP 外部行为钉住——issue #72 T10），SUPER_ADMIN 经 bypass 见全树（无 role-menu 种子行）。
+
+| 菜单 | route_name | route_path | component | icon | i18n_key | menu_type | sort_order | parent_id |
+|---|---|---|---|---|---|---|---|---|
+| AI 平台 | `aiplatform` | `/aiplatform` | `layout.base` | `carbon:machine-learning-model` | `route.aiplatform` | directory(1) | 3 | NULL |
+| 订单管理 | `aiplatform_order` | `/aiplatform/order` | `view.aiplatform_order` | `carbon:shopping-cart` | `route.aiplatform_order` | menu(2) | 1 | 82 |
+| 项目管理 | `aiplatform_project` | `/aiplatform/project` | `view.aiplatform_project` | `carbon:catalog` | `route.aiplatform_project` | menu(2) | 2 | 82 |
+| 沙箱管理 | `aiplatform_workspace` | `/aiplatform/workspace` | `view.aiplatform_workspace` | `carbon:virtual-machine` | `route.aiplatform_workspace` | menu(2) | 3 | 82 |
+| 成本中心 | `aiplatform_cost` | `/aiplatform/cost` | `view.aiplatform_cost` | `carbon:analytics` | `route.aiplatform_cost` | menu(2) | 4 | 82 |
+| 单价表 | `aiplatform_price_entry` | `/aiplatform/price-entry` | `view.aiplatform_price_entry` | `carbon:currency` | `route.aiplatform_price_entry` | menu(2) | 5 | 82 |
+| 知识素材 | `aiplatform_material` | `/aiplatform/material` | `view.aiplatform_material` | `carbon:knowledge-base` | `route.aiplatform_material` | menu(2) | 6 | 82 |
+
+ID：directory=82；leaves=160/170/180/190/200/210（账号读口不种）。route_name/component 为提案，admin-web UI issue 对齐。（2026-09-16 issue #72 落地，spec #62 定稿）
+
 ## 稳定不变式（来自平台架构，本项目务必遵守）
 
 - Operator 归本应用自有；不做 Operator SSO。
