@@ -156,7 +156,7 @@ Single-context — root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 
 
 ## 平台架构上下文
-本应用（admin）是统一后台后端（应用层·平台自带应用），企业内部聚合入口。继续在现有项目上开发。完整架构与决策在兄弟仓库 ../aieducenter-architecture/（起步包 docs/starters/admin.md）。
+本应用（admin）是统一后台后端（应用层·平台自带应用），企业内部聚合入口。继续在现有项目上开发。
 
 稳定不变式（务必遵守）：
 - Operator（运营人员认证 + 角色/部门/岗位/RBAC）归本应用自有——operator 是后台内部员工、非跨应用共享身份，凭据留本应用（用 cartisan-security），不进 IdP/用户域。
@@ -165,5 +165,4 @@ Single-context — root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 - 经 cartisan-openapi 签名调用各能力域；前端不直连各域（经本 BFF 聚合）。
 - 现有 RBAC（AdminUser/Role/Menu + sys_admin_*）已建、继续用。架构仓原列的三个已知 bug **均已修**（行为由 `RbacEnforcementIntegrationTest` / `BreakGlassAccountProtectionIntegrationTest` 钉住）：① Sa-Token 统一用默认 loginType `"login"`、`StpInterface` 无条件返回 admin 权限（[ADR-0001](docs/adr/0001-admin-uses-default-sa-token-login-type.md)）；② 超管 bypass 走框架 `AuthorizationBypassResolver` SPI（app 注入 `isSuperAdmin`，[ADR-0002](docs/adr/0002-super-admin-bypass-is-framework-gap.md)）；③ 内置 admin 按保留 ID=1 不可删/不可禁（破窗守卫，V4 已 drop `system` 列，[ADR-0003](docs/adr/0003-break-glass-reserved-id.md)）。
 
-深度（财务上下文、各域聚合流转）：读架构仓库 architecture.md §5.3、§6.15、CONTEXT.md、integration-flows.md、map.md。
 本项目自己的设计演进 → 本项目的 CONTEXT.md + docs/adr/。
