@@ -11,7 +11,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.test.annotation.DirtiesContext;
 
 import com.aieducenter.admin.application.AdminUserManagementAppService;
@@ -211,7 +210,7 @@ class PhysicalDeleteIntegrationTest {
 
         PageResponse<MenuResponse> page = menuAppService.findAll(
                 new MenuQuery(prefix, null, null, null),
-                PageRequest.of(0, 10));
+                new com.cartisan.web.request.Pagination(1, 10, null));
 
         assertThat(page.total())
                 .as("扁平分页不含物理删除行，total=2（父 + 独立）")

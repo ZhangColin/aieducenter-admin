@@ -10,8 +10,8 @@ import com.aieducenter.admin.account.infrastructure.AccountClient;
 import com.cartisan.core.exception.BaseCodeMessage;
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.openapi.client.OpenApiClientException;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
-import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 /**
@@ -37,12 +37,11 @@ public class AccountManagementAppService {
     /**
      * 分页搜索平台账号（透传 identity）。
      *
-     * <p>分页形状对齐 admin 现有列表端点（与 {@code /apps}、{@code /payments} 同形），平台分页协议
-     * 「请求 0-based / 响应 1-based」（ADR-0010）：{@code Pageable} 0-based 页码 +1 传入客户端（1-based
-     * 中间表示，client 上 wire 前 -1 还原 0-based）；identity 回显的 {@code page} 本就是 1-based
-     * （identity #70 契约：回显「页码+1」），北向响应<strong>原样透传，不得再 +1</strong>。</p>
+     * <p>分页走框架 {@link Pagination} 契约（全链 1-based，ADR-0012）：北向 {@code page} 1-based
+     * 与 wire 同值直传（无 ±1），响应透传 identity 回显的 {@code total/page/size}（identity #78 起
+     * 回显==请求页码，北向透传不得再 +1）。</p>
      */
-    public PageResponse<AccountSummaryResponse> list(AccountQuery query, Pageable pageable) {
+    public PageResponse<AccountSummaryResponse> list(AccountQuery query, Pagination pagination) {
         // query（北向 controller 绑定）→ wire（出站载荷），与 PaymentManagementAppService.list 把 query 映射为 wire 同位
         var filter = new AccountSearchWireRequest(
                 query.email(), query.phone(), query.userId(),
@@ -50,10 +49,7 @@ public class AccountManagementAppService {
                 query.createdFrom(), query.createdTo());
         PageResponse<AccountWireResponse> page;
         try {
-            page = accountClient.listAccounts(
-                    filter,
-                    pageable.getPageNumber() + 1,   // Spring Pageable 0-based → 客户端 1-based
-                    pageable.getPageSize());
+            page = accountClient.listAccounts(filter, pagination.page(), pagination.size());
         } catch (OpenApiClientException e) {
             throw translateAccountError(e);
         }
@@ -62,7 +58,7 @@ public class AccountManagementAppService {
                 .map(AccountManagementAppService::toSummary)
                 .toList();
 
-        // page 为 identity 1-based 回显，北向透传（不得再 +1——#56 验证：响应已是 1-based，再加即 2-based 回归）
+        // page 为 identity 回显（==请求页码），北向透传（不得再 +1——响应已是 1-based，再加即 2-based 回归）
         return new PageResponse<>(items, page.total(), page.page(), page.size());
     }
 

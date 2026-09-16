@@ -33,6 +33,14 @@ final class PaymentWireTestSupport {
      * {@link TypeReference} 反序列化——真实反序列化路径完整保留。
      */
     static PaymentManagementAppService appServiceWithStubTransport(String envelopeBody) {
+        return appServiceWithStubTransport(envelopeBody, new String[1]);
+    }
+
+    /**
+     * 同 {@link #appServiceWithStubTransport(String)}，另捕获真实出站 URL 到 {@code wireUrlSink}——
+     * 供断言 wire {@code page} 与北向同值直传（全链 1-based，ADR-0012，无 ±1）打到真实出站 seam。
+     */
+    static PaymentManagementAppService appServiceWithStubTransport(String envelopeBody, String[] wireUrlSink) {
         ObjectMapper mapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
@@ -41,6 +49,7 @@ final class PaymentWireTestSupport {
         OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, mapper) {
             @Override
             public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;   // 捕获 wire URL——断言 page 直传（1-based，无 ±1）
                 try {
                     return mapper.readValue(envelopeBody, typeReference);
                 } catch (Exception e) {

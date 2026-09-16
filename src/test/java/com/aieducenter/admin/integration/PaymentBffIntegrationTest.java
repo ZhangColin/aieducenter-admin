@@ -18,7 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.data.domain.PageRequest;
+import com.cartisan.web.request.Pagination;
 
 import com.aieducenter.admin.payment.application.PaymentManagementAppService;
 import com.aieducenter.admin.payment.application.dto.command.RefundAuditCommand;
@@ -108,16 +108,16 @@ class PaymentBffIntegrationTest {
                         new PaymentOrderWireResponse("PAY-2", "BIZ-2", "course-svc", 1, "待支付",
                                 19900L, 10, "支付宝", 5, "APP", 1, "工商银行",
                                 null, now.minusMinutes(1))
-                ), 28L, 0, 20));
+                ), 28L, 1, 20));
 
         var page = paymentAppService.list(
                 new PaymentOrderQuery(null, null, null, null, null, null, null,
                         null, null, null, null, null, null),
-                PageRequest.of(0, 20));
+                new Pagination(1, 20, null));
 
         // 分页契约：total/page/size 沿用 payment 回显
         assertThat(page.total()).isEqualTo(28L);
-        assertThat(page.page()).isEqualTo(0);
+        assertThat(page.page()).isEqualTo(1);
         assertThat(page.size()).isEqualTo(20);
         // DTO 映射：wire → response 逐字段
         assertThat(page.items()).hasSize(2);
@@ -133,12 +133,12 @@ class PaymentBffIntegrationTest {
         assertThat(second.paidAt()).isNull();
     }
 
-    // ========== list · 筛选映射 + 页码换算 ==========
+    // ========== list · 筛选映射 + 分页直传 ==========
 
     @Test
-    void given_filtersAndPageable_when_list_then_passQueryAndConvertPage() {
+    void given_filtersAndPagination_when_list_then_passQueryAndPageDirectly() {
         when(paymentClient.listPayments(any(PaymentOrderListWireRequest.class), anyInt(), anyInt()))
-                .thenReturn(new PageResponse<>(List.of(), 0L, 2, 20));
+                .thenReturn(new PageResponse<>(List.of(), 0L, 3, 20));
 
         PaymentOrderQuery query = new PaymentOrderQuery(
                 "PAY-1", "BIZ-1", "course-svc",
@@ -147,9 +147,9 @@ class PaymentBffIntegrationTest {
                 LocalDateTime.of(2026, 8, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59),
                 null, null);
 
-        paymentAppService.list(query, PageRequest.of(2, 20));
+        paymentAppService.list(query, new Pagination(3, 20, null));
 
-        // query → wire 映射：筛选原样透传；Spring Pageable 0-based(page=2) → 客户端 1-based(page=3)
+        // query → wire 映射：筛选原样透传；北向 page=3 1-based → client 入参同值 3（wire 直传，无 ±1）
         PaymentOrderListWireRequest expectedWire = new PaymentOrderListWireRequest(
                 "PAY-1", "BIZ-1", "course-svc",
                 List.of(2, 1), 9, 4, 1,
@@ -170,7 +170,7 @@ class PaymentBffIntegrationTest {
         assertThatThrownBy(() -> paymentAppService.list(
                 new PaymentOrderQuery(null, null, null, null, null, null, null,
                         null, null, null, null, null, null),
-                PageRequest.of(0, 20)))
+                new Pagination(1, 20, null)))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
     }
@@ -183,7 +183,7 @@ class PaymentBffIntegrationTest {
         assertThatThrownBy(() -> paymentAppService.list(
                 new PaymentOrderQuery(null, null, null, null, null, null, null,
                         null, null, null, null, null, null),
-                PageRequest.of(0, 20)))
+                new Pagination(1, 20, null)))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.CONFLICT);
     }
@@ -199,16 +199,16 @@ class PaymentBffIntegrationTest {
                                 9900L, 2, "人工审核", "alice", now.minusMinutes(10)),
                         new RefundOrderWireResponse("RF-2", "PAY-2", "BIZ-2", "course-svc", 1, "待审核",
                                 19900L, 1, "免审", null, now.minusMinutes(1))
-                ), 9L, 0, 20));
+                ), 9L, 1, 20));
 
         var page = paymentAppService.listRefunds(
                 new RefundOrderQuery(null, null, null, null, null, null, null,
                         null, null, null, null),
-                PageRequest.of(0, 20));
+                new Pagination(1, 20, null));
 
         // 分页契约：total/page/size 沿用 payment 回显
         assertThat(page.total()).isEqualTo(9L);
-        assertThat(page.page()).isEqualTo(0);
+        assertThat(page.page()).isEqualTo(1);
         assertThat(page.size()).isEqualTo(20);
         // DTO 映射：wire → response 逐字段（金额 Long 分透传 ADR-0011；无 auditorId/auditedAt——payment ghost）
         assertThat(page.items()).hasSize(2);
@@ -227,12 +227,12 @@ class PaymentBffIntegrationTest {
         assertThat(second.auditorName()).isNull();
     }
 
-    // ========== listRefunds · 筛选映射 + 页码换算 ==========
+    // ========== listRefunds · 筛选映射 + 分页直传 ==========
 
     @Test
-    void given_refundFiltersAndPageable_when_listRefunds_then_passQueryAndConvertPage() {
+    void given_refundFiltersAndPagination_when_listRefunds_then_passQueryAndPageDirectly() {
         when(paymentClient.listRefunds(any(RefundOrderListWireRequest.class), anyInt(), anyInt()))
-                .thenReturn(new PageResponse<>(List.of(), 0L, 2, 20));
+                .thenReturn(new PageResponse<>(List.of(), 0L, 3, 20));
 
         RefundOrderQuery query = new RefundOrderQuery(
                 "RF-1", "PAY-1", "BIZ-1", "course-svc",
@@ -240,10 +240,10 @@ class PaymentBffIntegrationTest {
                 1000L, 50000L,
                 LocalDateTime.of(2026, 8, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
 
-        paymentAppService.listRefunds(query, PageRequest.of(2, 20));
+        paymentAppService.listRefunds(query, new Pagination(3, 20, null));
 
         // query → wire 映射：筛选原样透传（auditorId 保留——payment 支持按审核人筛选；金额区间 Long 分）；
-        // Spring Pageable 0-based(page=2) → 客户端 1-based(page=3)
+        // 北向 page=3 1-based → client 入参同值 3（wire 直传，无 ±1）
         RefundOrderListWireRequest expectedWire = new RefundOrderListWireRequest(
                 "RF-1", "PAY-1", "BIZ-1", "course-svc",
                 List.of(1, 3), 2, 1001L,
@@ -262,7 +262,7 @@ class PaymentBffIntegrationTest {
         assertThatThrownBy(() -> paymentAppService.listRefunds(
                 new RefundOrderQuery(null, null, null, null, null, null, null,
                         null, null, null, null),
-                PageRequest.of(0, 20)))
+                new Pagination(1, 20, null)))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
     }
@@ -275,7 +275,7 @@ class PaymentBffIntegrationTest {
         assertThatThrownBy(() -> paymentAppService.listRefunds(
                 new RefundOrderQuery(null, null, null, null, null, null, null,
                         null, null, null, null),
-                PageRequest.of(0, 20)))
+                new Pagination(1, 20, null)))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.NOT_FOUND);
     }
@@ -291,15 +291,15 @@ class PaymentBffIntegrationTest {
                                 200, "000000", "success", 120L, true, null, now.minusMinutes(5)),
                         new PaymentLogWireResponse(7002L, null, "RF-1", "REFUND_QUERY", "ICBC", "ICBC_REFUNDQ",
                                 200, "9999", "bank error", 90L, false, "timeout", now.minusMinutes(1))
-                ), 17L, 0, 20));
+                ), 17L, 1, 20));
 
         var page = paymentAppService.listPaymentLogs(
                 new PaymentLogQuery(null, null, null, null, null, null, null, null),
-                PageRequest.of(0, 20));
+                new Pagination(1, 20, null));
 
         // 分页契约：total/page/size 沿用 payment 回显
         assertThat(page.total()).isEqualTo(17L);
-        assertThat(page.page()).isEqualTo(0);
+        assertThat(page.page()).isEqualTo(1);
         assertThat(page.size()).isEqualTo(20);
         // DTO 映射：wire → response 逐字段（含网关诊断字段组）
         assertThat(page.items()).hasSize(2);
@@ -326,12 +326,12 @@ class PaymentBffIntegrationTest {
         assertThat(second.errorMessage()).isEqualTo("timeout");
     }
 
-    // ========== listPaymentLogs · 筛选映射（含 logType 多选）+ 页码换算 ==========
+    // ========== listPaymentLogs · 筛选映射（含 logType 多选）+ 分页直传 ==========
 
     @Test
-    void given_paymentLogFiltersAndPageable_when_listPaymentLogs_then_passQueryAndConvertPage() {
+    void given_paymentLogFiltersAndPagination_when_listPaymentLogs_then_passQueryAndPageDirectly() {
         when(paymentClient.listPaymentLogs(any(PaymentLogListWireRequest.class), anyInt(), anyInt()))
-                .thenReturn(new PageResponse<>(List.of(), 0L, 2, 20));
+                .thenReturn(new PageResponse<>(List.of(), 0L, 3, 20));
 
         // logTypes 多选 + bankInterface/success/returnCode/createdAt 区间
         PaymentLogQuery query = new PaymentLogQuery(
@@ -339,9 +339,9 @@ class PaymentBffIntegrationTest {
                 "ICBC_PAY", true, "000000",
                 LocalDateTime.of(2026, 8, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
 
-        paymentAppService.listPaymentLogs(query, PageRequest.of(2, 20));
+        paymentAppService.listPaymentLogs(query, new Pagination(3, 20, null));
 
-        // query → wire 映射：筛选原样透传（含多选 logTypes）；Spring Pageable 0-based(page=2) → 客户端 1-based(page=3)
+        // query → wire 映射：筛选原样透传（含多选 logTypes）；北向 page=3 → client 同值 3（wire 直传，无 ±1）
         PaymentLogListWireRequest expectedWire = new PaymentLogListWireRequest(
                 "PAY-1", "RF-1", List.of("PAYMENT_REQUEST", "PAYMENT_QUERY"),
                 "ICBC_PAY", true, "000000",
@@ -358,7 +358,7 @@ class PaymentBffIntegrationTest {
 
         assertThatThrownBy(() -> paymentAppService.listPaymentLogs(
                 new PaymentLogQuery(null, null, null, null, null, null, null, null),
-                PageRequest.of(0, 20)))
+                new Pagination(1, 20, null)))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
     }
@@ -371,7 +371,7 @@ class PaymentBffIntegrationTest {
 
         assertThatThrownBy(() -> paymentAppService.listPaymentLogs(
                 new PaymentLogQuery(null, null, null, null, null, null, null, null),
-                PageRequest.of(0, 20)))
+                new Pagination(1, 20, null)))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.BAD_REQUEST);
     }
@@ -387,15 +387,15 @@ class PaymentBffIntegrationTest {
                                 1001L, "alice", "admin-console", "SUCCESS", "manual resend", now.minusMinutes(3)),
                         new OperationLogWireResponse(8002L, 2, "退款订单", "RF-1", 2, "审核拒绝",
                                 null, null, "course-svc", "FAILED", null, now.minusMinutes(1))
-                ), 4L, 0, 20));
+                ), 4L, 1, 20));
 
         var page = paymentAppService.listOperationLogs(
                 new OperationLogQuery(null, null, null, null, null, null, null, null),
-                PageRequest.of(0, 20));
+                new Pagination(1, 20, null));
 
         // 分页契约：total/page/size 沿用 payment 回显
         assertThat(page.total()).isEqualTo(4L);
-        assertThat(page.page()).isEqualTo(0);
+        assertThat(page.page()).isEqualTo(1);
         assertThat(page.size()).isEqualTo(20);
         // DTO 映射：wire → response 逐字段（含操作者/结果字段组）
         assertThat(page.items()).hasSize(2);
@@ -421,20 +421,20 @@ class PaymentBffIntegrationTest {
         assertThat(second.remark()).isNull();
     }
 
-    // ========== listOperationLogs · 筛选映射 + 页码换算 ==========
+    // ========== listOperationLogs · 筛选映射 + 分页直传 ==========
 
     @Test
-    void given_operationLogFiltersAndPageable_when_listOperationLogs_then_passQueryAndConvertPage() {
+    void given_operationLogFiltersAndPagination_when_listOperationLogs_then_passQueryAndPageDirectly() {
         when(paymentClient.listOperationLogs(any(OperationLogListWireRequest.class), anyInt(), anyInt()))
-                .thenReturn(new PageResponse<>(List.of(), 0L, 2, 20));
+                .thenReturn(new PageResponse<>(List.of(), 0L, 3, 20));
 
         OperationLogQuery query = new OperationLogQuery(
                 1, "PAY-1", 3, 1001L, "admin-console", "SUCCESS",
                 LocalDateTime.of(2026, 8, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
 
-        paymentAppService.listOperationLogs(query, PageRequest.of(2, 20));
+        paymentAppService.listOperationLogs(query, new Pagination(3, 20, null));
 
-        // query → wire 映射：筛选原样透传；Spring Pageable 0-based(page=2) → 客户端 1-based(page=3)
+        // query → wire 映射：筛选原样透传；北向 page=3 1-based → client 入参同值 3（wire 直传，无 ±1）
         OperationLogListWireRequest expectedWire = new OperationLogListWireRequest(
                 1, "PAY-1", 3, 1001L, "admin-console", "SUCCESS",
                 LocalDateTime.of(2026, 8, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
@@ -450,7 +450,7 @@ class PaymentBffIntegrationTest {
 
         assertThatThrownBy(() -> paymentAppService.listOperationLogs(
                 new OperationLogQuery(null, null, null, null, null, null, null, null),
-                PageRequest.of(0, 20)))
+                new Pagination(1, 20, null)))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
     }
@@ -463,7 +463,7 @@ class PaymentBffIntegrationTest {
 
         assertThatThrownBy(() -> paymentAppService.listOperationLogs(
                 new OperationLogQuery(null, null, null, null, null, null, null, null),
-                PageRequest.of(0, 20)))
+                new Pagination(1, 20, null)))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.BAD_REQUEST);
     }

@@ -60,10 +60,14 @@ public class AppRegistryClient {
 
     /**
      * 分页查询应用列表。
+     *
+     * <p>分页 1-based 与北向同值直传（app-registry #24 已迁框架 {@code Pagination}；全链无 ±1，见 ADR-0012）。
+     * 不传 sort 时 app-registry 默认 createdAt 降序（最新登记在前）。</p>
      */
     public PageResponse<AppRegistryAppResponse> listApps(String keyword, Integer status, int page, int size) {
+        // wire page 与北向同值直传（全链 1-based，ADR-0012），无 ±1
         StringBuilder url = new StringBuilder(baseUrl)
-                .append("/api/app-registry/apps?page=").append(page - 1)  // 入参是 1-based（AppService 传入），app-registry 的 Spring Pageable 用 0-based
+                .append("/api/app-registry/apps?page=").append(page)
                 .append("&size=").append(size);
         if (keyword != null && !keyword.isEmpty()) {
             url.append("&keyword=").append(encode(keyword));

@@ -1,5 +1,10 @@
 # 平台分页协议：请求 0-based / 响应 1-based（BFF 出站 +1/-1 抵消、回显透传）
 
+> **⚠️ SUPERSEDED**（2026-09-16，issue #73）：本 ADR 已被 [ADR-0012](0012-pagination-full-chain-1-based.md)
+> 取代——平台拍板**全链 1-based**（请求与响应同语义），±1 换算唯一收 cartisan-boot
+> （`Pagination.toPageRequest()` / `PageResponse.of()`）。本文「请求 0-based」半边不再有效；
+> 「mock 须钉真实回显契约」「BFF 回显透传不再 +1」等教训由 ADR-0012 继承。
+
 **决策**：平台统一分页协议——凡 `PageResponse{items,total,page,size}` 外壳：**请求 `page` 0-based**（Spring `Pageable` 语义），**响应 `page` 1-based**（回显「页码+1」）。北向（前端 ↔ admin BFF）与能力域服务（identity / payment 等）同此约定。admin BFF 出站换算链：AppService 把 `Pageable` 页码 **+1** 作 1-based 中间表示传给 `*Client`，`*Client` 上 wire 前 **-1** 还原 0-based（两步在 wire 上抵消），能力域回显 1-based 后 BFF **原样透传**（不得再 +1）。
 
 **为什么**：三个域共用同一 `PageResponse` 外壳却若各持一种 `page` 语义，前端每接一个域都要重猜一次（admin-web #50 对接 account 时即因此踩坑、写出错向的 `accountTransform` +1 适配）。反向统一（全平台改「响应 0-based」）要动 system-manage + payment 全部端点与测试，代价不可接受——既有主流即「请求 0-based / 响应 1-based」，正向归一成本最低。

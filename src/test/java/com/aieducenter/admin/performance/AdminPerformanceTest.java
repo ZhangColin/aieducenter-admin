@@ -16,8 +16,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.test.context.ActiveProfiles;
 
 import com.aieducenter.admin.application.AdminUserManagementAppService;
@@ -151,12 +149,12 @@ class AdminPerformanceTest {
     @Test
     void given_1000_users_when_query_pagination_then_should_complete_within_500ms() {
         // Given
-        Pageable pageable = PageRequest.of(0, 20);
+        var pagination = new com.cartisan.web.request.Pagination(1, 20, null);
         AdminUserQuery query = new AdminUserQuery(null, null, null, null, null);
 
         // When
         long startTime = System.currentTimeMillis();
-        var pageResponse = adminUserManagementAppService.findAll(query, pageable);
+        var pageResponse = adminUserManagementAppService.findAll(query, pagination);
         long endTime = System.currentTimeMillis();
         long duration = endTime - startTime;
 
@@ -244,7 +242,7 @@ class AdminPerformanceTest {
     @Test
     void given_1000_users_when_query_pagination_10_times_then_average_should_be_within_300ms() {
         // Given
-        Pageable pageable = PageRequest.of(0, 20);
+        var pagination = new com.cartisan.web.request.Pagination(1, 20, null);
         AdminUserQuery query = new AdminUserQuery(null, null, null, null, null);
         int iterations = 10;
         long totalDuration = 0;
@@ -252,7 +250,7 @@ class AdminPerformanceTest {
         // When: Execute pagination 10 times
         for (int i = 0; i < iterations; i++) {
             long startTime = System.currentTimeMillis();
-            adminUserManagementAppService.findAll(query, pageable);
+            adminUserManagementAppService.findAll(query, pagination);
             long endTime = System.currentTimeMillis();
             totalDuration += (endTime - startTime);
         }

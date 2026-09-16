@@ -45,8 +45,8 @@ import com.aieducenter.admin.payment.infrastructure.PaymentClient;
 import com.cartisan.core.exception.BaseCodeMessage;
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.openapi.client.OpenApiClientException;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
-import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -74,10 +74,10 @@ public class PaymentManagementAppService {
     /**
      * 分页查询支付订单列表（透传 payment）。
      *
-     * <p>分页形状对齐 admin 现有列表端点（与 {@code /apps} 同形）：{@code Pageable} 0-based 页码 +1
-     * 传入客户端（客户端约定 1-based），响应沿用 payment 回显的 {@code total/page/size}。</p>
+     * <p>分页走框架 {@link Pagination} 契约（全链 1-based，ADR-0012）：北向 {@code page} 1-based
+     * 与 wire 同值直传（无 ±1），响应透传 payment 回显的 {@code total/page/size}（回显==请求页码）。</p>
      */
-    public PageResponse<PaymentOrderSummaryResponse> list(PaymentOrderQuery query, Pageable pageable) {
+    public PageResponse<PaymentOrderSummaryResponse> list(PaymentOrderQuery query, Pagination pagination) {
         // query（北向 controller 绑定）→ wire（出站载荷），与 AppManagementAppService 把 query 拆成 wire 参数同位
         var filter = new PaymentOrderListWireRequest(
                 query.paymentOrderNo(), query.businessOrderNo(), query.businessSystemName(),
@@ -86,10 +86,7 @@ public class PaymentManagementAppService {
                 query.createdAtFrom(), query.createdAtTo(), query.paidAtFrom(), query.paidAtTo());
         PageResponse<PaymentOrderWireResponse> page;
         try {
-            page = paymentClient.listPayments(
-                    filter,
-                    pageable.getPageNumber() + 1,   // Spring Pageable 0-based → 客户端 1-based
-                    pageable.getPageSize());
+            page = paymentClient.listPayments(filter, pagination.page(), pagination.size());
         } catch (OpenApiClientException e) {
             throw translatePaymentError(e);
         }
@@ -114,10 +111,10 @@ public class PaymentManagementAppService {
     /**
      * 分页查询退款订单列表（透传 payment）。
      *
-     * <p>分页形状对齐 admin 现有列表端点（与 {@code /apps}、{@code /payments} 同形）：{@code Pageable}
-     * 0-based 页码 +1 传入客户端（客户端约定 1-based），响应沿用 payment 回显的 {@code total/page/size}。</p>
+     * <p>分页走框架 {@link Pagination} 契约（全链 1-based，ADR-0012）：北向 {@code page} 1-based
+     * 与 wire 同值直传（无 ±1），响应透传 payment 回显的 {@code total/page/size}（回显==请求页码）。</p>
      */
-    public PageResponse<RefundOrderSummaryResponse> listRefunds(RefundOrderQuery query, Pageable pageable) {
+    public PageResponse<RefundOrderSummaryResponse> listRefunds(RefundOrderQuery query, Pagination pagination) {
         // query（北向 controller 绑定）→ wire（出站载荷），与 list 把 PaymentOrderQuery 拆成 wire 参数同位
         var filter = new RefundOrderListWireRequest(
                 query.refundOrderNo(), query.paymentOrderNo(), query.businessOrderNo(),
@@ -126,10 +123,7 @@ public class PaymentManagementAppService {
                 query.createdAtFrom(), query.createdAtTo());
         PageResponse<RefundOrderWireResponse> page;
         try {
-            page = paymentClient.listRefunds(
-                    filter,
-                    pageable.getPageNumber() + 1,   // Spring Pageable 0-based → 客户端 1-based
-                    pageable.getPageSize());
+            page = paymentClient.listRefunds(filter, pagination.page(), pagination.size());
         } catch (OpenApiClientException e) {
             throw translatePaymentError(e);
         }
@@ -152,11 +146,11 @@ public class PaymentManagementAppService {
     /**
      * 分页查询通道交互日志（透传 payment）——PaymentLog：与银行/通道网关的机机交互留痕。
      *
-     * <p>分页形状对齐 admin 现有列表端点（与 {@code /apps}、{@code /payments}、{@code /refunds} 同形）：
-     * {@code Pageable} 0-based 页码 +1 传入客户端（客户端约定 1-based），响应沿用 payment 回显的
-     * {@code total/page/size}。payment 的 {@code PaymentLog} 全字段为基础类型（无枚举语义），admin 原值透传。</p>
+     * <p>分页走框架 {@link Pagination} 契约（全链 1-based，ADR-0012）：北向 {@code page} 1-based
+     * 与 wire 同值直传（无 ±1），响应透传 payment 回显的 {@code total/page/size}（回显==请求页码）。
+     * payment 的 {@code PaymentLog} 全字段为基础类型（无枚举语义），admin 原值透传。</p>
      */
-    public PageResponse<PaymentLogSummaryResponse> listPaymentLogs(PaymentLogQuery query, Pageable pageable) {
+    public PageResponse<PaymentLogSummaryResponse> listPaymentLogs(PaymentLogQuery query, Pagination pagination) {
         // query（北向 controller 绑定）→ wire（出站载荷），与 list/listRefunds 把 query 拆成 wire 参数同位
         var filter = new PaymentLogListWireRequest(
                 query.paymentOrderNo(), query.refundOrderNo(), query.logTypes(),
@@ -164,10 +158,7 @@ public class PaymentManagementAppService {
                 query.createdAtFrom(), query.createdAtTo());
         PageResponse<PaymentLogWireResponse> page;
         try {
-            page = paymentClient.listPaymentLogs(
-                    filter,
-                    pageable.getPageNumber() + 1,   // Spring Pageable 0-based → 客户端 1-based
-                    pageable.getPageSize());
+            page = paymentClient.listPaymentLogs(filter, pagination.page(), pagination.size());
         } catch (OpenApiClientException e) {
             throw translatePaymentError(e);
         }
@@ -191,11 +182,10 @@ public class PaymentManagementAppService {
     /**
      * 分页查询订单操作记录（透传 payment）——OperationLog：行为者对订单的操作留痕。
      *
-     * <p>分页形状对齐 admin 现有列表端点（与 {@code /apps}、{@code /payments}、{@code /refunds} 同形）：
-     * {@code Pageable} 0-based 页码 +1 传入客户端（客户端约定 1-based），响应沿用 payment 回显的
-     * {@code total/page/size}。</p>
+     * <p>分页走框架 {@link Pagination} 契约（全链 1-based，ADR-0012）：北向 {@code page} 1-based
+     * 与 wire 同值直传（无 ±1），响应透传 payment 回显的 {@code total/page/size}（回显==请求页码）。</p>
      */
-    public PageResponse<OperationLogSummaryResponse> listOperationLogs(OperationLogQuery query, Pageable pageable) {
+    public PageResponse<OperationLogSummaryResponse> listOperationLogs(OperationLogQuery query, Pagination pagination) {
         // query（北向 controller 绑定）→ wire（出站载荷），与 list/listRefunds 把 query 拆成 wire 参数同位。
         // 注意时间区间字段名映射：北向 query 用 createdAtFrom/To（admin 统一命名），wire 用 createdAtStart/End
         // （对齐 payment OperationLogQuery 的参数名特例，见 OperationLogListWireRequest javadoc）。
@@ -205,10 +195,7 @@ public class PaymentManagementAppService {
                 query.createdAtFrom(), query.createdAtTo());
         PageResponse<OperationLogWireResponse> page;
         try {
-            page = paymentClient.listOperationLogs(
-                    filter,
-                    pageable.getPageNumber() + 1,   // Spring Pageable 0-based → 客户端 1-based
-                    pageable.getPageSize());
+            page = paymentClient.listOperationLogs(filter, pagination.page(), pagination.size());
         } catch (OpenApiClientException e) {
             throw translatePaymentError(e);
         }

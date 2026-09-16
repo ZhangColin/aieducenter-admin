@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,10 +38,11 @@ import com.cartisan.core.exception.DomainException;
 import com.cartisan.data.jpa.specification.ConditionSpecifications;
 import com.cartisan.security.permission.Permission;
 import com.cartisan.security.permission.PermissionScanner;
+import com.cartisan.web.request.Pagination;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 /**
  * RoleManagementAppService 测试。
@@ -76,24 +78,30 @@ class RoleManagementAppServiceTest {
 
     @Test
     void given_no_filter_when_findAll_then_return_all_roles() {
-        // Given
+        // Given —— 北向 Pagination 1-based；不传 sort 时落到 AppService 的 DEFAULT_SORT
+        // （sortOrder 升序 + id 升序兜底，issue #19），toPageRequest 在框架内收口换算
         AdminRoleQuery query = new AdminRoleQuery(null, null, null, null);
-        Pageable pageable = PageRequest.of(0, 20);
+        Pagination pagination = new Pagination(1, 20, null);
+        Pageable expectedPageRequest = org.springframework.data.domain.PageRequest.of(0, 20,
+                Sort.by(Sort.Direction.ASC, "sortOrder", "id"));
 
         AdminRole role = new AdminRole("管理员", "ADMIN", "系统管理员", 1);
-        Page<AdminRole> rolePage = new PageImpl<>(List.of(role));
+        Page<AdminRole> rolePage = new PageImpl<>(List.of(role), expectedPageRequest, 1);
 
-        when(roleRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), any(Pageable.class)))
+        when(roleRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(expectedPageRequest)))
             .thenReturn(rolePage);
-        when(adminRoleMapper.convertList(List.of(role)))
-            .thenReturn(List.of(new RoleResponse(1L, "管理员", "ADMIN", "系统管理员", 1, null, null, null, null, null, null)));
+        when(adminRoleMapper.convert(role))
+            .thenReturn(new RoleResponse(1L, "管理员", "ADMIN", "系统管理员", 1, null, null, null, null, null, null));
 
         // When
-        var response = roleManagementAppService.findAll(query, pageable);
+        var response = roleManagementAppService.findAll(query, pagination);
 
         // Then
         assertThat(response.items()).hasSize(1);
         assertThat(response.total()).isEqualTo(1);
+        // 回显经 PageResponse.of 集中做 1-based（全链 1-based 收口，ADR-0012）
+        assertThat(response.page()).isEqualTo(1);
+        assertThat(response.size()).isEqualTo(20);
     }
 
     // ========== create tests ==========

@@ -21,13 +21,13 @@ import com.aieducenter.admin.domain.error.AdminMessage;
 import com.aieducenter.admin.infrastructure.AppRegistryClient;
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.openapi.client.OpenApiClientException;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -75,7 +75,7 @@ class AppBffIntegrationTest {
 
         var page = appService.list(
                 new com.aieducenter.admin.application.dto.query.AppManagementQuery("foo", null),
-                PageRequest.of(0, 20));
+                new Pagination(1, 20, null));
 
         assertThat(page.total()).isEqualTo(2L);
         assertThat(page.items()).hasSize(2);

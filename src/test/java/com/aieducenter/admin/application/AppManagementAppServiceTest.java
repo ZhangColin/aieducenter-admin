@@ -28,7 +28,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -71,7 +70,7 @@ class AppManagementAppServiceTest {
                 .thenReturn(new PageResponse<>(List.of(wire), 1L, 1, 20));
 
         PageResponse<AppSummaryResponse> result = service.list(
-                new AppManagementQuery("test", 1), PageRequest.of(0, 20));
+                new AppManagementQuery("test", 1), new com.cartisan.web.request.Pagination(1, 20, null));
 
         assertThat(result.total()).isEqualTo(1L);
         assertThat(result.items()).hasSize(1);
@@ -89,7 +88,7 @@ class AppManagementAppServiceTest {
                 .thenReturn(new PageResponse<>(List.of(), 0L, 1, 20));
 
         PageResponse<AppSummaryResponse> result = service.list(
-                new AppManagementQuery(null, null), PageRequest.of(0, 20));
+                new AppManagementQuery(null, null), new com.cartisan.web.request.Pagination(1, 20, null));
 
         assertThat(result.total()).isEqualTo(0L);
     }

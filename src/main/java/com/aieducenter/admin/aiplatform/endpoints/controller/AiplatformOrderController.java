@@ -40,7 +40,7 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code AiplatformUpstreamErrorAdvice} 原样透传（如 404 ORD_001→5001、400 ORD_010→5010、
  * 409 PRJ_013→4013 跨域码）。</p>
  *
- * <p>分页（spec #62 平台分页统一决议目标态，区别于 payment 的 0-based Pageable ±1 仪式）：
+ * <p>分页（spec #62 平台分页统一决议目标态；#73 起全平台收口同语义，见 ADR-0012）：
  * 北向请求 page 1-based、回显 provider 1-based 原值，全链零换算；provider clamp
  * （page≥1、size∈[1,100]）行为透传，BFF 不重复夹取。</p>
  *

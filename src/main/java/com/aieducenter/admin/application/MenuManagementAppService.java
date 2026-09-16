@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.Set;
 
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +20,7 @@ import static com.cartisan.core.util.Assertions.requirePresent;
 
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.data.jpa.specification.ConditionSpecifications;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 /**
@@ -72,16 +72,17 @@ public class MenuManagementAppService {
 
     /**
      * 扁平分页查询（{@code GET /menus}，Soybean 菜单表格用）。
+     *
+     * <p>分页走框架 {@link Pagination} 契约（全链 1-based，ADR-0012）：{@code page} 1-based 绑定、
+     * {@code toPageRequest} 收口换算，回显经 {@link PageResponse#of(Page)} 集中做 1-based
+     * （替代原手写 {@code +1}）。</p>
      */
-    public PageResponse<MenuResponse> findAll(MenuQuery query, Pageable pageable) {
+    public PageResponse<MenuResponse> findAll(MenuQuery query, Pagination pagination) {
         Specification<AdminMenu> spec = ConditionSpecifications.fromAnnotation(query);
-        Page<AdminMenu> page = menuRepository.findAll(spec, pageable);
-        return new PageResponse<>(
-                adminMenuMapper.convertList(page.getContent()),
-                page.getTotalElements(),
-                pageable.getPageNumber() + 1,
-                pageable.getPageSize()
-        );
+        Page<MenuResponse> page = menuRepository
+                .findAll(spec, pagination.toPageRequest())
+                .map(adminMenuMapper::convert);
+        return PageResponse.of(page);
     }
 
     /**

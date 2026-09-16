@@ -18,7 +18,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.data.domain.PageRequest;
 
 import com.aieducenter.admin.account.application.AccountManagementAppService;
 import com.aieducenter.admin.account.application.dto.query.AccountQuery;
@@ -31,6 +30,7 @@ import com.aieducenter.admin.account.infrastructure.AccountClient;
 import com.cartisan.core.exception.BaseCodeMessage;
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.openapi.client.OpenApiClientException;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 /**
@@ -41,10 +41,10 @@ import com.cartisan.web.response.PageResponse;
  * 不模拟安全层（权限在 {@code AccountRbacEnforcementIntegrationTest} 覆盖）；
  * 不直测 {@link AccountClient}（与 {@code PaymentClient} / {@code AppRegistryClient} 一致，client bean 直接 mock）。</p>
  *
- * <p>对接 identity {@code GET /api/account}（#70 已冻结）：mock 数据按 identity
+ * <p>对接 identity {@code GET /api/account}（#70 已冻结，#78 迁框架 Pagination）：mock 数据按 identity
  * {@code AccountManagementView} 真实形状构造（userId=Long TSID、status=Integer BaseEnum code
- * 1=ACTIVE/0=DISABLED、locked/hasPassword=原始 boolean、无注册时间字段；分页回显 1-based——
- * identity 收 wire 页码 N 回显 N+1，见 ADR-0010）。本测试在 client 边界 mock，
+ * 1=ACTIVE/0=DISABLED、locked/hasPassword=原始 boolean、无注册时间字段；分页全链 1-based——
+ * identity #78 起收 wire 页码 N 回显 N，见 ADR-0012）。本测试在 client 边界 mock，
  * 验证 controller→appservice→client 通路（DTO 映射 / 筛选映射 / 分页契约 / 错误翻译）。</p>
  *
  * <p>另覆盖 #53：管理详情（{@code GET /api/account/{userId}/management}，wire→detail 映射 + 错误翻译）、
@@ -68,8 +68,8 @@ class AccountBffIntegrationTest {
     @Test
     void given_accounts_when_list_then_returnMappedPage() {
         when(accountClient.listAccounts(any(AccountSearchWireRequest.class), anyInt(), anyInt()))
-                // mock 建模 identity 真实回显（1-based）：Pageable page=0 → client 入参 1 → wire page=0 →
-                // identity 回显 0+1=1（identity #70 契约：请求 0-based / 回显 页码+1，#56 钉死）
+                // mock 建模 identity 真实回显：北向 page=1 → wire page=1（直传）→ identity 回显 1
+                // （identity #78 契约：全链 1-based、回显==请求页码，ADR-0012）
                 .thenReturn(new PageResponse<>(List.of(
                         // ACTIVE、未锁、已设密码的常规账号
                         new AccountWireResponse(1001L, "alice@example.com", "13800000001",
@@ -81,10 +81,10 @@ class AccountBffIntegrationTest {
 
         var page = accountAppService.list(
                 new AccountQuery(null, null, null, null, null, null, null),
-                PageRequest.of(0, 20));
+                new Pagination(1, 20, null));
 
-        // 分页契约：total/page/size 沿用 identity 回显；page 为 1-based 且北向透传（不得再 +1）——
-        // 平台分页协议「请求 0-based / 响应 1-based」（ADR-0010）
+        // 分页契约：total/page/size 沿用 identity 回显；page 回显==请求页码且北向透传（不得再 +1）
+        // ——平台分页协议全链 1-based（ADR-0012）
         assertThat(page.total()).isEqualTo(28L);
         assertThat(page.page()).isEqualTo(1);
         assertThat(page.size()).isEqualTo(20);
@@ -112,9 +112,9 @@ class AccountBffIntegrationTest {
     // ========== list · 筛选映射 + 页码换算 ==========
 
     @Test
-    void given_filtersAndPageable_when_list_then_passQueryAndConvertPage() {
+    void given_filtersAndPagination_when_list_then_passQueryAndPageDirectly() {
         when(accountClient.listAccounts(any(AccountSearchWireRequest.class), anyInt(), anyInt()))
-                // mock 建模 identity 真实回显（1-based）：client 入参 page=3 → wire page=2 → 回显 2+1=3
+                // mock 建模 identity 真实回显：北向 page=3 → wire page=3（直传）→ identity 回显 3
                 .thenReturn(new PageResponse<>(List.of(), 0L, 3, 20));
 
         AccountQuery query = new AccountQuery(
@@ -122,16 +122,16 @@ class AccountBffIntegrationTest {
                 1, true,
                 LocalDateTime.of(2026, 1, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
 
-        var page = accountAppService.list(query, PageRequest.of(2, 20));
+        var page = accountAppService.list(query, new Pagination(3, 20, null));
 
         // query → wire 映射：筛选原样透传（含 userId Long / status Integer code / createdFrom·To）；
-        // Spring Pageable 0-based(page=2) → 客户端 1-based(page=3)
+        // 北向 page=3 1-based → client 入参同值 3（wire 直传，无 ±1）
         AccountSearchWireRequest expectedWire = new AccountSearchWireRequest(
                 "alice@example.com", "13800000001", 1001L,
                 1, true,
                 LocalDateTime.of(2026, 1, 1, 0, 0), LocalDateTime.of(2026, 8, 31, 23, 59));
         verify(accountClient).listAccounts(eq(expectedWire), eq(3), eq(20));
-        // 北向响应透传 identity 的 1-based 回显（请求 0-based page=2 → 响应 page=3，ADR-0010）
+        // 北向响应透传 identity 回显（请求 page=3 → 响应 page=3，ADR-0012）
         assertThat(page.page()).isEqualTo(3);
     }
 
@@ -145,7 +145,7 @@ class AccountBffIntegrationTest {
 
         assertThatThrownBy(() -> accountAppService.list(
                 new AccountQuery(null, null, null, null, null, null, null),
-                PageRequest.of(0, 20)))
+                new Pagination(1, 20, null)))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.THIRD_PARTY_ERROR);
     }
@@ -158,7 +158,7 @@ class AccountBffIntegrationTest {
 
         assertThatThrownBy(() -> accountAppService.list(
                 new AccountQuery(null, null, null, null, null, null, null),
-                PageRequest.of(0, 20)))
+                new Pagination(1, 20, null)))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.BAD_REQUEST);
     }
@@ -170,7 +170,7 @@ class AccountBffIntegrationTest {
 
         assertThatThrownBy(() -> accountAppService.list(
                 new AccountQuery(null, null, null, null, null, null, null),
-                PageRequest.of(0, 20)))
+                new Pagination(1, 20, null)))
                 .isInstanceOf(DomainException.class)
                 .matches(e -> ((DomainException) e).getCodeMessage() == BaseCodeMessage.NOT_FOUND);
     }

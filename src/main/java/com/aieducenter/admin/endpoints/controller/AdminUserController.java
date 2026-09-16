@@ -2,8 +2,6 @@ package com.aieducenter.admin.endpoints.controller;
 
 import java.util.List;
 
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.web.PageableDefault;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,6 +16,7 @@ import com.aieducenter.admin.constants.AdminScopes;
 import com.aieducenter.admin.domain.enums.AdminUserStatus;
 import com.cartisan.security.annotation.RequireAuth;
 import com.cartisan.security.annotation.RequirePermission;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
 
@@ -50,8 +49,8 @@ public class AdminUserController {
     @Operation(summary = "查询管理员列表（分页）")
     public ApiResponse<PageResponse<AdminUserResponse>> findAll(
             AdminUserQuery query,
-            @PageableDefault(size = 20) Pageable pageable) {
-        return ApiResponse.ok(adminManagementAppService.findAll(query, pageable));
+            Pagination pagination) {
+        return ApiResponse.ok(adminManagementAppService.findAll(query, pagination));
     }
 
     @GetMapping("/{id}")

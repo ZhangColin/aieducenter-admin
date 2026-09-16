@@ -254,10 +254,11 @@ class RoleManagementSoybeanAlignmentIntegrationTest {
     void given_minSortOrderRoleInsertedLast_when_firstPageSizeOne_then_itIsFirst() throws Exception {
         String token = login(callerUsername);
         String prefix = "SORTP" + uuidSuffix();
-        // sortOrder=-1 全局最小、物理最后插入——若未排序或仅内存排当前页，它都不会出现在 page0 size1
+        // sortOrder=-1 全局最小、物理最后插入——若未排序或仅内存排当前页，它都不会出现在第 1 页 size1
+        // （page=1 为首页：北向分页全链 1-based，ADR-0012）
         Long z = createRole(token, "排序Z_" + prefix, prefix + "_Z", null, -1);
 
-        JsonNode items = listRoleItems(token, "?page=0&size=1");
+        JsonNode items = listRoleItems(token, "?page=1&size=1");
 
         assertThat(items.size()).isEqualTo(1);
         assertThat(items.get(0).path("id").asLong()).isEqualTo(z);

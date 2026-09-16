@@ -20,8 +20,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 
 import com.aieducenter.admin.application.dto.command.AssignRolesCommand;
@@ -33,6 +31,7 @@ import com.aieducenter.admin.application.dto.response.AssignedRoleResponse;
 import com.aieducenter.admin.domain.aggregate.AdminRole;
 import com.aieducenter.admin.domain.aggregate.AdminUser;
 import com.aieducenter.admin.domain.enums.AdminUserGender;
+import com.cartisan.web.request.Pagination;
 import com.aieducenter.admin.domain.enums.AdminUserStatus;
 import com.aieducenter.admin.domain.error.AdminMessage;
 import com.aieducenter.admin.domain.repository.AdminRoleRepository;
@@ -505,15 +504,15 @@ class AdminUserManagementAppServiceTest {
         setRoleId(role2, 2L);
         setRoleId(role3, 3L);
 
-        Pageable pageable = PageRequest.of(0, 20);
-        when(adminUserRepository.findAll(any(Specification.class), eq(pageable)))
-            .thenReturn(new PageImpl<>(List.of(user1, user2), pageable, 2));
+        Pagination pagination = new Pagination(1, 20, null);
+        when(adminUserRepository.findAll(any(Specification.class), eq(pagination.toPageRequest())))
+            .thenReturn(new PageImpl<>(List.of(user1, user2), pagination.toPageRequest(), 2));
         when(adminRoleRepository.findByIdIn(Set.of(1L, 2L, 3L)))
             .thenReturn(List.of(role1, role2, role3));
 
         // When
         PageResponse<AdminUserResponse> page =
-            serviceWithRealMapper().findAll(new AdminUserQuery(null, null, null, null, null), pageable);
+            serviceWithRealMapper().findAll(new AdminUserQuery(null, null, null, null, null), pagination);
 
         // Then —— 每行内联角色摘要裁剪投影 {id,name,code}；gender 透传；批量只查一次（无 N+1）
         AdminUserResponse r1 = page.items().stream()
@@ -539,15 +538,15 @@ class AdminUserManagementAppServiceTest {
         AdminRole alive = new AdminRole("管理员", "ADMIN", "管理员", 1);
         setRoleId(alive, 1L);
 
-        Pageable pageable = PageRequest.of(0, 20);
-        when(adminUserRepository.findAll(any(Specification.class), eq(pageable)))
-            .thenReturn(new PageImpl<>(List.of(user), pageable, 1));
+        Pagination pagination = new Pagination(1, 20, null);
+        when(adminUserRepository.findAll(any(Specification.class), eq(pagination.toPageRequest())))
+            .thenReturn(new PageImpl<>(List.of(user), pagination.toPageRequest(), 1));
         when(adminRoleRepository.findByIdIn(Set.of(1L, 2L)))
             .thenReturn(List.of(alive)); // 仅存活角色
 
         // When
         PageResponse<AdminUserResponse> page =
-            serviceWithRealMapper().findAll(new AdminUserQuery(null, null, null, null, null), pageable);
+            serviceWithRealMapper().findAll(new AdminUserQuery(null, null, null, null, null), pagination);
 
         // Then —— 已删角色不回显（与 findById 同语义）
         assertThat(page.items().get(0).roles()).extracting(AssignedRoleResponse::code)
@@ -558,13 +557,13 @@ class AdminUserManagementAppServiceTest {
     void given_noRolesAcrossPage_when_findAll_then_rolesEmptyAndNoRoleQuery() {
         // Given —— 本页用户均无角色
         AdminUser user = new AdminUser("listu1", "Test1234", "用户一");
-        Pageable pageable = PageRequest.of(0, 20);
-        when(adminUserRepository.findAll(any(Specification.class), eq(pageable)))
-            .thenReturn(new PageImpl<>(List.of(user), pageable, 1));
+        Pagination pagination = new Pagination(1, 20, null);
+        when(adminUserRepository.findAll(any(Specification.class), eq(pagination.toPageRequest())))
+            .thenReturn(new PageImpl<>(List.of(user), pagination.toPageRequest(), 1));
 
         // When
         PageResponse<AdminUserResponse> page =
-            serviceWithRealMapper().findAll(new AdminUserQuery(null, null, null, null, null), pageable);
+            serviceWithRealMapper().findAll(new AdminUserQuery(null, null, null, null, null), pagination);
 
         // Then —— 无角色时返回 []，且不发起无谓的角色批量查询
         assertThat(page.items().get(0).roles()).isNotNull().isEmpty();

@@ -2,9 +2,6 @@ package com.aieducenter.admin.endpoints.controller;
 
 import java.util.List;
 
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
-import org.springframework.data.web.PageableDefault;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,6 +17,7 @@ import com.aieducenter.admin.constants.AdminScopes;
 import com.aieducenter.admin.domain.enums.AdminRoleStatus;
 import com.cartisan.security.annotation.RequireAuth;
 import com.cartisan.security.annotation.RequirePermission;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
 
@@ -52,10 +50,10 @@ public class AdminRoleController {
     @Operation(summary = "查询角色列表（分页）")
     public ApiResponse<PageResponse<RoleResponse>> findAll(
             AdminRoleQuery query,
-            // 默认 sortOrder 升序 + id 升序兜底（对齐菜单侧先例，issue #19）；
-            // 仅在请求未带 ?sort= 时生效，客户端显式排序可覆盖
-            @PageableDefault(size = 20, sort = {"sortOrder", "id"}, direction = Sort.Direction.ASC) Pageable pageable) {
-        return ApiResponse.ok(roleManagementAppService.findAll(query, pageable));
+            // 默认排序（sortOrder 升序 + id 升序兜底，issue #19）由 AppService 经
+            // pagination.toPageRequest(DEFAULT_SORT) 提供——请求未带 ?sort= 时生效，显式排序可覆盖
+            Pagination pagination) {
+        return ApiResponse.ok(roleManagementAppService.findAll(query, pagination));
     }
 
     @GetMapping("/all")

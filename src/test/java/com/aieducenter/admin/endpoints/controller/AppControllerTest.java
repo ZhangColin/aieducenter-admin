@@ -14,7 +14,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -47,9 +46,8 @@ class AppControllerTest {
     @BeforeEach
     void setUp() {
         AppController controller = new AppController(appManagementAppService);
-        mvc = MockMvcBuilders.standaloneSetup(controller)
-                .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
-                .build();
+        // Pagination 为框架 record，standalone MockMvc 默认 model-attribute 构造绑定即可（无需自定义解析器）
+        mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
     @Test
@@ -58,7 +56,7 @@ class AppControllerTest {
                 .thenReturn(new PageResponse<>(List.of(), 0L, 1, 20));
 
         mvc.perform(get("/api/admin/apps")
-                        .param("page", "0").param("size", "20"))
+                        .param("page", "1").param("size", "20"))
                 .andExpect(status().isOk());
 
         verify(appManagementAppService).list(any(), any());

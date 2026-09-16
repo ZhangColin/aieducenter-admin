@@ -112,15 +112,15 @@ public class PaymentClient {
      * 分页查询支付订单列表（透传 payment）。
      *
      * @param filter wire 层过滤参数（由应用层从 {@code PaymentOrderQuery} 映射而来）
-     * @param page   页码，<strong>1-based</strong>（应用层由 Spring {@code Pageable} 的 0-based 页码 +1 传入；
-     *               此处 {@code page - 1} 还原为 payment 端 Spring {@code Pageable} 的 0-based）
+     * @param page   页码，<strong>1-based</strong>，与北向同值直传（payment #22 已迁框架 {@code Pagination}，
+     *               wire 即 1-based；全链无 ±1，见 ADR-0012）
      * @param size   每页大小
      * @return payment 返回的分页结果
      */
     public PageResponse<PaymentOrderWireResponse> listPayments(PaymentOrderListWireRequest filter, int page, int size) {
-        // 入参 page 为 1-based，payment 端用 Spring Pageable 的 0-based，故 -1（与 AppRegistryClient.listApps 一致）。
+        // wire page 与北向同值直传（全链 1-based，ADR-0012），无 ±1
         StringBuilder url = new StringBuilder(baseUrl)
-                .append("/api/v1/payments?page=").append(page - 1)
+                .append("/api/v1/payments?page=").append(page)
                 .append("&size=").append(size);
         appendParam(url, "paymentOrderNo", filter.paymentOrderNo());
         appendParam(url, "businessOrderNo", filter.businessOrderNo());
@@ -149,15 +149,15 @@ public class PaymentClient {
      * 分页查询退款订单列表（透传 payment）。
      *
      * @param filter wire 层过滤参数（由应用层从 {@code RefundOrderQuery} 映射而来）
-     * @param page   页码，<strong>1-based</strong>（应用层由 Spring {@code Pageable} 的 0-based 页码 +1 传入；
-     *               此处 {@code page - 1} 还原为 payment 端 Spring {@code Pageable} 的 0-based）
+     * @param page   页码，<strong>1-based</strong>，与北向同值直传（payment #22 已迁框架 {@code Pagination}，
+     *               wire 即 1-based；全链无 ±1，见 ADR-0012）
      * @param size   每页大小
      * @return payment 返回的分页结果
      */
     public PageResponse<RefundOrderWireResponse> listRefunds(RefundOrderListWireRequest filter, int page, int size) {
-        // 入参 page 为 1-based，payment 端用 Spring Pageable 的 0-based，故 -1（与 listPayments / AppRegistryClient 一致）。
+        // wire page 与北向同值直传（全链 1-based，ADR-0012），无 ±1
         StringBuilder url = new StringBuilder(baseUrl)
-                .append("/api/v1/refunds?page=").append(page - 1)
+                .append("/api/v1/refunds?page=").append(page)
                 .append("&size=").append(size);
         appendParam(url, "refundOrderNo", filter.refundOrderNo());
         appendParam(url, "paymentOrderNo", filter.paymentOrderNo());
@@ -184,15 +184,15 @@ public class PaymentClient {
      * 分页查询通道交互日志（透传 payment）——PaymentLog：与银行/通道网关的机机交互留痕。
      *
      * @param filter wire 层过滤参数（由应用层从 {@code PaymentLogQuery} 映射而来）
-     * @param page   页码，<strong>1-based</strong>（应用层由 Spring {@code Pageable} 的 0-based 页码 +1 传入；
-     *               此处 {@code page - 1} 还原为 payment 端 Spring {@code Pageable} 的 0-based）
+     * @param page   页码，<strong>1-based</strong>，与北向同值直传（payment #22 已迁框架 {@code Pagination}，
+     *               wire 即 1-based；全链无 ±1，见 ADR-0012）
      * @param size   每页大小
      * @return payment 返回的分页结果
      */
     public PageResponse<PaymentLogWireResponse> listPaymentLogs(PaymentLogListWireRequest filter, int page, int size) {
-        // 入参 page 为 1-based，payment 端用 Spring Pageable 的 0-based，故 -1（与 listPayments/listRefunds 一致）。
+        // wire page 与北向同值直传（全链 1-based，ADR-0012），无 ±1
         StringBuilder url = new StringBuilder(baseUrl)
-                .append("/api/v1/payment-logs?page=").append(page - 1)
+                .append("/api/v1/payment-logs?page=").append(page)
                 .append("&size=").append(size);
         appendParam(url, "paymentOrderNo", filter.paymentOrderNo());
         appendParam(url, "refundOrderNo", filter.refundOrderNo());
@@ -216,15 +216,15 @@ public class PaymentClient {
      * 分页查询订单操作记录（透传 payment）——OperationLog：行为者对订单的操作留痕。
      *
      * @param filter wire 层过滤参数（由应用层从 {@code OperationLogQuery} 映射而来）
-     * @param page   页码，<strong>1-based</strong>（应用层由 Spring {@code Pageable} 的 0-based 页码 +1 传入；
-     *               此处 {@code page - 1} 还原为 payment 端 Spring {@code Pageable} 的 0-based）
+     * @param page   页码，<strong>1-based</strong>，与北向同值直传（payment #22 已迁框架 {@code Pagination}，
+     *               wire 即 1-based；全链无 ±1，见 ADR-0012）
      * @param size   每页大小
      * @return payment 返回的分页结果
      */
     public PageResponse<OperationLogWireResponse> listOperationLogs(OperationLogListWireRequest filter, int page, int size) {
-        // 入参 page 为 1-based，payment 端用 Spring Pageable 的 0-based，故 -1（与 listPayments/listRefunds 一致）。
+        // wire page 与北向同值直传（全链 1-based，ADR-0012），无 ±1
         StringBuilder url = new StringBuilder(baseUrl)
-                .append("/api/v1/operation-logs?page=").append(page - 1)
+                .append("/api/v1/operation-logs?page=").append(page)
                 .append("&size=").append(size);
         appendParam(url, "targetType", filter.targetType());
         appendParam(url, "targetNo", filter.targetNo());

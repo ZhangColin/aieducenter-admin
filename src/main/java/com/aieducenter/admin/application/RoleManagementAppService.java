@@ -10,7 +10,7 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.map.MapUtil;
 
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +36,7 @@ import com.cartisan.core.exception.DomainException;
 import com.cartisan.data.jpa.specification.ConditionSpecifications;
 import com.cartisan.security.permission.Permission;
 import com.cartisan.security.permission.PermissionScanner;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 /**
@@ -43,6 +44,13 @@ import com.cartisan.web.response.PageResponse;
  */
 @Service
 public class RoleManagementAppService {
+
+    /**
+     * 列表默认排序：sortOrder 升序 + id 升序兜底（对齐菜单侧先例，issue #19）；
+     * 仅在请求未带 {@code ?sort=} 时生效，客户端显式排序可覆盖
+     * （框架 {@link Pagination#toPageRequest(Sort)} 的 defaultSort 出口，identity #78 同款）。
+     */
+    private static final Sort DEFAULT_SORT = Sort.by(Sort.Direction.ASC, "sortOrder", "id");
 
     private final AdminRoleRepository roleRepository;
     private final AdminMenuRepository menuRepository;
@@ -61,18 +69,19 @@ public class RoleManagementAppService {
 
     /**
      * 查询角色列表（分页）。
+     *
+     * <p>分页走框架 {@link Pagination} 契约（全链 1-based，ADR-0012）：{@code page} 1-based 绑定、
+     * {@code toPageRequest} 收口换算，回显经 {@link PageResponse#of(Page)} 集中做 1-based
+     * （替代原手写 {@code +1}）。</p>
      */
     @Transactional(readOnly = true)
-    public PageResponse<RoleResponse> findAll(AdminRoleQuery query, Pageable pageable) {
+    public PageResponse<RoleResponse> findAll(AdminRoleQuery query, Pagination pagination) {
         Specification<AdminRole> spec = ConditionSpecifications.fromAnnotation(query);
-        Page<AdminRole> page = roleRepository.findAll(spec, pageable);
+        Page<RoleResponse> page = roleRepository
+                .findAll(spec, pagination.toPageRequest(DEFAULT_SORT))
+                .map(adminRoleMapper::convert);
 
-        return new PageResponse<>(
-                adminRoleMapper.convertList(page.getContent()),
-                page.getTotalElements(),
-                pageable.getPageNumber() + 1,
-                pageable.getPageSize()
-        );
+        return PageResponse.of(page);
     }
 
     /**

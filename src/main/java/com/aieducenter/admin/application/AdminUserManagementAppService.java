@@ -9,7 +9,6 @@ import java.util.stream.Collectors;
 import cn.hutool.core.collection.CollUtil;
 
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +34,7 @@ import static com.cartisan.core.util.Assertions.requirePresent;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.data.jpa.specification.ConditionSpecifications;
 
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 /**
@@ -74,9 +74,9 @@ public class AdminUserManagementAppService {
      * 无 N+1。关联指向的角色若已物理删除（ADR-0005）则不回显，与 {@link #findById} 同语义。</p>
      */
     @Transactional(readOnly = true)
-    public PageResponse<AdminUserResponse> findAll(AdminUserQuery query, Pageable pageable) {
+    public PageResponse<AdminUserResponse> findAll(AdminUserQuery query, Pagination pagination) {
         Specification<AdminUser> spec = ConditionSpecifications.fromAnnotation(query);
-        Page<AdminUser> page = adminUserRepository.findAll(spec, pageable);
+        Page<AdminUser> page = adminUserRepository.findAll(spec, pagination.toPageRequest());
         List<AdminUser> users = page.getContent();
 
         // 批量取本页全部用户所挂角色（一次查询，无 N+1）
@@ -88,16 +88,8 @@ public class AdminUserManagementAppService {
                 : adminRoleRepository.findByIdIn(roleIds).stream()
                         .collect(Collectors.toMap(AdminRole::getId, role -> role));
 
-        List<AdminUserResponse> responses = users.stream()
-                .map(u -> adminUserMapper.convertWithRoles(u, rolesFor(u, roleById)))
-                .collect(Collectors.toList());
-
-        return new PageResponse<>(
-                responses,
-                page.getTotalElements(),
-                pageable.getPageNumber() + 1,
-                pageable.getPageSize()
-        );
+        // 回显经 PageResponse.of 集中做 1-based（全链 1-based 收口，ADR-0012）
+        return PageResponse.of(page.map(u -> adminUserMapper.convertWithRoles(u, rolesFor(u, roleById))));
     }
 
     /**

@@ -9,13 +9,12 @@ import com.aieducenter.admin.account.application.dto.response.AccountSummaryResp
 import com.aieducenter.admin.constants.AdminScopes;
 import com.cartisan.security.annotation.RequireAuth;
 import com.cartisan.security.annotation.RequirePermission;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.web.PageableDefault;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -51,8 +50,8 @@ public class AccountController {
     @Operation(summary = "分页搜索平台账号（email/phone/userId/status/locked/注册时间区间）")
     public ApiResponse<PageResponse<AccountSummaryResponse>> list(
             AccountQuery query,
-            @PageableDefault(size = 20) Pageable pageable) {
-        return ApiResponse.ok(accountAppService.list(query, pageable));
+            Pagination pagination) {
+        return ApiResponse.ok(accountAppService.list(query, pagination));
     }
 
     @GetMapping("/{userId}/management")

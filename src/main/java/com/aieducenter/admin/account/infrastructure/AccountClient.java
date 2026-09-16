@@ -61,16 +61,16 @@ public class AccountClient {
      * 分页搜索平台账号（透传 identity）。
      *
      * @param filter wire 层过滤参数（由应用层从 {@code AccountQuery} 映射而来）
-     * @param page   页码，<strong>1-based</strong>（应用层由 Spring {@code Pageable} 的 0-based 页码 +1 传入；
-     *               此处 {@code page - 1} 还原为 identity 端 Spring {@code Pageable} 的 0-based）
+     * @param page   页码，<strong>1-based</strong>，与北向同值直传（identity #78 已迁框架 {@code Pagination}，
+     *               wire 即 1-based；全链无 ±1，见 ADR-0012）
      * @param size   每页大小
-     * @return identity 返回的分页结果（{@code page} 为 identity 1-based 回显「wire 页码+1」，
-     *                identity #70 契约；应用层北向透传，见 ADR-0010）
+     * @return identity 返回的分页结果（{@code page} 回显==请求页码，identity #78 契约；
+     *                应用层北向透传，见 ADR-0012）
      */
     public PageResponse<AccountWireResponse> listAccounts(AccountSearchWireRequest filter, int page, int size) {
-        // 入参 page 为 1-based，identity 端用 Spring Pageable 的 0-based，故 -1（与 PaymentClient.listPayments 一致）。
+        // wire page 与北向同值直传（全链 1-based，ADR-0012），无 ±1
         StringBuilder url = new StringBuilder(baseUrl)
-                .append("/api/account?page=").append(page - 1)
+                .append("/api/account?page=").append(page)
                 .append("&size=").append(size);
         appendParam(url, "email", filter.email());
         appendParam(url, "phone", filter.phone());

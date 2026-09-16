@@ -22,10 +22,10 @@ import com.aieducenter.admin.infrastructure.AppRegistryClient;
 import com.cartisan.core.exception.BaseCodeMessage;
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.openapi.client.OpenApiClientException;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
@@ -48,12 +48,15 @@ public class AppManagementAppService {
 
     /**
      * 分页查询应用列表（透传 app-registry）。
+     *
+     * <p>分页走框架 {@link Pagination} 契约（全链 1-based，ADR-0012）：北向 {@code page} 1-based
+     * 与 wire 同值直传（无 ±1），响应透传 app-registry 回显的 {@code total/page/size}（回显==请求页码）。
+     * 不传 sort 时 app-registry 默认 createdAt 降序（最新登记在前）。</p>
      */
-    public PageResponse<AppSummaryResponse> list(AppManagementQuery query, Pageable pageable) {
+    public PageResponse<AppSummaryResponse> list(AppManagementQuery query, Pagination pagination) {
         PageResponse<AppRegistryAppResponse> page = appRegistryClient.listApps(
                 query.keyword(), query.status(),
-                pageable.getPageNumber() + 1,  // Spring Pageable 是 0-based，app-registry 用 1-based
-                pageable.getPageSize());
+                pagination.page(), pagination.size());
 
         var items = page.items().stream()
                 .map(AppManagementAppService::toSummary)

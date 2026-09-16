@@ -202,9 +202,10 @@ public class AiplatformClient {
      * externalId 换算不到/非数值 orderId 时 provider 如实返回空清单 200（无命非错误）；
      * 过滤参数绑定失败 400 ORD_010（数字业务码 5010）原样透传。</p>
      *
-     * <p>与 payment 的分页差异（spec #62，平台分页统一决议目标态）：aiplatform wire 本就
-     * <strong>1-based</strong>，page 直传 <strong>零换算</strong>（payment 是 page-1 还原 0-based）；
-     * provider 侧 {@code BackofficePages} clamp（page≥1、size∈[1,100]）行为透传，本客户端不重复夹取。
+     * <p>分页（spec #62，平台分页统一决议目标态；#73 起全平台收口同语义，见 ADR-0012）：
+     * aiplatform wire 本就 <strong>1-based</strong>，page 直传 <strong>零换算</strong>（与 payment
+     * #22 迁移后的同值直传同语义）；provider 侧 {@code BackofficePages} clamp（page≥1、size∈[1,100]）
+     * 行为透传，本客户端不重复夹取。
      * {@code status} 多选拼为逗号分隔单值（{@code status=1,5}）——签名协议按参数名去重，
      * 禁用重复参数展开。</p>
      *

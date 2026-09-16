@@ -2,8 +2,6 @@ package com.aieducenter.admin.endpoints.controller;
 
 import java.util.List;
 
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.web.PageableDefault;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,6 +16,7 @@ import com.aieducenter.admin.constants.AdminScopes;
 import com.cartisan.core.context.RequestContext;
 import com.cartisan.security.annotation.RequireAuth;
 import com.cartisan.security.annotation.RequirePermission;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
 
@@ -64,8 +63,8 @@ public class AdminMenuController {
     @Operation(summary = "查询菜单列表（扁平分页，Soybean 菜单表格用）")
     public ApiResponse<PageResponse<MenuResponse>> findAll(
             MenuQuery query,
-            @PageableDefault(size = 20) Pageable pageable) {
-        return ApiResponse.ok(menuManagementAppService.findAll(query, pageable));
+            Pagination pagination) {
+        return ApiResponse.ok(menuManagementAppService.findAll(query, pagination));
     }
 
     @GetMapping("/tree")

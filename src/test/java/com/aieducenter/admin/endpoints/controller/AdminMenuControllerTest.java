@@ -51,10 +51,8 @@ class AdminMenuControllerTest {
     @BeforeEach
     void setUp() {
         controller = new AdminMenuController(menuManagementAppService, adminUserPermissionAppService);
-        // standalone 默认不注册 Spring Data 的 Pageable 解析器，手动补上以测分页根端点
-        mvc = MockMvcBuilders.standaloneSetup(controller)
-                .setCustomArgumentResolvers(new org.springframework.data.web.PageableHandlerMethodArgumentResolver())
-                .build();
+        // Pagination 为框架 record，standalone MockMvc 默认 model-attribute 构造绑定即可（无需自定义解析器）
+        mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
     @Test
@@ -81,7 +79,7 @@ class AdminMenuControllerTest {
         when(menuManagementAppService.findAll(any(), any())).thenReturn(page);
 
         mvc.perform(get("/api/admin/menus")
-                        .param("page", "0").param("size", "20"))
+                        .param("page", "1").param("size", "20"))
                 .andExpect(status().isOk());
 
         verify(menuManagementAppService).findAll(any(), any());

@@ -25,6 +25,7 @@ import com.aieducenter.admin.payment.application.dto.response.RefundOrderSummary
 import com.cartisan.core.context.RequestContext;
 import com.cartisan.security.annotation.RequireAuth;
 import com.cartisan.security.annotation.RequirePermission;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -32,8 +33,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.time.LocalDateTime;
 import java.util.List;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -71,8 +70,8 @@ public class PaymentController {
     @Operation(summary = "分页查询支付订单列表")
     public ApiResponse<PageResponse<PaymentOrderSummaryResponse>> listPayments(
             PaymentOrderQuery query,
-            @PageableDefault(size = 20) Pageable pageable) {
-        return ApiResponse.ok(paymentAppService.list(query, pageable));
+            Pagination pagination) {
+        return ApiResponse.ok(paymentAppService.list(query, pagination));
     }
 
     @GetMapping("/refunds")
@@ -85,8 +84,8 @@ public class PaymentController {
     @Operation(summary = "分页查询退款订单列表")
     public ApiResponse<PageResponse<RefundOrderSummaryResponse>> listRefunds(
             RefundOrderQuery query,
-            @PageableDefault(size = 20) Pageable pageable) {
-        return ApiResponse.ok(paymentAppService.listRefunds(query, pageable));
+            Pagination pagination) {
+        return ApiResponse.ok(paymentAppService.listRefunds(query, pagination));
     }
 
     @GetMapping("/payment-logs")
@@ -99,8 +98,8 @@ public class PaymentController {
     @Operation(summary = "分页查询通道交互日志（PaymentLog：与银行/通道网关的机机交互留痕）")
     public ApiResponse<PageResponse<PaymentLogSummaryResponse>> listPaymentLogs(
             PaymentLogQuery query,
-            @PageableDefault(size = 20) Pageable pageable) {
-        return ApiResponse.ok(paymentAppService.listPaymentLogs(query, pageable));
+            Pagination pagination) {
+        return ApiResponse.ok(paymentAppService.listPaymentLogs(query, pagination));
     }
 
     @GetMapping("/operation-logs")
@@ -113,8 +112,8 @@ public class PaymentController {
     @Operation(summary = "分页查询订单操作记录（OperationLog：行为者对订单的操作留痕）")
     public ApiResponse<PageResponse<OperationLogSummaryResponse>> listOperationLogs(
             OperationLogQuery query,
-            @PageableDefault(size = 20) Pageable pageable) {
-        return ApiResponse.ok(paymentAppService.listOperationLogs(query, pageable));
+            Pagination pagination) {
+        return ApiResponse.ok(paymentAppService.listOperationLogs(query, pagination));
     }
 
     @GetMapping("/payments/{paymentOrderNo}")

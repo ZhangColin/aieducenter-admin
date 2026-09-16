@@ -47,9 +47,8 @@ class AdminRoleControllerTest {
     @BeforeEach
     void setUp() {
         controller = new AdminRoleController(roleManagementAppService);
-        mvc = MockMvcBuilders.standaloneSetup(controller)
-                .setCustomArgumentResolvers(new org.springframework.data.web.PageableHandlerMethodArgumentResolver())
-                .build();
+        // Pagination 为框架 record，standalone MockMvc 默认 model-attribute 构造绑定即可（无需自定义解析器）
+        mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
     @Test

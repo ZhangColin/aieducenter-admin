@@ -3,7 +3,6 @@ package com.aieducenter.admin.payment.infrastructure;
 import com.aieducenter.admin.payment.application.dto.query.OperationLogQuery;
 import com.aieducenter.admin.payment.application.dto.query.RefundOrderQuery;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.domain.PageRequest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -82,7 +81,7 @@ class PaymentEnumNamePassThroughContractTest {
         var page = PaymentWireTestSupport.appServiceWithStubTransport(envelope).listRefunds(
                 new RefundOrderQuery(null, null, null, null, null, null, null,
                         null, null, null, null),
-                PageRequest.of(0, 20));
+                new com.cartisan.web.request.Pagination(1, 20, null));
 
         assertThat(page.items()).hasSize(1);
         var item = page.items().get(0);
@@ -118,7 +117,7 @@ class PaymentEnumNamePassThroughContractTest {
                 """;
         var page = PaymentWireTestSupport.appServiceWithStubTransport(envelope).listOperationLogs(
                 new OperationLogQuery(null, null, null, null, null, null, null, null),
-                PageRequest.of(0, 20));
+                new com.cartisan.web.request.Pagination(1, 20, null));
 
         assertThat(page.items()).hasSize(1);
         var item = page.items().get(0);

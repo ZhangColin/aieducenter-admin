@@ -19,8 +19,6 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.test.context.ActiveProfiles;
 
 import com.aieducenter.admin.application.AdminUserManagementAppService;
@@ -133,7 +131,7 @@ class AdminStressTest {
         AtomicInteger failureCount = new AtomicInteger(0);
         List<Long> responseTimes = new ArrayList<>();
 
-        Pageable pageable = PageRequest.of(0, 20);
+        var pagination = new com.cartisan.web.request.Pagination(1, 20, null);
 
         // When: 100 threads execute pagination concurrently
         for (int i = 0; i < CONCURRENT_THREAD_COUNT; i++) {
@@ -142,7 +140,7 @@ class AdminStressTest {
                     startLatch.await(); // Wait for all threads to be ready
 
                     long startTime = System.currentTimeMillis();
-                    adminUserManagementAppService.findAll(new AdminUserQuery(null, null, null, null, null), pageable);
+                    adminUserManagementAppService.findAll(new AdminUserQuery(null, null, null, null, null), pagination);
                     long endTime = System.currentTimeMillis();
 
                     synchronized (responseTimes) {
@@ -278,8 +276,8 @@ class AdminStressTest {
 
                     // Perform multiple DB operations in each thread
                     for (int j = 0; j < 5; j++) {
-                        Pageable pageable = PageRequest.of(0, 10);
-                        adminUserManagementAppService.findAll(new AdminUserQuery(null, null, null, null, null), pageable);
+                        var pagination = new com.cartisan.web.request.Pagination(1, 10, null);
+                        adminUserManagementAppService.findAll(new AdminUserQuery(null, null, null, null, null), pagination);
                     }
 
                     successCount.incrementAndGet();
