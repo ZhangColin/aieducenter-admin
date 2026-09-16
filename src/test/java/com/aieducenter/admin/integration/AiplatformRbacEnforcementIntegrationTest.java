@@ -39,8 +39,11 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformConversat
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderBriefWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderCancelWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderQuoteWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryRepriceWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireResponse;
@@ -76,11 +79,12 @@ import cn.dev33.satoken.config.SaTokenConfig;
 /**
  * aiplatform BFF 端点 RBAC 强制执行集成测试（issue #63 T1 账号 + #64 订单读路径 + #65 项目核心读路径 +
  * #66 沙箱观测与四干预动作 + #67 成本四读口 + #68 单价表清单/原子改价/停用 + #69 知识素材
- * 清单/详情/停用⇄启用/删除）
+ * 清单/详情/停用⇄启用/删除 + #70 订单写路径报价/改价/取消/重试归档）
  * ——真实 Sa-Token 过滤链，断言 {@code admin:aiplatform:account:read} / {@code admin:aiplatform:order:read} /
  * {@code admin:aiplatform:project:read} / {@code admin:aiplatform:workspace:read} /
  * {@code admin:aiplatform:cost:read} / {@code admin:aiplatform:price-entry:read} /
- * {@code admin:aiplatform:material:read} + 沙箱四独立写码
+ * {@code admin:aiplatform:material:read} + 订单三独立写码
+ * （{@code order:quote|cancel|retry-archive}）+ 沙箱四独立写码
  * （{@code workspace:wake|hibernate|rebuild|seal}）+ 单价表两独立写码
  * （{@code price-entry:reprice|deactivate}）+ 知识素材三独立写码
  * （{@code material:disable|enable|delete}）对未登录（401）/ 无权者（403）/ 有权者（200）的行为，
@@ -91,7 +95,8 @@ import cn.dev33.satoken.config.SaTokenConfig;
  * {@code RbacEnforcementIntegrationTest}）。200 用例 mock {@link AiplatformClient}，证明权限放行后
  * 整条 controller→appservice→client 通路接通。超管 bypass 由框架级测试钉住，此处不重复。</p>
  *
- * <p><strong>操作者身份透传契约</strong>（issue #66 断言必带；#69 素材域同款必带）：沙箱四干预动作、
+ * <p><strong>操作者身份透传契约</strong>（issue #66 断言必带；#69 素材域、#70 订单域同款必带）：订单三写
+ * 操作（报价落痕价目行、取消/归档落痕订单行）、沙箱四干预动作、
  * 单价表改价/停用、素材停用/启用从 {@code RequestContext} 读 operator 审计，admin 不在 body 塞
  * 身份——框架 cartisan-openapi 自动从 {@code RequestContext} 带 {@code X-User-Id/X-User-Name}
  * 出站 header。本测试在 mocked {@link AiplatformClient} 边界用 {@code doAnswer} 在调用瞬间抓取
@@ -121,6 +126,14 @@ class AiplatformRbacEnforcementIntegrationTest {
     private static final String ORDERS_ENDPOINT = "/api/admin/aiplatform/orders";
     private static final String ORDER_DETAIL_ENDPOINT = ORDERS_ENDPOINT + "/" + ORDER_ID;
     private static final String SOURCE_PACKAGE_ENDPOINT = ORDER_DETAIL_ENDPOINT + "/source-package";
+    private static final String ORDER_QUOTE_PERMISSION = "admin:aiplatform:order:quote";
+    private static final String ORDER_CANCEL_PERMISSION = "admin:aiplatform:order:cancel";
+    private static final String ORDER_RETRY_ARCHIVE_PERMISSION = "admin:aiplatform:order:retry-archive";
+    private static final String QUOTE_ENDPOINT = ORDER_DETAIL_ENDPOINT + "/quote";
+    private static final String CANCEL_ENDPOINT = ORDER_DETAIL_ENDPOINT + "/cancel";
+    private static final String RETRY_ARCHIVE_ENDPOINT = ORDER_DETAIL_ENDPOINT + "/retry-archive";
+    private static final String QUOTE_BODY = "{\"amount\":2199000,\"note\":\"含加急费用\"}";
+    private static final String CANCEL_BODY = "{\"reason\":\"重复下单，用户要求取消\"}";
     private static final String PROJECT_ID = "3829492007654321";
     private static final String PROJECTS_ENDPOINT = "/api/admin/aiplatform/projects";
     private static final String PROJECT_DETAIL_ENDPOINT = PROJECTS_ENDPOINT + "/" + PROJECT_ID;
@@ -183,9 +196,11 @@ class AiplatformRbacEnforcementIntegrationTest {
     private String usernameWithRepriceOnly;
     private String usernameWithMaterialWrite;
     private String usernameWithDisableOnly;
+    private String usernameWithOrderWrite;
+    private String usernameWithQuoteOnly;
 
     // 在 mocked client 调用瞬间抓取 RequestContext——证明 operator 身份抵达出站调用点
-    // （供 OpenApiClient 带 X-User-Id/X-User-Name 出站头，issue #66/#69 断言必带）
+    // （供 OpenApiClient 带 X-User-Id/X-User-Name 出站头，issue #66/#69/#70 断言必带）
     private final AtomicReference<Long> capturedOperatorId = new AtomicReference<>();
     private final AtomicReference<String> capturedOperatorName = new AtomicReference<>();
     private Long workspaceWriteUserId;
@@ -194,6 +209,8 @@ class AiplatformRbacEnforcementIntegrationTest {
     private String priceWriteUserNickname;
     private Long materialWriteUserId;
     private String materialWriteUserNickname;
+    private Long orderWriteUserId;
+    private String orderWriteUserNickname;
 
     @Autowired
     AiplatformRbacEnforcementIntegrationTest(
@@ -223,6 +240,8 @@ class AiplatformRbacEnforcementIntegrationTest {
         usernameWithRepriceOnly = "aiplarpon" + suffix;
         usernameWithMaterialWrite = "aiplamwpr" + suffix;
         usernameWithDisableOnly = "aipladson" + suffix;
+        usernameWithOrderWrite = "aiplaowpr" + suffix;
+        usernameWithQuoteOnly = "aiplaqpon" + suffix;
 
         Long readRoleId = roleAppService.create(
                 new CreateRoleCommand("AI平台读权限_" + suffix, "AIPLAREAD_" + suffix,
@@ -309,6 +328,29 @@ class AiplatformRbacEnforcementIntegrationTest {
                         "素材停用专员_" + suffix, null, null, null));
         userAppService.assignRoles(disableOnlyUserId, new AssignRolesCommand(List.of(disableOnlyRoleId)));
 
+        // 订单三写码专用运营（quote+cancel+retry-archive，无读码）——操作者透传断言用其 id/昵称
+        Long orderWriteRoleId = roleAppService.create(
+                new CreateRoleCommand("AI平台订单写操作_" + suffix, "AIPLAOWPR_" + suffix,
+                        "AI 平台订单报价改价 + 取消 + 重试归档权限", 93, null));
+        roleAppService.assignPermissions(orderWriteRoleId, new AssignPermissionsCommand(List.of(
+                ORDER_QUOTE_PERMISSION, ORDER_CANCEL_PERMISSION, ORDER_RETRY_ARCHIVE_PERMISSION)));
+        orderWriteUserNickname = "交易监管运营_" + suffix;
+        orderWriteUserId = userAppService.create(
+                new CreateAdminUserCommand(usernameWithOrderWrite, PASSWORD,
+                        orderWriteUserNickname, null, null, null));
+        userAppService.assignRoles(orderWriteUserId, new AssignRolesCommand(List.of(orderWriteRoleId)));
+
+        // 仅 quote 单写码——钉死三写码彼此独立（spec #62 最小授权：定价与处置/归档分权）
+        Long quoteOnlyRoleId = roleAppService.create(
+                new CreateRoleCommand("AI平台订单报价_" + suffix, "AIPLAQPON_" + suffix,
+                        "AI 平台订单仅报价改价权限", 94, null));
+        roleAppService.assignPermissions(quoteOnlyRoleId,
+                new AssignPermissionsCommand(List.of(ORDER_QUOTE_PERMISSION)));
+        Long quoteOnlyUserId = userAppService.create(
+                new CreateAdminUserCommand(usernameWithQuoteOnly, PASSWORD,
+                        "定价专员_" + suffix, null, null, null));
+        userAppService.assignRoles(quoteOnlyUserId, new AssignRolesCommand(List.of(quoteOnlyRoleId)));
+
         // 200 用例：aiplatform 下游 mock，证明通路接通（不依赖真实 aiplatform 服务）
         when(aiplatformClient.getAccountProfile(eq(EXTERNAL_ID))).thenReturn(
                 new AiplatformAccountProfileWireResponse(
@@ -383,6 +425,21 @@ class AiplatformRbacEnforcementIntegrationTest {
             capturedOperatorId.set(RequestContext.getUserId());
             capturedOperatorName.set(RequestContext.getUserName());
         };
+        // 订单写路径 mock：三操作回执（用户面同构 OrderResponse）+ 抓取 RequestContext（操作者
+        // 透传契约证据——issue #70 断言必带；provider 落痕价目行/订单行，缺头落空）
+        doAnswer(inv -> {
+            capture.run();
+            return orderReceiptWire(2, "已报价", null, null, null);
+        }).when(aiplatformClient).quoteOrder(eq(ORDER_ID), any(AiplatformOrderQuoteWireRequest.class));
+        doAnswer(inv -> {
+            capture.run();
+            return orderReceiptWire(5, "已取消", LocalDateTime.of(2026, 9, 16, 15, 0, 0), null, null);
+        }).when(aiplatformClient).cancelOrder(eq(ORDER_ID), any(AiplatformOrderCancelWireRequest.class));
+        doAnswer(inv -> {
+            capture.run();
+            return orderReceiptWire(4, "已归档", null,
+                    LocalDateTime.of(2026, 9, 15, 20, 0, 0), LocalDateTime.of(2026, 9, 16, 9, 30, 0));
+        }).when(aiplatformClient).retryArchiveOrder(eq(ORDER_ID));
         doAnswer(inv -> {
             capture.run();
             return workspaceActionReceiptWire(1, "运行", 1, "运行中", null, null);
@@ -512,6 +569,25 @@ class AiplatformRbacEnforcementIntegrationTest {
                     2, "停用", Instant.parse("2026-09-01T08:30:00Z"),
                     String.valueOf(materialWriteUserId), materialWriteUserNickname);
         }).when(aiplatformClient).deleteMaterial(eq(MATERIAL_ID));
+    }
+
+    /**
+     * 三写操作回执共用的 wire 载荷工厂（用户面同构 OrderResponse）：按动作后的终态
+     * （status/时点组）参数化，其余字段固定（报价事实 + 单条五字段价目行——回执形状的
+     * 代表面）。paidAt/cancelledAt/archivedAt 全参数化——各终态只落自己的时点（改价/取消单
+     * 未支付 paidAt=null，归档单双时点俱全）。
+     */
+    private static AiplatformOrderWireResponse orderReceiptWire(
+            Integer status, String statusName,
+            LocalDateTime cancelledAt, LocalDateTime paidAt, LocalDateTime archivedAt) {
+        return new AiplatformOrderWireResponse(
+                ORDER_ID, "3829492007654321", status, statusName,
+                2199000L, "CNY", "含加急费用", LocalDateTime.of(2026, 9, 11, 9, 0, 0),
+                List.of(new AiplatformOrderWireResponse.PriceEntry(
+                        "3829492011111111", 2199000L, "CNY", "含加急费用",
+                        LocalDateTime.of(2026, 9, 12, 10, 0, 0))),
+                LocalDateTime.of(2026, 9, 10, 14, 20, 0),
+                cancelledAt, paidAt, archivedAt);
     }
 
     /**
@@ -663,6 +739,137 @@ class AiplatformRbacEnforcementIntegrationTest {
         JsonNode root = objectMapper.readTree(response.getBody());
         assertThat(root.path("code").asInt()).isEqualTo(5001);
         assertThat(root.path("message").asText()).isEqualTo("订单不存在");
+        assertThat(root.path("data").isNull()).isTrue();
+    }
+
+    // ========== 订单写操作（quote/cancel/retry-archive 三独立写码）· 权限三态 + 操作者身份透传 ==========
+
+    @Test
+    @DisplayName("非超管且拥有三写码 → 报价/取消/重试归档 200，回执=用户面 OrderResponse 且 RequestContext 透传登录 operator")
+    void given_nonSuperAdminWithThreeWriteCodes_when_orderActions_then_200_andRequestContextCarriesOperator()
+            throws Exception {
+        String token = login(usernameWithOrderWrite);
+
+        // 报价（本例＝改价：已报价态重复提交）：回执现值取最新价目行 + append-only 价目历史
+        // （五字段，无操作者留痕——查全量留痕转后台详情读口）
+        ResponseEntity<String> quote = postWithToken(QUOTE_ENDPOINT, QUOTE_BODY, token);
+        assertThat(quote.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode quoted = objectMapper.readTree(quote.getBody()).path("data");
+        assertThat(quoted.path("id").asText()).isEqualTo(ORDER_ID);
+        assertThat(quoted.path("status").asInt()).isEqualTo(2);
+        assertThat(quoted.path("statusName").asText()).isEqualTo("已报价");
+        assertThat(quoted.path("amount").asLong()).isEqualTo(2199000L);
+        assertThat(quoted.path("note").asText()).isEqualTo("含加急费用");
+        assertThat(quoted.path("quotedAt").asText()).isEqualTo("2026-09-11T09:00:00");
+        JsonNode entry = quoted.path("priceEntries").get(0);
+        assertThat(entry.path("amount").asLong()).isEqualTo(2199000L);
+        assertThat(entry.path("createdAt").asText()).isEqualTo("2026-09-12T10:00:00");
+        // 用户面回执无操作者留痕两肢——字段不存在（isMissingNode），区别于后台详情价目行
+        assertThat(entry.path("operatorId").isMissingNode()).isTrue();
+
+        // 取消：已取消终态（cancelledAt 落定，报价事实保留）
+        ResponseEntity<String> cancel = postWithToken(CANCEL_ENDPOINT, CANCEL_BODY, token);
+        assertThat(cancel.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode cancelled = objectMapper.readTree(cancel.getBody()).path("data");
+        assertThat(cancelled.path("status").asInt()).isEqualTo(5);
+        assertThat(cancelled.path("statusName").asText()).isEqualTo("已取消");
+        assertThat(cancelled.path("cancelledAt").asText()).isEqualTo("2026-09-16T15:00:00");
+
+        // 重试归档：已归档终态（paidAt/archivedAt 双时点）
+        ResponseEntity<String> retryArchive = postWithToken(RETRY_ARCHIVE_ENDPOINT, token);
+        assertThat(retryArchive.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode archived = objectMapper.readTree(retryArchive.getBody()).path("data");
+        assertThat(archived.path("status").asInt()).isEqualTo(4);
+        assertThat(archived.path("paidAt").asText()).isEqualTo("2026-09-15T20:00:00");
+        assertThat(archived.path("archivedAt").asText()).isEqualTo("2026-09-16T09:30:00");
+
+        // 操作者身份不经 body——经 RequestContext 抵达出站调用点（OpenApiClient 据此带
+        // X-User-Id/X-User-Name 出站头，issue #70 断言必带；provider 落痕价目行/订单行）：
+        // == 登录交易监管运营的 id/昵称
+        assertThat(capturedOperatorId.get()).isEqualTo(orderWriteUserId);
+        assertThat(capturedOperatorName.get()).isEqualTo(orderWriteUserNickname);
+    }
+
+    @Test
+    @DisplayName("仅有 order:read（无写码）→ 三写操作 403（read ≠ 三写码）")
+    void given_nonSuperAdminWithReadOnly_when_orderWriteActions_then_403() {
+        String token = login(usernameWithReadPermission);
+        assertThat(postWithToken(QUOTE_ENDPOINT, QUOTE_BODY, token).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(CANCEL_ENDPOINT, CANCEL_BODY, token).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(RETRY_ARCHIVE_ENDPOINT, token).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("仅有 order:quote 单写码 → 报价 200、取消/重试归档 403（三写码彼此独立，最小授权）")
+    void given_nonSuperAdminWithQuoteOnly_when_actions_then_quote200Others403() {
+        String token = login(usernameWithQuoteOnly);
+        assertThat(postWithToken(QUOTE_ENDPOINT, QUOTE_BODY, token).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(postWithToken(CANCEL_ENDPOINT, CANCEL_BODY, token).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(RETRY_ARCHIVE_ENDPOINT, token).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("非超管且缺少权限 → 订单三写端点 403")
+    void given_nonSuperAdminWithoutPermission_when_orderWriteEndpoints_then_403() {
+        String token = login(usernameWithoutPermission);
+        assertThat(postWithToken(QUOTE_ENDPOINT, QUOTE_BODY, token).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(CANCEL_ENDPOINT, CANCEL_BODY, token).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(RETRY_ARCHIVE_ENDPOINT, token).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("未登录访问订单三写端点返回 401")
+    void given_unauthenticated_when_orderWriteEndpoints_then_401() {
+        assertThat(postWithToken(QUOTE_ENDPOINT, QUOTE_BODY, null).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(postWithToken(CANCEL_ENDPOINT, CANCEL_BODY, null).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(postWithToken(RETRY_ARCHIVE_ENDPOINT, null).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    @DisplayName("取消下游 ORD_005（已支付拒取消）→ 北向 HTTP 409 + 信封 code=5005 + message 原文（不映射）")
+    void given_ord005FromDownstream_when_cancel_then_errorEnvelopePassedThrough() throws Exception {
+        when(aiplatformClient.cancelOrder(eq(ORDER_ID), any(AiplatformOrderCancelWireRequest.class)))
+                .thenThrow(AiplatformUpstreamException.from(new OpenApiClientException(409,
+                        "{\"code\":5005,\"message\":\"订单已支付或已终结，无法取消\",\"data\":null}")));
+
+        String token = login(usernameWithOrderWrite);
+        ResponseEntity<String> response = postWithToken(CANCEL_ENDPOINT, CANCEL_BODY, token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        JsonNode root = objectMapper.readTree(response.getBody());
+        // 信封 code＝数字业务码 5005（ORD_005＝域码 5×1000＋5），而非映射后的 409——前端比对业务码的分支活
+        assertThat(root.path("code").asInt()).isEqualTo(5005);
+        assertThat(root.path("message").asText()).isEqualTo("订单已支付或已终结，无法取消");
+        assertThat(root.path("data").isNull()).isTrue();
+    }
+
+    @Test
+    @DisplayName("重试归档下游 PRJ_013（项目已归档，跨域码）→ 北向 HTTP 409 + 信封 code=4013 + message 原文（不映射）")
+    void given_prj013FromDownstream_when_retryArchive_then_crossDomainCodePassedThrough() throws Exception {
+        when(aiplatformClient.retryArchiveOrder(eq(ORDER_ID))).thenThrow(
+                AiplatformUpstreamException.from(new OpenApiClientException(409,
+                        "{\"code\":4013,\"message\":\"项目已归档（归档是单向终点）\",\"data\":null}")));
+
+        String token = login(usernameWithOrderWrite);
+        ResponseEntity<String> response = postWithToken(RETRY_ARCHIVE_ENDPOINT, token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        JsonNode root = objectMapper.readTree(response.getBody());
+        // 跨域码透传（issue #70）：PRJ_013 来自项目域（域码 4×1000＋13），经订单域端点原样抵达北向
+        assertThat(root.path("code").asInt()).isEqualTo(4013);
+        assertThat(root.path("message").asText()).isEqualTo("项目已归档（归档是单向终点）");
         assertThat(root.path("data").isNull()).isTrue();
     }
 

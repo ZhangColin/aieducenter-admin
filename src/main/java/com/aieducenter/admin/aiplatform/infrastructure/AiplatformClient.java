@@ -13,9 +13,12 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostWindo
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialSummaryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderCancelWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderListWireRequest;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderQuoteWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryRepriceWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireResponse;
@@ -79,6 +82,11 @@ public class AiplatformClient {
             new TypeReference<>() {};
 
     private static final TypeReference<ApiResponse<AiplatformOrderDetailWireResponse>> ORDER_DETAIL_TYPEREF =
+            new TypeReference<>() {};
+
+    // 订单写路径（#29 交易环②报价改价 + #157 运营取消 + #158 重试归档）三操作共用回执：
+    // ApiResponse<OrderResponse>（provider 用户面同构 DTO——五字段价目行，区别于后台详情七字段行）
+    private static final TypeReference<ApiResponse<AiplatformOrderWireResponse>> ORDER_RECEIPT_TYPEREF =
             new TypeReference<>() {};
 
     // 项目域（#159/#162）同为 ApiResponse<T> 信封；对话史/版本列表的 data 是裸 List（非分页载体）
@@ -262,6 +270,92 @@ public class AiplatformClient {
         log.debug("AiplatformClient.downloadSourcePackage: {}", url);
         try {
             return openApiClient.download(url);
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 提交报价/改价（透传 aiplatform）——「已报价态重复提交＝改价」语义由 provider 承担
+     * （待报价态首次提交＝报价→已报价；已报价态重复提交＝改价，状态不变、append-only 价目行
+     * 留痕、订单现值取最新行），BFF 不解释不预判。
+     *
+     * <p>对接 aiplatform {@code POST /api/backoffice/orders/{id}/quote}（#29 交易环②）：请求体
+     * {@code {amount, note}} 逐字镜像（amount Long 分 → JSON string，全局 Long→ToStringSerializer
+     * 出口口径——provider 默认 string→Long 强转可回读；note 可空在场），返回
+     * {@code ApiResponse<OrderResponse>}（用户面同构回执，含 append-only 改价历史）。操作者身份
+     * 经框架 {@code OpenApiClient} 自动带 {@code X-User-Id/X-User-Name} 头（RequestContext→
+     * provider 落痕价目行，缺头落空）。订单不存在 404 ORD_001（5001）；已支付/已终结
+     * 409 ORD_007（5007）；金额非正 400 ORD_008（5008）；备注超长 400 ORD_009（5009）
+     * ——均原样透传。</p>
+     *
+     * @param id      订单标识（TSID 十进制字符串，provider 侧 lenient 解析：非数值同 404 ORD_001）
+     * @param command 报价命令体（由应用层从北向命令映射而来，字段合法性归 provider 聚合守卫）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（ORD_001/007/008/009 等，不做映射）
+     */
+    public AiplatformOrderWireResponse quoteOrder(String id, AiplatformOrderQuoteWireRequest command) {
+        String url = baseUrl + "/api/backoffice/orders/" + encode(id) + "/quote";
+        log.debug("AiplatformClient.quoteOrder: {}", url);
+        try {
+            ApiResponse<AiplatformOrderWireResponse> resp = openApiClient.post(url, command, ORDER_RECEIPT_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 运营取消订单（透传 aiplatform）——限未支付态，语义与用户取消完全一致：订单落已取消、
+     * 项目解冻回迭代、用户可继续对话与再次下单。取消原因必填（运营内部口径留档，不呈现
+     * 任何用户面读面）。
+     *
+     * <p>对接 aiplatform {@code POST /api/backoffice/orders/{id}/cancel}（#157）：请求体
+     * {@code {reason}} 逐字镜像，返回 {@code ApiResponse<OrderResponse>}（已取消终态回执，
+     * cancelledAt 落定）。操作者身份经框架 {@code OpenApiClient} 自动带
+     * {@code X-User-Id/X-User-Name} 头（RequestContext→provider 落痕订单行，缺头落空）。
+     * 订单不存在 404 ORD_001（5001）；已支付/已归档/已取消 409 ORD_005（5005，退款/售后
+     * 另议）；原因缺失 400 ORD_013（5013）；原因超长（至多 1000 字）400 ORD_014（5014）
+     * ——均原样透传。</p>
+     *
+     * @param id      订单标识（TSID 十进制字符串，provider 侧 lenient 解析）
+     * @param command 取消命令体（由应用层从北向命令映射而来，字段合法性归 provider 聚合守卫）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（ORD_001/005/013/014 等，不做映射）
+     */
+    public AiplatformOrderWireResponse cancelOrder(String id, AiplatformOrderCancelWireRequest command) {
+        String url = baseUrl + "/api/backoffice/orders/" + encode(id) + "/cancel";
+        log.debug("AiplatformClient.cancelOrder: {}", url);
+        try {
+            ApiResponse<AiplatformOrderWireResponse> resp = openApiClient.post(url, command, ORDER_RECEIPT_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 重试归档（透传 aiplatform）——已支付未归档卡单的手动补完结：一事务内订单落已归档＋
+     * 项目归档，成功后补发「已归档」通知并触发知识沉淀（成交 PRD 入知识库，best-effort
+     * 不炸主流程）。幂等由既有守卫保证。
+     *
+     * <p>对接 aiplatform {@code POST /api/backoffice/orders/{id}/retry-archive}（#158）：
+     * <strong>无请求体</strong>（框架 {@code OpenApiClient.post} 对 null body 发空 body，
+     * provider 端只读路径参数——同沙箱四动作/单价表停用先例），返回
+     * {@code ApiResponse<OrderResponse>}（已归档终态回执，paidAt/archivedAt 双时点）。
+     * 操作者身份经框架 {@code OpenApiClient} 自动带 {@code X-User-Id/X-User-Name} 头
+     * （RequestContext→provider 落痕订单行，缺头落空；支付链自动归档操作者为空）。订单
+     * 不存在 404 ORD_001（5001）；重复触发/非已支付态 409 ORD_012（5012）；项目已归档
+     * 409 <strong>PRJ_013</strong>（4013，跨 BC 既有码透传——不产生重复素材）——均原样
+     * 透传。</p>
+     *
+     * @param id 订单标识（TSID 十进制字符串，provider 侧 lenient 解析）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（ORD_001/012、PRJ_013 等，不做映射）
+     */
+    public AiplatformOrderWireResponse retryArchiveOrder(String id) {
+        String url = baseUrl + "/api/backoffice/orders/" + encode(id) + "/retry-archive";
+        log.debug("AiplatformClient.retryArchiveOrder: {}", url);
+        try {
+            ApiResponse<AiplatformOrderWireResponse> resp = openApiClient.post(url, null, ORDER_RECEIPT_TYPEREF);
+            return resp.data();
         } catch (OpenApiClientException e) {
             throw AiplatformUpstreamException.from(e);
         }

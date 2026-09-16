@@ -4,8 +4,11 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import com.aieducenter.admin.aiplatform.application.AiplatformOrderAppService;
+import com.aieducenter.admin.aiplatform.application.dto.command.AiplatformOrderCancelCommand;
+import com.aieducenter.admin.aiplatform.application.dto.command.AiplatformOrderQuoteCommand;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformOrderQuery;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformOrderDetailResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformOrderResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformOrderSummaryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformSourcePackageResponse;
 import com.aieducenter.admin.constants.AdminScopes;
@@ -21,21 +24,31 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * AI 平台订单控制器——BFF 读路径（清单/详情/源码包），issue #64。
+ * AI 平台订单控制器——BFF 读路径（清单/详情/源码包，issue #64）＋写路径三操作
+ * （报价/改价、运营取消、重试归档，issue #70）。
  *
  * <p>北向 {@code /api/admin/aiplatform/orders/**} 逐字镜像 aiplatform
- * {@code /api/backoffice/orders/**}（#155/#156 已冻结）——查询参数名、缺省值、分页基准
- * （page 1-based，缺省 1/20）与 provider controller 同形。错误经
- * {@code AiplatformUpstreamErrorAdvice} 原样透传（如 404 ORD_001→5001、400 ORD_010→5010）。</p>
+ * {@code /api/backoffice/orders/**}（#155/#156/#29/#157/#158 已冻结）——查询参数名、缺省值、
+ * 分页基准（page 1-based，缺省 1/20）与 provider controller 同形。错误经
+ * {@code AiplatformUpstreamErrorAdvice} 原样透传（如 404 ORD_001→5001、400 ORD_010→5010、
+ * 409 PRJ_013→4013 跨域码）。</p>
  *
  * <p>分页（spec #62 平台分页统一决议目标态，区别于 payment 的 0-based Pageable ±1 仪式）：
  * 北向请求 page 1-based、回显 provider 1-based 原值，全链零换算；provider clamp
  * （page≥1、size∈[1,100]）行为透传，BFF 不重复夹取。</p>
+ *
+ * <p>权限码（spec #62）：读 {@code order:read} 一码（#64）；三写操作各自独立成码
+ * （{@code order:quote|cancel|retry-archive}，issue #70）——最小授权（如只给定价员配报价
+ * 而不给取消/归档）。操作者身份由框架 OpenApiClient 自动透传 {@code X-User-Id/X-User-Name}
+ * 出站头（identity 同款），provider 落痕价目行（报价）/订单行（取消/归档）——认知口径：
+ * 操作者＝admin 侧管理员，非 aiplatform 平台用户；北向无操作者字段，前端无法伪造留痕。</p>
  *
  * @since 0.1.0
  */
@@ -117,5 +130,68 @@ public class AiplatformOrderController {
                 .header(HttpHeaders.CONTENT_TYPE, pkg.contentType())
                 .header(HttpHeaders.CONTENT_DISPOSITION, pkg.contentDisposition())
                 .body(pkg.content());
+    }
+
+    @PostMapping("/{id}/quote")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:aiplatform:order:quote",
+            name = "AI 平台 / 订单报价改价",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "提交报价（已报价态重复提交＝改价）——透传 aiplatform",
+            description = "交易定价写口：待报价态首次提交＝报价（→已报价）；已报价态重复提交＝改价"
+                    + "（状态不变，append-only 价目行留痕、订单现值取最新行，改价历史用户面可见）"
+                    + "——<strong>语义由 provider 承担、BFF 不解释</strong>（同一端点同一命令体，前端"
+                    + "无需区分模式）。命令体逐字镜像 {amount, note}：amount 总价（分，正整数，"
+                    + "JSON string——Long 出口口径）；note 报价备注（可空，至多 1000 字，用户面展示）。"
+                    + "回执＝OrderResponse（provider 用户面同构：金额/备注取最新价目行＋改价历史"
+                    + "新→旧，价目行五字段无操作者——查全量留痕转后台详情读口）。X-User-Id/"
+                    + "X-User-Name 透传头自动落痕价目行（缺头落空）。订单不存在（含畸形 id）"
+                    + " 404 ORD_001（数字业务码 5001）；限未支付态：已支付/已终结 409 ORD_007（5007）；"
+                    + "金额非正 400 ORD_008（5008）；备注超长 400 ORD_009（5009）。")
+    public ApiResponse<AiplatformOrderResponse> quote(
+            @PathVariable String id, @RequestBody AiplatformOrderQuoteCommand command) {
+        return ApiResponse.ok(orderAppService.quote(id, command));
+    }
+
+    @PostMapping("/{id}/cancel")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:aiplatform:order:cancel",
+            name = "AI 平台 / 订单取消",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "运营取消订单（限未支付态）——透传 aiplatform",
+            description = "异常交易处置：语义与用户取消完全一致——订单落已取消、项目解冻回迭代、"
+                    + "用户可继续对话与再次下单。取消原因必填（运营内部口径留档，不呈现任何用户面"
+                    + "读面、后台订单详情可见）。命令体逐字镜像 {reason}（必填，至多 1000 字）。"
+                    + "回执＝OrderResponse（已取消终态，cancelledAt 落定）。X-User-Id/X-User-Name"
+                    + " 透传头自动落痕订单行（缺头落空）。订单不存在（含畸形 id）404 ORD_001"
+                    + "（数字业务码 5001）；限未支付态：已支付/已归档/已取消 409 ORD_005（5005，"
+                    + "退款/售后另议）；原因缺失 400 ORD_013（5013）；原因超长 400 ORD_014（5014）。")
+    public ApiResponse<AiplatformOrderResponse> cancel(
+            @PathVariable String id, @RequestBody AiplatformOrderCancelCommand command) {
+        return ApiResponse.ok(orderAppService.cancel(id, command));
+    }
+
+    @PostMapping("/{id}/retry-archive")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:aiplatform:order:retry-archive",
+            name = "AI 平台 / 订单重试归档",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "重试归档（已支付未归档的卡单补归档）——透传 aiplatform",
+            description = "交付闭环补齐：对支付成功但归档失败的卡单手动补完结——一事务内订单落"
+                    + "已归档＋项目归档，成功后补发「已归档」通知并触发知识沉淀（成交 PRD 入"
+                    + "知识库，best-effort 不炸主流程）。幂等由 provider 既有守卫保证。<strong>无请求体</strong>。"
+                    + "回执＝OrderResponse（已归档终态，paidAt/archivedAt 双时点）。X-User-Id/"
+                    + "X-User-Name 透传头自动落痕订单行（缺头落空；支付链自动归档操作者为空）。"
+                    + "订单不存在（含畸形 id）404 ORD_001（数字业务码 5001）；重复触发/非已支付态"
+                    + " 409 ORD_012（5012）；项目已归档 409 <strong>PRJ_013</strong>（数字业务码"
+                    + " 4013，跨域码原样透传——不产生重复素材）。")
+    public ApiResponse<AiplatformOrderResponse> retryArchive(@PathVariable String id) {
+        return ApiResponse.ok(orderAppService.retryArchive(id));
     }
 }

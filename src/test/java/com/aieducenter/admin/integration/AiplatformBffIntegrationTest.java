@@ -29,6 +29,8 @@ import com.aieducenter.admin.aiplatform.application.AiplatformPriceEntryAppServi
 import com.aieducenter.admin.aiplatform.application.AiplatformProjectAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformUpstreamException;
 import com.aieducenter.admin.aiplatform.application.AiplatformWorkspaceAppService;
+import com.aieducenter.admin.aiplatform.application.dto.command.AiplatformOrderCancelCommand;
+import com.aieducenter.admin.aiplatform.application.dto.command.AiplatformOrderQuoteCommand;
 import com.aieducenter.admin.aiplatform.application.dto.command.AiplatformPriceEntryRepriceCommand;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformCostQuery;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformMaterialQuery;
@@ -40,6 +42,7 @@ import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformAccou
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformCostOverviewResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformMaterialDetailResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformMaterialSummaryResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformOrderResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformOrderSummaryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectCostDetailResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectCostResponse;
@@ -58,8 +61,11 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialD
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderBriefWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderCancelWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderListWireRequest;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderQuoteWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryRepriceWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformTokenUsageWireResponse;
@@ -85,7 +91,8 @@ import com.cartisan.web.response.PageResponse;
 /**
  * aiplatform BFF 集成测试（issue #63 T1 账号首批 + #64 订单读路径 + #65 项目核心读路径 +
  * #66 沙箱观测与四干预动作 + #67 成本四读口 + #68 单价表清单/原子改价/停用 + #69 知识素材
- * 清单/详情/停用⇄启用/删除）——mock {@link AiplatformClient}，验证 AppService 在 Spring 上下文
+ * 清单/详情/停用⇄启用/删除 + #70 订单写路径报价/改价/取消/重试归档）——mock {@link AiplatformClient}，
+ * 验证 AppService 在 Spring 上下文
  * 中的完整接线（DI、query→wire 映射、wire→response DTO 映射、分页 1-based 透传、二进制载体
  * 保全、下游错误透传不映射）。
  *
@@ -244,6 +251,122 @@ class AiplatformBffIntegrationTest {
         assertThat(pkg.content()).containsExactly(tarGz);
         assertThat(pkg.contentType()).isEqualTo("application/gzip");
         assertThat(pkg.contentDisposition()).isEqualTo("attachment; filename=\"3829492001234567-source.tar.gz\"");
+    }
+
+    // ========== 写路径三操作 · 命令映射 + 用户面同构回执映射 ==========
+
+    @Test
+    void given_quoteReceipt_when_quote_then_wireCommandMappedAndReceiptMapped() {
+        when(aiplatformClient.quoteOrder(eq("3829492001234567"), any())).thenReturn(orderReceiptWire(
+                2, "已报价", null, null, null, List.of(
+                        new AiplatformOrderWireResponse.PriceEntry(
+                                "3829492011111111", 2199000L, "CNY", "含加急费用",
+                                LocalDateTime.of(2026, 9, 12, 10, 0, 0)),
+                        new AiplatformOrderWireResponse.PriceEntry(
+                                "3829492009999999", 1999000L, "CNY", "首次报价",
+                                LocalDateTime.of(2026, 9, 11, 9, 0, 0)))));
+
+        AiplatformOrderResponse receipt = orderAppService.quote("3829492001234567",
+                new AiplatformOrderQuoteCommand(2199000L, "含加急费用"));
+
+        // 出站参数：北向命令 → wire 命令体逐字段映射（Long 分/null note 原值，不代填）
+        ArgumentCaptor<AiplatformOrderQuoteWireRequest> commandCaptor =
+                ArgumentCaptor.forClass(AiplatformOrderQuoteWireRequest.class);
+        verify(aiplatformClient).quoteOrder(eq("3829492001234567"), commandCaptor.capture());
+        assertThat(commandCaptor.getValue())
+                .isEqualTo(new AiplatformOrderQuoteWireRequest(2199000L, "含加急费用"));
+
+        // wire → response 逐字段：现值取最新价目行；quotedAt 仍是首次报价时点（改价不刷新）；
+        // 价目历史五字段（无操作者留痕——用户面同构回执）
+        assertThat(receipt.status()).isEqualTo(2);
+        assertThat(receipt.statusName()).isEqualTo("已报价");
+        assertThat(receipt.amount()).isEqualTo(2199000L);
+        assertThat(receipt.note()).isEqualTo("含加急费用");
+        assertThat(receipt.quotedAt()).isEqualTo(LocalDateTime.of(2026, 9, 11, 9, 0, 0));
+        assertThat(receipt.priceEntries()).hasSize(2);
+        assertThat(receipt.priceEntries().get(0).id()).isEqualTo("3829492011111111");
+        assertThat(receipt.priceEntries().get(0).amount()).isEqualTo(2199000L);
+        assertThat(receipt.priceEntries().get(1).note()).isEqualTo("首次报价");
+        assertThat(receipt.cancelledAt()).isNull();
+        assertThat(receipt.paidAt()).isNull();
+        assertThat(receipt.archivedAt()).isNull();
+    }
+
+    @Test
+    void given_cancelReceipt_when_cancel_then_wireCommandMappedAndCancelledReceiptMapped() {
+        when(aiplatformClient.cancelOrder(eq("3829492001234567"), any())).thenReturn(orderReceiptWire(
+                5, "已取消", LocalDateTime.of(2026, 9, 16, 15, 0, 0), null, null, List.of(
+                        new AiplatformOrderWireResponse.PriceEntry(
+                                "3829492011111111", 2199000L, "CNY", "含加急费用",
+                                LocalDateTime.of(2026, 9, 12, 10, 0, 0)))));
+
+        AiplatformOrderResponse receipt = orderAppService.cancel("3829492001234567",
+                new AiplatformOrderCancelCommand("重复下单，用户要求取消"));
+
+        // 出站参数：北向命令 → wire 命令体逐字段映射（reason 原值）
+        ArgumentCaptor<AiplatformOrderCancelWireRequest> commandCaptor =
+                ArgumentCaptor.forClass(AiplatformOrderCancelWireRequest.class);
+        verify(aiplatformClient).cancelOrder(eq("3829492001234567"), commandCaptor.capture());
+        assertThat(commandCaptor.getValue())
+                .isEqualTo(new AiplatformOrderCancelWireRequest("重复下单，用户要求取消"));
+
+        // 已取消终态回执：cancelledAt 落定，报价事实保留
+        assertThat(receipt.status()).isEqualTo(5);
+        assertThat(receipt.statusName()).isEqualTo("已取消");
+        assertThat(receipt.cancelledAt()).isEqualTo(LocalDateTime.of(2026, 9, 16, 15, 0, 0));
+        assertThat(receipt.amount()).isEqualTo(2199000L);
+        assertThat(receipt.priceEntries()).hasSize(1);
+    }
+
+    @Test
+    void given_archiveReceipt_when_retryArchive_then_archivedReceiptMapped() {
+        when(aiplatformClient.retryArchiveOrder("3829492001234567")).thenReturn(orderReceiptWire(
+                4, "已归档", null, LocalDateTime.of(2026, 9, 15, 20, 0, 0),
+                LocalDateTime.of(2026, 9, 16, 9, 30, 0), List.of()));
+
+        AiplatformOrderResponse receipt = orderAppService.retryArchive("3829492001234567");
+
+        // 已归档终态回执：paidAt/archivedAt 双时点（支付成功在前、补归档在后）；无请求体无命令映射
+        assertThat(receipt.status()).isEqualTo(4);
+        assertThat(receipt.statusName()).isEqualTo("已归档");
+        assertThat(receipt.paidAt()).isEqualTo(LocalDateTime.of(2026, 9, 15, 20, 0, 0));
+        assertThat(receipt.archivedAt()).isEqualTo(LocalDateTime.of(2026, 9, 16, 9, 30, 0));
+        assertThat(receipt.cancelledAt()).isNull();
+        assertThat(receipt.priceEntries()).isEmpty();
+    }
+
+    @Test
+    void given_ord007FromDownstream_when_quote_then_propagateWithoutMapping() {
+        when(aiplatformClient.quoteOrder(eq("3829492001234567"), any())).thenThrow(
+                AiplatformUpstreamException.from(new OpenApiClientException(409,
+                        "{\"code\":5007,\"message\":\"订单已支付或已终结，无法报价或改价\",\"data\":null}")));
+
+        assertThatThrownBy(() -> orderAppService.quote("3829492001234567",
+                new AiplatformOrderQuoteCommand(2199000L, "含加急费用")))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    // ORD_007 → HTTP 409 + 数字业务码 5007（域码 5×1000＋7）
+                    assertThat(upstream.httpStatus()).isEqualTo(409);
+                    assertThat(upstream.envelopeCode()).isEqualTo(5007);
+                    assertThat(upstream.getMessage()).isEqualTo("订单已支付或已终结，无法报价或改价");
+                });
+    }
+
+    /**
+     * 三写操作共用回执 wire 工厂：按动作后的终态（status/时点组）参数化，固定订单标识与
+     * 报价事实（金额/备注取最新价目行、quotedAt 首次报价时点）。paidAt/ cancelledAt/archivedAt
+     * 全参数化——各终态只落自己的时点（改价/取消单未支付 paidAt=null，归档单双时点俱全）。
+     */
+    private static AiplatformOrderWireResponse orderReceiptWire(
+            Integer status, String statusName,
+            LocalDateTime cancelledAt, LocalDateTime paidAt, LocalDateTime archivedAt,
+            List<AiplatformOrderWireResponse.PriceEntry> priceEntries) {
+        return new AiplatformOrderWireResponse(
+                "3829492001234567", "3829492007654321", status, statusName,
+                2199000L, "CNY", "含加急费用", LocalDateTime.of(2026, 9, 11, 9, 0, 0),
+                priceEntries, LocalDateTime.of(2026, 9, 10, 14, 20, 0),
+                cancelledAt, paidAt, archivedAt);
     }
 
     // ========== 项目清单 · query→wire 映射（status 单选）+ 分页 1-based 透传 ==========

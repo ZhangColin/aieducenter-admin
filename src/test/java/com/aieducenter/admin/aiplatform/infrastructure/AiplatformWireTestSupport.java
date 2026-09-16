@@ -16,6 +16,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 /**
@@ -108,9 +110,9 @@ final class AiplatformWireTestSupport {
     }
 
     /**
-     * 订单域版 {@link #accountAppServiceWithErrorTransport}——{@code get} 与 {@code download}
-     * 都始终抛 {@link OpenApiClientException}（框架对 ≥400 的行为复刻：download 的错误信封
-     * 在 body 里、以 UTF-8 解码后入异常）。
+     * 订单域版 {@link #accountAppServiceWithErrorTransport}——{@code get}/{@code download}/
+     * {@code post} 都始终抛 {@link OpenApiClientException}（框架对 ≥400 的行为复刻：download 的
+     * 错误信封在 body 里、以 UTF-8 解码后入异常；写路径三操作的错误信封同读口）。
      */
     static AiplatformOrderAppService orderAppServiceWithErrorTransport(
             int statusCode, String errorBody, String[] wireUrlSink) {
@@ -125,6 +127,59 @@ final class AiplatformWireTestSupport {
             public BinaryResponse download(String url) {
                 wireUrlSink[0] = url;
                 throw new OpenApiClientException(statusCode, errorBody);
+            }
+
+            @Override
+            public <T> T post(String url, Object body, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                throw new OpenApiClientException(statusCode, errorBody);
+            }
+        };
+        return new AiplatformOrderAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
+    }
+
+    /**
+     * 订单域<strong>写路径</strong>版 {@link #orderAppServiceWithStubTransport}——报价/取消/
+     * 重试归档走 {@code post}（前两者带命令体、重试归档 null body），按真实 {@code TypeReference}
+     * 反序列化；post 额外把命令体按<strong>生产 mapper 口径</strong>序列化进 wireBodySink（出站
+     * JSON 形状断言——OpenApiClient 序列化在其 sendWithBody 内部，传输替换于 post 方法边界会
+     * 绕过它，故在 stub 里用对齐生产的 mapper 补打这一 seam；null body 原样记 null——钉死
+     * 重试归档无请求体契约）。{@code get}/{@code download} 沿用读路径版语义（写测试不触达）。
+     */
+    static AiplatformOrderAppService orderWriteAppServiceWithStubTransport(
+            String envelopeBody, String[] wireUrlSink, String[] wireBodySink) {
+        ObjectMapper mapper = bootDefaultMapper();
+        // cartisan-web 生产 ObjectMapper 对 Long/long 注册 ToStringSerializer（JacksonConfiguration
+        // serializerByType，与 BigDecimal WRITE_BIGDECIMAL_AS_PLAIN 同一全局配置）——报价命令体的
+        // amount（Long 分）出站为 JSON string，断言须对齐生产口径，而非 Spring Boot 默认（JSON 数字）
+        ObjectMapper commandBodyMapper = bootDefaultMapper().registerModule(new SimpleModule()
+                .addSerializer(Long.class, ToStringSerializer.instance)
+                .addSerializer(Long.TYPE, ToStringSerializer.instance));
+        OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, mapper) {
+            @Override
+            public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                try {
+                    return mapper.readValue(envelopeBody, typeReference);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            public BinaryResponse download(String url) {
+                throw new UnsupportedOperationException("写路径契约测试不触达 download");
+            }
+
+            @Override
+            public <T> T post(String url, Object body, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                try {
+                    wireBodySink[0] = body == null ? null : commandBodyMapper.writeValueAsString(body);
+                    return mapper.readValue(envelopeBody, typeReference);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
             }
         };
         return new AiplatformOrderAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
