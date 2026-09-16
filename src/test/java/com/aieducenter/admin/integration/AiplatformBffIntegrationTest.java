@@ -23,6 +23,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 
 import com.aieducenter.admin.aiplatform.application.AiplatformAccountAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformCostAppService;
+import com.aieducenter.admin.aiplatform.application.AiplatformMaterialAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformOrderAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformPriceEntryAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformProjectAppService;
@@ -30,12 +31,15 @@ import com.aieducenter.admin.aiplatform.application.AiplatformUpstreamException;
 import com.aieducenter.admin.aiplatform.application.AiplatformWorkspaceAppService;
 import com.aieducenter.admin.aiplatform.application.dto.command.AiplatformPriceEntryRepriceCommand;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformCostQuery;
+import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformMaterialQuery;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformOrderQuery;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformPriceEntryQuery;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformProjectQuery;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformWorkspaceQuery;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformAccountProfileResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformCostOverviewResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformMaterialDetailResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformMaterialSummaryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformOrderSummaryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectCostDetailResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectCostResponse;
@@ -50,6 +54,9 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformAccountPr
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostOverviewWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostWindowWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformConversationEntryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialListWireRequest;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderBriefWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
@@ -77,9 +84,10 @@ import com.cartisan.web.response.PageResponse;
 
 /**
  * aiplatform BFF 集成测试（issue #63 T1 账号首批 + #64 订单读路径 + #65 项目核心读路径 +
- * #66 沙箱观测与四干预动作 + #67 成本四读口 + #68 单价表清单/原子改价/停用）——
- * mock {@link AiplatformClient}，验证 AppService 在 Spring 上下文中的完整接线（DI、query→wire 映射、
- * wire→response DTO 映射、分页 1-based 透传、二进制载体保全、下游错误透传不映射）。
+ * #66 沙箱观测与四干预动作 + #67 成本四读口 + #68 单价表清单/原子改价/停用 + #69 知识素材
+ * 清单/详情/停用⇄启用/删除）——mock {@link AiplatformClient}，验证 AppService 在 Spring 上下文
+ * 中的完整接线（DI、query→wire 映射、wire→response DTO 映射、分页 1-based 透传、二进制载体
+ * 保全、下游错误透传不映射）。
  *
  * <p>镜像 {@code AccountBffIntegrationTest} / {@code PaymentBffIntegrationTest}。不模拟安全层
  * （权限在 {@code AiplatformRbacEnforcementIntegrationTest} 覆盖）；不直测 {@link AiplatformClient}
@@ -116,6 +124,9 @@ class AiplatformBffIntegrationTest {
 
     @Autowired
     private AiplatformPriceEntryAppService priceEntryAppService;
+
+    @Autowired
+    private AiplatformMaterialAppService materialAppService;
 
     @MockBean
     private AiplatformClient aiplatformClient;
@@ -750,6 +761,142 @@ class AiplatformBffIntegrationTest {
                     assertThat(upstream.httpStatus()).isEqualTo(409);
                     assertThat(upstream.envelopeCode()).isEqualTo(3008);
                     assertThat(upstream.getMessage()).isEqualTo("同匹配键生效区间重叠（跨区间或同起点）");
+                });
+    }
+
+    // ========== 知识素材清单 · query→wire 映射（三维过滤）+ 分页 1-based 透传 ==========
+
+    @Test
+    void given_materialQueryAndPage_when_list_then_wireRequestMappedAndPageEchoedFromProvider() {
+        Instant sunkFrom = Instant.parse("2026-09-01T00:00:00Z");
+        Instant sunkTo = Instant.parse("2026-09-15T23:59:59Z");
+        when(aiplatformClient.listMaterials(any(), eq(2), eq(20))).thenReturn(new PageResponse<>(List.of(
+                new AiplatformMaterialSummaryWireResponse(
+                        "3840600001111111", "PRD", "3829492007654321", "英语学习助手",
+                        "英语学习助手 · PRD", 2, "停用",
+                        Instant.parse("2026-09-01T08:30:00Z"),
+                        "3829492001234567", "内容治理运营"),
+                new AiplatformMaterialSummaryWireResponse(
+                        "3840600002222222", "PRD", "3829492005555444", "待办清单应用",
+                        "待办清单应用 · PRD", 1, "启用",
+                        Instant.parse("2026-08-20T12:00:00Z"),
+                        null, null)), 9, 2, 20));
+
+        PageResponse<AiplatformMaterialSummaryResponse> page = materialAppService.list(
+                new AiplatformMaterialQuery(2, sunkFrom, sunkTo, "3829492007654321"), 2, 20);
+
+        // 出站参数：北向 query → wire 过滤记录逐字段映射（status 单选 + 沉淀时间闭区间 + projectId 精确）；
+        // page 1-based 直传（2→2，无 ±1）
+        ArgumentCaptor<AiplatformMaterialListWireRequest> wireCaptor =
+                ArgumentCaptor.forClass(AiplatformMaterialListWireRequest.class);
+        verify(aiplatformClient).listMaterials(wireCaptor.capture(), eq(2), eq(20));
+        assertThat(wireCaptor.getValue()).isEqualTo(new AiplatformMaterialListWireRequest(
+                2, sunkFrom, sunkTo, "3829492007654321"));
+
+        // 回显取 provider 回报值；wire → response 逐字段——首行已治理（status Integer + *Name、
+        // 操作者留痕两肢），次行未治理（操作者两列 null 如实映射）
+        assertThat(page.total()).isEqualTo(9L);
+        assertThat(page.page()).isEqualTo(2);
+        assertThat(page.size()).isEqualTo(20);
+        var governed = page.items().get(0);
+        assertThat(governed.id()).isEqualTo("3840600001111111");
+        assertThat(governed.kind()).isEqualTo("PRD");
+        assertThat(governed.projectId()).isEqualTo("3829492007654321");
+        assertThat(governed.projectName()).isEqualTo("英语学习助手");
+        assertThat(governed.status()).isEqualTo(2);
+        assertThat(governed.statusName()).isEqualTo("停用");
+        assertThat(governed.sunkAt()).isEqualTo(Instant.parse("2026-09-01T08:30:00Z"));
+        assertThat(governed.operatorId()).isEqualTo("3829492001234567");
+        var untreated = page.items().get(1);
+        assertThat(untreated.status()).isEqualTo(1);
+        assertThat(untreated.statusName()).isEqualTo("启用");
+        assertThat(untreated.operatorId()).isNull();
+        assertThat(untreated.operatorName()).isNull();
+    }
+
+    // ========== 素材详情 · 元数据 + PRD 全文映射 ==========
+
+    @Test
+    void given_materialDetailWire_when_getDetail_then_metadataAndContentMapped() {
+        when(aiplatformClient.getMaterial("3840600001111111")).thenReturn(
+                new AiplatformMaterialDetailWireResponse(
+                        "3840600001111111", "PRD", "3829492007654321", "英语学习助手",
+                        "英语学习助手 · PRD", 1, "启用",
+                        Instant.parse("2026-09-01T08:30:00Z"),
+                        null, null,
+                        "# PRD\n\n做一个英语学习助手……\n\n## 功能范围\n\n1. 单词卡片\n2. 复习计划"));
+
+        AiplatformMaterialDetailResponse detail = materialAppService.getDetail("3840600001111111");
+
+        // wire → response 逐字段：元数据（与清单行同形）＋全文 content 原样到达（块拼接形态不改写）
+        assertThat(detail.id()).isEqualTo("3840600001111111");
+        assertThat(detail.kind()).isEqualTo("PRD");
+        assertThat(detail.status()).isEqualTo(1);
+        assertThat(detail.statusName()).isEqualTo("启用");
+        assertThat(detail.sunkAt()).isEqualTo(Instant.parse("2026-09-01T08:30:00Z"));
+        assertThat(detail.operatorId()).isNull();
+        assertThat(detail.content()).startsWith("# PRD");
+        assertThat(detail.content()).contains("\n\n## 功能范围\n\n1. 单词卡片\n2. 复习计划");
+    }
+
+    // ========== 三治理动作 · 委托 + 回执映射（删除＝删除前终态） ==========
+
+    @Test
+    void given_governanceReceipts_when_disableEnableDelete_then_summaryReceiptsMapped() {
+        when(aiplatformClient.disableMaterial("3840600001111111")).thenReturn(
+                new AiplatformMaterialSummaryWireResponse(
+                        "3840600001111111", "PRD", "3829492007654321", "英语学习助手",
+                        "英语学习助手 · PRD", 2, "停用",
+                        Instant.parse("2026-09-01T08:30:00Z"),
+                        "3829492001234567", "内容治理运营"));
+        when(aiplatformClient.enableMaterial("3840600001111111")).thenReturn(
+                new AiplatformMaterialSummaryWireResponse(
+                        "3840600001111111", "PRD", "3829492007654321", "英语学习助手",
+                        "英语学习助手 · PRD", 1, "启用",
+                        Instant.parse("2026-09-01T08:30:00Z"),
+                        "3829492001234567", "内容治理运营"));
+        when(aiplatformClient.deleteMaterial("3840600001111111")).thenReturn(
+                new AiplatformMaterialSummaryWireResponse(
+                        "3840600001111111", "PRD", "3829492007654321", "英语学习助手",
+                        "英语学习助手 · PRD", 2, "停用",
+                        Instant.parse("2026-09-01T08:30:00Z"),
+                        "3829492001234567", "内容治理运营"));
+
+        // 停用回执：provider 重读登记行——已停用 + 操作者落素材级
+        AiplatformMaterialSummaryResponse disabled = materialAppService.disable("3840600001111111");
+        assertThat(disabled.status()).isEqualTo(2);
+        assertThat(disabled.statusName()).isEqualTo("停用");
+        assertThat(disabled.operatorId()).isEqualTo("3829492001234567");
+        assertThat(disabled.operatorName()).isEqualTo("内容治理运营");
+
+        // 启用回执：恢复启用（可逆开关的另一侧）
+        AiplatformMaterialSummaryResponse enabled = materialAppService.enable("3840600001111111");
+        assertThat(enabled.status()).isEqualTo(1);
+        assertThat(enabled.statusName()).isEqualTo("启用");
+
+        // 删除回执：删除前终态（本例是一行已停用素材——留痕原样在场，确认移除了什么）
+        AiplatformMaterialSummaryResponse deleted = materialAppService.delete("3840600001111111");
+        assertThat(deleted.id()).isEqualTo("3840600001111111");
+        assertThat(deleted.status()).isEqualTo(2);
+        assertThat(deleted.operatorName()).isEqualTo("内容治理运营");
+    }
+
+    // ========== 知识素材域错误 · 透传不映射 ==========
+
+    @Test
+    void given_knw006FromDownstream_when_disable_then_propagateWithoutMapping() {
+        when(aiplatformClient.disableMaterial("3840600001111111")).thenThrow(
+                AiplatformUpstreamException.from(new OpenApiClientException(400,
+                        "{\"code\":2006,\"message\":\"操作者不能为空\",\"data\":null}")));
+
+        assertThatThrownBy(() -> materialAppService.disable("3840600001111111"))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    // KNW_006 → HTTP 400 + 数字业务码 2006（域码 2×1000＋6，操作者必留痕守卫）
+                    assertThat(upstream.httpStatus()).isEqualTo(400);
+                    assertThat(upstream.envelopeCode()).isEqualTo(2006);
+                    assertThat(upstream.getMessage()).isEqualTo("操作者不能为空");
                 });
     }
 }

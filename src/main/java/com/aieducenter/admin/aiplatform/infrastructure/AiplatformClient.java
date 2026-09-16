@@ -10,6 +10,9 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformAccountPr
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformConversationEntryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostOverviewWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostWindowWireRequest;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialListWireRequest;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
@@ -127,6 +130,17 @@ public class AiplatformClient {
             new TypeReference<>() {};
 
     private static final TypeReference<ApiResponse<AiplatformUnitPriceEntryRepriceWireResponse>> PRICE_ENTRY_REPRICE_TYPEREF =
+            new TypeReference<>() {};
+
+    // 知识素材域（#166 知识库管理）同为 ApiResponse<T> 信封；清单 data 为 PageResponse（page 1-based），
+    // 详情含素材全文，三治理动作（停用/启用/删除）回执共形＝summary 单行（删除回执＝删除前终态）
+    private static final TypeReference<ApiResponse<PageResponse<AiplatformMaterialSummaryWireResponse>>> MATERIAL_PAGE_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<AiplatformMaterialDetailWireResponse>> MATERIAL_DETAIL_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<AiplatformMaterialSummaryWireResponse>> MATERIAL_SUMMARY_TYPEREF =
             new TypeReference<>() {};
 
     // 出站时间参数定长格式（秒恒在场）：LocalDateTime.toString() 会省略零秒（"T00:00"），
@@ -752,6 +766,149 @@ public class AiplatformClient {
         try {
             ApiResponse<AiplatformUnitPriceEntryWireResponse> resp =
                     openApiClient.post(url, null, PRICE_ENTRY_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 分页查询知识素材清单（透传 aiplatform，三维过滤——治理工作清单）。
+     *
+     * <p>对接 aiplatform {@code GET /api/backoffice/materials}（#166 知识库管理）：返回
+     * {@code ApiResponse<PageResponse<BackofficeMaterialSummaryResponse>>}。三维度可组合、均可缺省
+     * （缺省＝全量）：{@code status} 状态<strong>单选</strong> Integer code（1=启用 2=停用——与订单
+     * 多选有意不同）；{@code sunkFrom}/{@code sunkTo} 沉淀时间闭区间（首沉淀时间，ISO-8601
+     * Instant UTC 带 Z——{@code appendParam} 默认分支取 {@code Instant.toString()} 确定形）；
+     * {@code projectId} 来源项目 id 精确（查无＝空清单 200）。排序服务端定死＝沉淀时间倒序
+     * （新沉淀在前，id 倒序稳定）。绑定裁决两段：非整数 status/非 Instant 时间在<strong>北向
+     * 绑定层</strong>即 404（框架类型不匹配口径，到不了本方法）；provider 侧绑定失败
+     * 400 KNW_007（数字业务码 2007，含数值但未知的状态 code）原样透传。</p>
+     *
+     * <p>page 1-based 直传零换算（同订单/项目/沙箱/成本/单价表），provider clamp
+     * （page≥1、size∈[1,100] 默认 20）行为透传、本客户端不重复夹取。</p>
+     *
+     * @param filter wire 层过滤参数（由应用层从 {@code AiplatformMaterialQuery} 映射而来）
+     * @param page   页码，<strong>1-based</strong>（北向原样直传）
+     * @param size   每页大小
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（400 KNW_007 等，不做映射）
+     */
+    public PageResponse<AiplatformMaterialSummaryWireResponse> listMaterials(
+            AiplatformMaterialListWireRequest filter, int page, int size) {
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/backoffice/materials?page=").append(page)
+                .append("&size=").append(size);
+        // status 单选（1=启用 2=停用）：单值直传（项目/沙箱同款），无订单域多选拼逗号
+        appendParam(url, "status", filter.status());
+        appendParam(url, "sunkFrom", filter.sunkFrom());
+        appendParam(url, "sunkTo", filter.sunkTo());
+        appendParam(url, "projectId", filter.projectId());
+        log.debug("AiplatformClient.listMaterials: {}", url);
+        try {
+            ApiResponse<PageResponse<AiplatformMaterialSummaryWireResponse>> resp =
+                    openApiClient.get(url.toString(), MATERIAL_PAGE_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 查询知识素材详情（透传 aiplatform）——元数据（与清单行同形）＋素材全文：{@code content}
+     * ＝块按 seq 以空行拼接（段落级重组，内容无损）。来源项目引用容缺直读登记面。
+     *
+     * <p>对接 aiplatform {@code GET /api/backoffice/materials/{id}}（#166）：返回
+     * {@code ApiResponse<BackofficeMaterialDetailResponse>}；素材不存在（含畸形 id——provider
+     * 侧 lenient 解析）时 HTTP 404 + 数字业务码 2005（KNW_005）原样透传。</p>
+     *
+     * @param id 素材标识（TSID 十进制字符串，provider 侧 lenient 解析：非数值同 404 KNW_005）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（404 KNW_005 等，不做映射）
+     */
+    public AiplatformMaterialDetailWireResponse getMaterial(String id) {
+        String url = baseUrl + "/api/backoffice/materials/" + encode(id);
+        log.debug("AiplatformClient.getMaterial: {}", url);
+        try {
+            ApiResponse<AiplatformMaterialDetailWireResponse> resp =
+                    openApiClient.get(url, MATERIAL_DETAIL_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 停用素材（透传 aiplatform）——可逆开关：素材全部块退出生成命中（重沉淀不复活），误伤可经
+     * enable 恢复；重复停用幂等（操作者留最近一次）。
+     *
+     * <p>对接 aiplatform {@code POST /api/backoffice/materials/{id}/disable}（#166）：<strong>无
+     * 请求体</strong>（框架 {@code OpenApiClient.post} 对 null body 发空 body，provider 端只读
+     * 路径参数——同沙箱四动作/单价表停用先例），返回 {@code ApiResponse<BackofficeMaterialSummaryResponse>}
+     * （provider 重读登记行的最新状态与操作者）。操作者身份经框架 {@code OpenApiClient} 自动带
+     * {@code X-User-Id/X-User-Name} 头（RequestContext→provider 落痕素材级）——<strong>缺头
+     * 400 KNW_006</strong>（数字业务码 2006，知识治理动作必留痕，与单价表缺头落空有意不同——
+     * 知识治理无种子脚本无头通道）。素材不存在（含畸形 id）404 KNW_005（2005）——均原样透传。</p>
+     *
+     * @param id 素材标识（TSID 十进制字符串）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（400 KNW_006、404 KNW_005 等，不做映射）
+     */
+    public AiplatformMaterialSummaryWireResponse disableMaterial(String id) {
+        return postMaterialAction(id, "disable");
+    }
+
+    /**
+     * 启用素材（透传 aiplatform）——停用的可逆侧：素材全部块恢复参与生成命中；重复启用幂等。
+     *
+     * <p>对接 aiplatform {@code POST /api/backoffice/materials/{id}/enable}（#166）：无请求体，
+     * 回执＝summary（同停用口径）。操作者透传头落痕同停用（缺头 400 KNW_006＝2006）；
+     * 素材不存在（含畸形 id）404 KNW_005（2005）——均原样透传。</p>
+     *
+     * @param id 素材标识（TSID 十进制字符串）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（400 KNW_006、404 KNW_005 等，不做映射）
+     */
+    public AiplatformMaterialSummaryWireResponse enableMaterial(String id) {
+        return postMaterialAction(id, "enable");
+    }
+
+    /**
+     * 删除素材（透传 aiplatform）——治理移除、不可逆：登记行与全部块同事务移除、不动来源项目
+     * （管理删除与项目删除级联正交）；无行可留、不留痕。回执＝<strong>删除前终态</strong>
+     * summary（provider 契约如此，逐字镜像——确认移除了什么）。
+     *
+     * <p>对接 aiplatform {@code DELETE /api/backoffice/materials/{id}}（#166）：HTTP <strong>DELETE</strong>
+     * 动词——经框架 {@link OpenApiClient#delete}（cartisan-boot#33：空 body digest + query 入签
+     * + RequestContext 透传，与 {@code get()} 同形），返回 {@code ApiResponse<BackofficeMaterialSummaryResponse>}。
+     * 素材不存在（含畸形 id、重复删除）404 KNW_005（2005）原样透传。删除不落操作者
+     * （无行可留），操作者透传头在发（无操作者参数可落）。</p>
+     *
+     * @param id 素材标识（TSID 十进制字符串）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（404 KNW_005 等，不做映射）
+     */
+    public AiplatformMaterialSummaryWireResponse deleteMaterial(String id) {
+        String url = baseUrl + "/api/backoffice/materials/" + encode(id);
+        log.debug("AiplatformClient.deleteMaterial: {}", url);
+        try {
+            ApiResponse<AiplatformMaterialSummaryWireResponse> resp =
+                    openApiClient.delete(url, MATERIAL_SUMMARY_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 停用/启用两治理动作共用的出站形状（#166）：{@code POST /api/backoffice/materials/{id}/{action}}
+     * ——无请求体（框架 {@code OpenApiClient.post} 对 null body 发空 body，provider 端只读路径参数），
+     * 返回 {@code ApiResponse<BackofficeMaterialSummaryResponse>} 信封取 {@code .data()}（provider
+     * 重读登记行的最新状态与操作者）；操作者身份由框架经 {@code RequestContext}→
+     * {@code X-User-Id/X-User-Name} 自动透传（缺头会被 provider 域面守卫 KNW_006 拦截——
+     * 治理动作必留痕）。
+     */
+    private AiplatformMaterialSummaryWireResponse postMaterialAction(String id, String action) {
+        String url = baseUrl + "/api/backoffice/materials/" + encode(id) + "/" + action;
+        log.debug("AiplatformClient.materialAction[{}]: {}", action, url);
+        try {
+            ApiResponse<AiplatformMaterialSummaryWireResponse> resp =
+                    openApiClient.post(url, null, MATERIAL_SUMMARY_TYPEREF);
             return resp.data();
         } catch (OpenApiClientException e) {
             throw AiplatformUpstreamException.from(e);

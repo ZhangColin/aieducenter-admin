@@ -36,6 +36,8 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformAccountPr
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostOverviewWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostWindowWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformConversationEntryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformMaterialSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderBriefWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
@@ -73,12 +75,15 @@ import cn.dev33.satoken.config.SaTokenConfig;
 
 /**
  * aiplatform BFF 端点 RBAC 强制执行集成测试（issue #63 T1 账号 + #64 订单读路径 + #65 项目核心读路径 +
- * #66 沙箱观测与四干预动作 + #67 成本四读口 + #68 单价表清单/原子改价/停用）
+ * #66 沙箱观测与四干预动作 + #67 成本四读口 + #68 单价表清单/原子改价/停用 + #69 知识素材
+ * 清单/详情/停用⇄启用/删除）
  * ——真实 Sa-Token 过滤链，断言 {@code admin:aiplatform:account:read} / {@code admin:aiplatform:order:read} /
  * {@code admin:aiplatform:project:read} / {@code admin:aiplatform:workspace:read} /
- * {@code admin:aiplatform:cost:read} / {@code admin:aiplatform:price-entry:read} + 沙箱四独立写码
+ * {@code admin:aiplatform:cost:read} / {@code admin:aiplatform:price-entry:read} /
+ * {@code admin:aiplatform:material:read} + 沙箱四独立写码
  * （{@code workspace:wake|hibernate|rebuild|seal}）+ 单价表两独立写码
- * （{@code price-entry:reprice|deactivate}）对未登录（401）/ 无权者（403）/ 有权者（200）的行为，
+ * （{@code price-entry:reprice|deactivate}）+ 知识素材三独立写码
+ * （{@code material:disable|enable|delete}）对未登录（401）/ 无权者（403）/ 有权者（200）的行为，
  * 并钉死北向出口形状、二进制透传与 provider 错误信封透传。成本域另钉死时间窗 from/to 北向必填
  * （缺参 400 / 非 Instant 404 均在本服务绑定层裁决、不到 provider，issue #67：不设默认窗口）。
  *
@@ -86,11 +91,13 @@ import cn.dev33.satoken.config.SaTokenConfig;
  * {@code RbacEnforcementIntegrationTest}）。200 用例 mock {@link AiplatformClient}，证明权限放行后
  * 整条 controller→appservice→client 通路接通。超管 bypass 由框架级测试钉住，此处不重复。</p>
  *
- * <p><strong>操作者身份透传契约</strong>（issue #66 断言必带）：沙箱四干预动作从 {@code RequestContext}
- * 读 operator 审计，admin 不在 body 塞身份——框架 cartisan-openapi 自动从 {@code RequestContext} 带
- * {@code X-User-Id/X-User-Name} 出站 header。本测试在 mocked {@link AiplatformClient} 边界用
- * {@code doAnswer} 在调用瞬间抓取 {@link RequestContext#getUserId()} / {@link RequestContext#getUserName()}，
- * 断言其 == 登录沙箱治理运营的 id / 昵称（{@code AccountRbacEnforcementIntegrationTest} 同款手法）。</p>
+ * <p><strong>操作者身份透传契约</strong>（issue #66 断言必带；#69 素材域同款必带）：沙箱四干预动作、
+ * 单价表改价/停用、素材停用/启用从 {@code RequestContext} 读 operator 审计，admin 不在 body 塞
+ * 身份——框架 cartisan-openapi 自动从 {@code RequestContext} 带 {@code X-User-Id/X-User-Name}
+ * 出站 header。本测试在 mocked {@link AiplatformClient} 边界用 {@code doAnswer} 在调用瞬间抓取
+ * {@link RequestContext#getUserId()} / {@link RequestContext#getUserName()}，断言其 == 登录治理
+ * 运营的 id / 昵称（{@code AccountRbacEnforcementIntegrationTest} 同款手法）。素材域该头是
+ * provider 必拦项（缺头 400 KNW_006——治理动作必留痕），透传断言即「北向永缺不了头」的证据。</p>
  *
  * <p><strong>错误信封透传（spec #62 定稿）</strong>：下游 IDN_004（HTTP 404 + 数字业务码 6004）经
  * {@link AiplatformUpstreamException} 抵达 {@code AiplatformUpstreamErrorAdvice}，北向还原 provider
@@ -148,6 +155,16 @@ class AiplatformRbacEnforcementIntegrationTest {
     private static final String DEACTIVATE_ENDPOINT = PRICE_ENTRIES_ENDPOINT + "/" + PRICE_ENTRY_ID + "/deactivate";
     private static final String REPRICE_BODY =
             "{\"unitPrice\":0.0000018,\"currency\":\"USD\",\"effectiveFrom\":\"2026-09-20T00:00:00Z\"}";
+    private static final String MATERIAL_READ_PERMISSION = "admin:aiplatform:material:read";
+    private static final String MATERIAL_DISABLE_PERMISSION = "admin:aiplatform:material:disable";
+    private static final String MATERIAL_ENABLE_PERMISSION = "admin:aiplatform:material:enable";
+    private static final String MATERIAL_DELETE_PERMISSION = "admin:aiplatform:material:delete";
+    private static final String MATERIAL_ID = "3840600001111111";
+    private static final String MATERIALS_ENDPOINT = "/api/admin/aiplatform/materials";
+    private static final String MATERIAL_DETAIL_ENDPOINT = MATERIALS_ENDPOINT + "/" + MATERIAL_ID;
+    private static final String MATERIAL_DISABLE_ENDPOINT = MATERIAL_DETAIL_ENDPOINT + "/disable";
+    private static final String MATERIAL_ENABLE_ENDPOINT = MATERIAL_DETAIL_ENDPOINT + "/enable";
+    private static final String MATERIAL_DELETE_ENDPOINT = MATERIAL_DETAIL_ENDPOINT;
 
     private final AdminUserManagementAppService userAppService;
     private final RoleManagementAppService roleAppService;
@@ -164,15 +181,19 @@ class AiplatformRbacEnforcementIntegrationTest {
     private String usernameWithHibernateOnly;
     private String usernameWithPriceWrite;
     private String usernameWithRepriceOnly;
+    private String usernameWithMaterialWrite;
+    private String usernameWithDisableOnly;
 
     // 在 mocked client 调用瞬间抓取 RequestContext——证明 operator 身份抵达出站调用点
-    // （供 OpenApiClient 带 X-User-Id/X-User-Name 出站头，issue #66 断言必带）
+    // （供 OpenApiClient 带 X-User-Id/X-User-Name 出站头，issue #66/#69 断言必带）
     private final AtomicReference<Long> capturedOperatorId = new AtomicReference<>();
     private final AtomicReference<String> capturedOperatorName = new AtomicReference<>();
     private Long workspaceWriteUserId;
     private String workspaceWriteUserNickname;
     private Long priceWriteUserId;
     private String priceWriteUserNickname;
+    private Long materialWriteUserId;
+    private String materialWriteUserNickname;
 
     @Autowired
     AiplatformRbacEnforcementIntegrationTest(
@@ -200,14 +221,16 @@ class AiplatformRbacEnforcementIntegrationTest {
         usernameWithHibernateOnly = "aiplahibr" + suffix;
         usernameWithPriceWrite = "aiplapwpr" + suffix;
         usernameWithRepriceOnly = "aiplarpon" + suffix;
+        usernameWithMaterialWrite = "aiplamwpr" + suffix;
+        usernameWithDisableOnly = "aipladson" + suffix;
 
         Long readRoleId = roleAppService.create(
                 new CreateRoleCommand("AI平台读权限_" + suffix, "AIPLAREAD_" + suffix,
-                        "AI 平台账号档案 + 订单 + 项目 + 沙箱 + 成本 + 单价表读权限", 80, null));
+                        "AI 平台账号档案 + 订单 + 项目 + 沙箱 + 成本 + 单价表 + 知识素材读权限", 80, null));
         roleAppService.assignPermissions(readRoleId,
                 new AssignPermissionsCommand(List.of(READ_PERMISSION, ORDER_READ_PERMISSION,
                         PROJECT_READ_PERMISSION, WORKSPACE_READ_PERMISSION, COST_READ_PERMISSION,
-                        PRICE_ENTRY_READ_PERMISSION)));
+                        PRICE_ENTRY_READ_PERMISSION, MATERIAL_READ_PERMISSION)));
 
         Long userWithReadId = userAppService.create(
                 new CreateAdminUserCommand(usernameWithReadPermission, PASSWORD, "只读运营_" + suffix, null, null, null));
@@ -262,6 +285,29 @@ class AiplatformRbacEnforcementIntegrationTest {
                 new CreateAdminUserCommand(usernameWithRepriceOnly, PASSWORD,
                         "调价专员_" + suffix, null, null, null));
         userAppService.assignRoles(repriceOnlyUserId, new AssignRolesCommand(List.of(repriceOnlyRoleId)));
+
+        // 知识素材三写码专用运营（disable+enable+delete，无读码）——操作者透传断言用其 id/昵称
+        Long materialWriteRoleId = roleAppService.create(
+                new CreateRoleCommand("AI平台知识素材写操作_" + suffix, "AIPLAMWPR_" + suffix,
+                        "AI 平台知识素材停用 + 启用 + 删除权限", 98, null));
+        roleAppService.assignPermissions(materialWriteRoleId, new AssignPermissionsCommand(List.of(
+                MATERIAL_DISABLE_PERMISSION, MATERIAL_ENABLE_PERMISSION, MATERIAL_DELETE_PERMISSION)));
+        materialWriteUserNickname = "内容治理运营_" + suffix;
+        materialWriteUserId = userAppService.create(
+                new CreateAdminUserCommand(usernameWithMaterialWrite, PASSWORD,
+                        materialWriteUserNickname, null, null, null));
+        userAppService.assignRoles(materialWriteUserId, new AssignRolesCommand(List.of(materialWriteRoleId)));
+
+        // 仅 disable 单写码——钉死三写码彼此独立（spec #62 最小授权：可逆治理与不可逆删除分权）
+        Long disableOnlyRoleId = roleAppService.create(
+                new CreateRoleCommand("AI平台知识素材停用_" + suffix, "AIPLADSON_" + suffix,
+                        "AI 平台知识素材仅停用权限", 99, null));
+        roleAppService.assignPermissions(disableOnlyRoleId,
+                new AssignPermissionsCommand(List.of(MATERIAL_DISABLE_PERMISSION)));
+        Long disableOnlyUserId = userAppService.create(
+                new CreateAdminUserCommand(usernameWithDisableOnly, PASSWORD,
+                        "素材停用专员_" + suffix, null, null, null));
+        userAppService.assignRoles(disableOnlyUserId, new AssignRolesCommand(List.of(disableOnlyRoleId)));
 
         // 200 用例：aiplatform 下游 mock，证明通路接通（不依赖真实 aiplatform 服务）
         when(aiplatformClient.getAccountProfile(eq(EXTERNAL_ID))).thenReturn(
@@ -430,6 +476,42 @@ class AiplatformRbacEnforcementIntegrationTest {
                     Instant.parse("2026-08-01T00:00:00Z"), Instant.parse("2026-09-16T10:30:00Z"),
                     String.valueOf(priceWriteUserId), priceWriteUserNickname);
         }).when(aiplatformClient).deactivatePriceEntry(eq(PRICE_ENTRY_ID));
+        // 知识素材域 mock：清单（已治理行 + 未治理行）/ 详情（PRD 全文）/ 三治理动作回执（抓取
+        // RequestContext——操作者透传契约证据，provider 缺头必拦 KNW_006，issue #69 断言必带）
+        when(aiplatformClient.listMaterials(any(), anyInt(), anyInt())).thenReturn(new PageResponse<>(List.of(
+                new AiplatformMaterialSummaryWireResponse(
+                        MATERIAL_ID, "PRD", PROJECT_ID, "英语学习助手", "英语学习助手 · PRD",
+                        2, "停用", Instant.parse("2026-09-01T08:30:00Z"),
+                        String.valueOf(materialWriteUserId), materialWriteUserNickname),
+                new AiplatformMaterialSummaryWireResponse(
+                        "3840600002222222", "PRD", "3829492005555444", "待办清单应用",
+                        "待办清单应用 · PRD", 1, "启用", Instant.parse("2026-08-20T12:00:00Z"),
+                        null, null)), 9, 2, 20));
+        when(aiplatformClient.getMaterial(eq(MATERIAL_ID))).thenReturn(new AiplatformMaterialDetailWireResponse(
+                MATERIAL_ID, "PRD", PROJECT_ID, "英语学习助手", "英语学习助手 · PRD",
+                1, "启用", Instant.parse("2026-09-01T08:30:00Z"), null, null,
+                "# PRD\n\n做一个英语学习助手……\n\n## 功能范围\n\n1. 单词卡片\n2. 复习计划"));
+        doAnswer(inv -> {
+            capture.run();
+            return new AiplatformMaterialSummaryWireResponse(
+                    MATERIAL_ID, "PRD", PROJECT_ID, "英语学习助手", "英语学习助手 · PRD",
+                    2, "停用", Instant.parse("2026-09-01T08:30:00Z"),
+                    String.valueOf(materialWriteUserId), materialWriteUserNickname);
+        }).when(aiplatformClient).disableMaterial(eq(MATERIAL_ID));
+        doAnswer(inv -> {
+            capture.run();
+            return new AiplatformMaterialSummaryWireResponse(
+                    MATERIAL_ID, "PRD", PROJECT_ID, "英语学习助手", "英语学习助手 · PRD",
+                    1, "启用", Instant.parse("2026-09-01T08:30:00Z"),
+                    String.valueOf(materialWriteUserId), materialWriteUserNickname);
+        }).when(aiplatformClient).enableMaterial(eq(MATERIAL_ID));
+        doAnswer(inv -> {
+            capture.run();
+            return new AiplatformMaterialSummaryWireResponse(
+                    MATERIAL_ID, "PRD", PROJECT_ID, "英语学习助手", "英语学习助手 · PRD",
+                    2, "停用", Instant.parse("2026-09-01T08:30:00Z"),
+                    String.valueOf(materialWriteUserId), materialWriteUserNickname);
+        }).when(aiplatformClient).deleteMaterial(eq(MATERIAL_ID));
     }
 
     /**
@@ -1121,6 +1203,185 @@ class AiplatformRbacEnforcementIntegrationTest {
         assertThat(root.path("data").isNull()).isTrue();
     }
 
+    // ========== 知识素材（admin:aiplatform:material:read）· 权限三态 + 北向出口形状 ==========
+
+    @Test
+    @DisplayName("非超管且拥有 admin:aiplatform:material:read → 清单 200，三维过滤 + status/*Name + 留痕镜像 provider")
+    void given_nonSuperAdminWithMaterialRead_when_listMaterials_then_200AndShapeMirrorsProvider() throws Exception {
+        String token = login(usernameWithReadPermission);
+        // 三维过滤（status 单选 + 沉淀时间闭区间 Instant + projectId 精确）+ 分页 1-based 直传
+        ResponseEntity<String> response = getWithToken(
+                MATERIALS_ENDPOINT + "?status=2&sunkFrom=2026-09-01T00:00:00Z&sunkTo=2026-09-15T23:59:59Z"
+                        + "&projectId=" + PROJECT_ID + "&page=2&size=20", token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode data = objectMapper.readTree(response.getBody()).path("data");
+        // PageResponse 形状：items/total/page/size，回显 provider 回报值（page=2——1-based 原值）
+        assertThat(data.path("total").asLong()).isEqualTo(9L);
+        assertThat(data.path("page").asInt()).isEqualTo(2);
+        assertThat(data.path("size").asInt()).isEqualTo(20);
+        // 首行：已治理行——status Integer code + statusName、来源项目引用、治理留痕两肢
+        JsonNode governed = data.path("items").get(0);
+        assertThat(governed.path("id").asText()).isEqualTo(MATERIAL_ID);
+        assertThat(governed.path("kind").asText()).isEqualTo("PRD");
+        assertThat(governed.path("projectId").asText()).isEqualTo(PROJECT_ID);
+        assertThat(governed.path("projectName").asText()).isEqualTo("英语学习助手");
+        assertThat(governed.path("status").asInt()).isEqualTo(2);
+        assertThat(governed.path("statusName").asText()).isEqualTo("停用");
+        assertThat(governed.path("sunkAt").asText()).isEqualTo("2026-09-01T08:30:00Z");
+        assertThat(governed.path("operatorId").asText()).isEqualTo(String.valueOf(materialWriteUserId));
+        assertThat(governed.path("operatorName").asText()).isEqualTo(materialWriteUserNickname);
+        // 次行：未治理行——操作者两列如实出 JSON null（全局 Jackson 含 null）
+        JsonNode untreated = data.path("items").get(1);
+        assertThat(untreated.path("status").asInt()).isEqualTo(1);
+        assertThat(untreated.path("statusName").asText()).isEqualTo("启用");
+        assertThat(untreated.path("operatorId").isNull()).isTrue();
+        assertThat(untreated.path("operatorName").isNull()).isTrue();
+    }
+
+    @Test
+    @DisplayName("非超管且拥有 material:read → 详情 200，元数据 + PRD 全文 content 镜像 provider")
+    void given_nonSuperAdminWithMaterialRead_when_getMaterialDetail_then_200WithFullContent() throws Exception {
+        String token = login(usernameWithReadPermission);
+        ResponseEntity<String> response = getWithToken(MATERIAL_DETAIL_ENDPOINT, token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode data = objectMapper.readTree(response.getBody()).path("data");
+        assertThat(data.path("id").asText()).isEqualTo(MATERIAL_ID);
+        assertThat(data.path("status").asInt()).isEqualTo(1);
+        assertThat(data.path("statusName").asText()).isEqualTo("启用");
+        // 全文＝块按 seq 以空行拼接（多段形态原样到达）；未治理过的操作者两列 JSON null
+        assertThat(data.path("content").asText()).startsWith("# PRD");
+        assertThat(data.path("content").asText()).contains("\n\n## 功能范围\n\n1. 单词卡片\n2. 复习计划");
+        assertThat(data.path("operatorId").isNull()).isTrue();
+    }
+
+    @Test
+    @DisplayName("非超管且缺少权限 → 素材五端点 403（read 与三写码皆无）")
+    void given_nonSuperAdminWithoutPermission_when_materialEndpoints_then_403() {
+        String token = login(usernameWithoutPermission);
+        assertThat(getWithToken(MATERIALS_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(getWithToken(MATERIAL_DETAIL_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(MATERIAL_DISABLE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(MATERIAL_ENABLE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(deleteWithToken(MATERIAL_DELETE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("素材清单非法参数 → 404（本服务绑定层类型不匹配裁决，不到 provider——KNW_007 不经北向暴露）")
+    void given_illegalFilterParam_when_listMaterials_then_bindingLayerRejects() {
+        String token = login(usernameWithReadPermission);
+        // 非整数 status / 非 Instant 沉淀时间（无时区态）在北向绑定即类型不匹配，按框架
+        // handleTypeMismatch 既定口径 404——provider 的 KNW_007 口径仅剩「数值但未知 code」一径可达
+        assertThat(getWithToken(MATERIALS_ENDPOINT + "?status=abc", token).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(getWithToken(MATERIALS_ENDPOINT + "?sunkFrom=2026-09-01", token).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("未登录访问素材五端点返回 401（含 DELETE）")
+    void given_unauthenticated_when_materialEndpoints_then_401() {
+        assertThat(getWithToken(MATERIALS_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(getWithToken(MATERIAL_DETAIL_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(postWithToken(MATERIAL_DISABLE_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(postWithToken(MATERIAL_ENABLE_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(deleteWithToken(MATERIAL_DELETE_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    // ========== 素材三治理动作（disable/enable/delete 三独立写码）· 权限三态 + 回执形状 + 操作者透传 ==========
+
+    @Test
+    @DisplayName("非超管且拥有三写码 → 停用/启用/删除 200，回执=summary 且 RequestContext 透传登录 operator")
+    void given_nonSuperAdminWithThreeWriteCodes_when_governanceActions_then_200_andRequestContextCarriesOperator()
+            throws Exception {
+        String token = login(usernameWithMaterialWrite);
+
+        // 停用：回执＝provider 重读登记行——已停用 + 治理操作者落素材级
+        ResponseEntity<String> disable = postWithToken(MATERIAL_DISABLE_ENDPOINT, token);
+        assertThat(disable.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode disabled = objectMapper.readTree(disable.getBody()).path("data");
+        assertThat(disabled.path("id").asText()).isEqualTo(MATERIAL_ID);
+        assertThat(disabled.path("status").asInt()).isEqualTo(2);
+        assertThat(disabled.path("statusName").asText()).isEqualTo("停用");
+        assertThat(disabled.path("operatorId").asText()).isEqualTo(String.valueOf(materialWriteUserId));
+        assertThat(disabled.path("operatorName").asText()).isEqualTo(materialWriteUserNickname);
+
+        // 启用：恢复启用（可逆开关的另一侧）
+        ResponseEntity<String> enable = postWithToken(MATERIAL_ENABLE_ENDPOINT, token);
+        assertThat(enable.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode enabled = objectMapper.readTree(enable.getBody()).path("data");
+        assertThat(enabled.path("status").asInt()).isEqualTo(1);
+        assertThat(enabled.path("statusName").asText()).isEqualTo("启用");
+
+        // 删除：回执＝删除前终态（provider 契约如此——确认移除了什么；本例是一行已停用素材）
+        ResponseEntity<String> delete = deleteWithToken(MATERIAL_DELETE_ENDPOINT, token);
+        assertThat(delete.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode deleted = objectMapper.readTree(delete.getBody()).path("data");
+        assertThat(deleted.path("id").asText()).isEqualTo(MATERIAL_ID);
+        assertThat(deleted.path("status").asInt()).isEqualTo(2);
+
+        // 操作者身份不经 body——经 RequestContext 抵达出站调用点（OpenApiClient 据此带
+        // X-User-Id/X-User-Name 出站头，provider 缺头必拦 KNW_006——issue #69 断言必带）：
+        // == 登录内容治理运营的 id/昵称
+        assertThat(capturedOperatorId.get()).isEqualTo(materialWriteUserId);
+        assertThat(capturedOperatorName.get()).isEqualTo(materialWriteUserNickname);
+    }
+
+    @Test
+    @DisplayName("仅有 material:read（无写码）→ 三治理动作 403（read ≠ 三写码）")
+    void given_nonSuperAdminWithReadOnly_when_materialActions_then_403() {
+        String token = login(usernameWithReadPermission);
+        assertThat(postWithToken(MATERIAL_DISABLE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(MATERIAL_ENABLE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(deleteWithToken(MATERIAL_DELETE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("仅有 material:disable 单写码 → 停用 200、启用/删除 403（三写码彼此独立，可逆与不可逆分权）")
+    void given_nonSuperAdminWithDisableOnly_when_actions_then_disable200Others403() {
+        String token = login(usernameWithDisableOnly);
+        assertThat(postWithToken(MATERIAL_DISABLE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(postWithToken(MATERIAL_ENABLE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(deleteWithToken(MATERIAL_DELETE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("素材停用下游 KNW_006（缺操作者头）→ 北向 HTTP 400 + 信封 code=2006 + message 原文（不映射）")
+    void given_knw006FromDownstream_when_disable_then_errorEnvelopePassedThrough() throws Exception {
+        when(aiplatformClient.disableMaterial(eq(MATERIAL_ID))).thenThrow(
+                AiplatformUpstreamException.from(new OpenApiClientException(400,
+                        "{\"code\":2006,\"message\":\"操作者不能为空\",\"data\":null}")));
+
+        String token = login(usernameWithMaterialWrite);
+        ResponseEntity<String> response = postWithToken(MATERIAL_DISABLE_ENDPOINT, token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        JsonNode root = objectMapper.readTree(response.getBody());
+        // 信封 code＝数字业务码 2006（KNW_006＝域码 2×1000＋6），而非映射后的 400——前端比对业务码的分支活
+        assertThat(root.path("code").asInt()).isEqualTo(2006);
+        assertThat(root.path("message").asText()).isEqualTo("操作者不能为空");
+        assertThat(root.path("data").isNull()).isTrue();
+    }
+
+    @Test
+    @DisplayName("素材删除下游 KNW_005（重复删除）→ 北向 HTTP 404 + 信封 code=2005 + message 原文（不映射）")
+    void given_knw005FromDownstream_when_delete_then_errorEnvelopePassedThrough() throws Exception {
+        when(aiplatformClient.deleteMaterial(eq(MATERIAL_ID))).thenThrow(
+                AiplatformUpstreamException.from(new OpenApiClientException(404,
+                        "{\"code\":2005,\"message\":\"知识素材不存在\",\"data\":null}")));
+
+        String token = login(usernameWithMaterialWrite);
+        ResponseEntity<String> response = deleteWithToken(MATERIAL_DELETE_ENDPOINT, token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        JsonNode root = objectMapper.readTree(response.getBody());
+        // 信封 code＝数字业务码 2005（KNW_005＝域码 2×1000＋5），而非映射后的 404——前端比对业务码的分支活
+        assertThat(root.path("code").asInt()).isEqualTo(2005);
+        assertThat(root.path("message").asText()).isEqualTo("知识素材不存在");
+        assertThat(root.path("data").isNull()).isTrue();
+    }
+
     // ========== 错误信封透传（忠实透传，不做映射） ==========
 
     @Test
@@ -1175,6 +1436,12 @@ class AiplatformRbacEnforcementIntegrationTest {
     private ResponseEntity<String> postWithToken(String path, String body, String token) {
         return restTemplate.exchange(url(path), HttpMethod.POST,
                 new HttpEntity<>(body, jsonHeadersWithToken(token)), String.class);
+    }
+
+    /** 无请求体 DELETE（素材删除同形——provider 端只读路径参数，body 为空）。 */
+    private ResponseEntity<String> deleteWithToken(String path, String token) {
+        return restTemplate.exchange(url(path), HttpMethod.DELETE,
+                new HttpEntity<>(null, jsonHeadersWithToken(token)), String.class);
     }
 
     /** JSON 请求头 + Sa-Token 头（前缀按框架配置拼装；token null 则只带内容类型）。 */

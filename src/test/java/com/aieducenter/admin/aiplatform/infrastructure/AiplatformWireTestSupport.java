@@ -2,6 +2,7 @@ package com.aieducenter.admin.aiplatform.infrastructure;
 
 import com.aieducenter.admin.aiplatform.application.AiplatformAccountAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformCostAppService;
+import com.aieducenter.admin.aiplatform.application.AiplatformMaterialAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformOrderAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformPriceEntryAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformProjectAppService;
@@ -27,8 +28,9 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
  *
  * <p>供 {@code AiplatformAccountClientContractTest} / {@code AiplatformOrderClientContractTest} /
  * {@code AiplatformProjectClientContractTest} / {@code AiplatformWorkspaceClientContractTest} /
- * {@code AiplatformCostClientContractTest} / {@code AiplatformPriceEntryClientContractTest} 复用；
- * 后续知识素材域 {@code *ContractTest} 沿用本脚手架扩展（各域 AppService 重载）。</p>
+ * {@code AiplatformCostClientContractTest} / {@code AiplatformPriceEntryClientContractTest} /
+ * {@code AiplatformMaterialClientContractTest} 复用；后续域 {@code *ContractTest} 沿用本脚手架
+ * 扩展（各域 AppService 重载）。</p>
  *
  * @since 0.1.0
  */
@@ -313,6 +315,79 @@ final class AiplatformWireTestSupport {
             }
         };
         return new AiplatformPriceEntryAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
+    }
+
+    /**
+     * 知识素材域版 {@link #accountAppServiceWithStubTransport}——清单/详情走 {@code get}、
+     * 停用/启用走 {@code post}（null body）、删除走 {@code delete}（cartisan-boot#33，无 body
+     * 参数——DELETE 动词唯一出口），均按真实 {@link TypeReference} 反序列化；post 额外把命令体
+     * 序列化进 wireBodySink（null body 原样记 null——钉死两治理动作无请求体契约）。
+     */
+    static AiplatformMaterialAppService materialAppServiceWithStubTransport(
+            String envelopeBody, String[] wireUrlSink, String[] wireBodySink) {
+        ObjectMapper mapper = bootDefaultMapper();
+        OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, mapper) {
+            @Override
+            public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                try {
+                    return mapper.readValue(envelopeBody, typeReference);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            public <T> T post(String url, Object body, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                try {
+                    wireBodySink[0] = body == null ? null : mapper.writeValueAsString(body);
+                    return mapper.readValue(envelopeBody, typeReference);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            public <T> T delete(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                try {
+                    return mapper.readValue(envelopeBody, typeReference);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        };
+        return new AiplatformMaterialAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
+    }
+
+    /**
+     * 知识素材域版 {@link #accountAppServiceWithErrorTransport}——{@code get}/{@code post}/
+     * {@code delete} 都始终抛 {@link OpenApiClientException}（框架对 ≥400 的行为复刻：
+     * 三治理动作与读口的错误信封同形）。
+     */
+    static AiplatformMaterialAppService materialAppServiceWithErrorTransport(
+            int statusCode, String errorBody, String[] wireUrlSink) {
+        OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, bootDefaultMapper()) {
+            @Override
+            public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                throw new OpenApiClientException(statusCode, errorBody);
+            }
+
+            @Override
+            public <T> T post(String url, Object body, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                throw new OpenApiClientException(statusCode, errorBody);
+            }
+
+            @Override
+            public <T> T delete(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                throw new OpenApiClientException(statusCode, errorBody);
+            }
+        };
+        return new AiplatformMaterialAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
     }
 
     private static ObjectMapper bootDefaultMapper() {
