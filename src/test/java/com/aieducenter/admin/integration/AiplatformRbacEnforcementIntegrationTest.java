@@ -39,6 +39,7 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformConversat
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderBriefWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryRepriceWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostDetailWireResponse;
@@ -46,6 +47,8 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCo
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformTokenUsageWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnitPriceEntryRepriceWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnitPriceEntryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnpricedUsageWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionWireResponse;
@@ -70,11 +73,12 @@ import cn.dev33.satoken.config.SaTokenConfig;
 
 /**
  * aiplatform BFF 端点 RBAC 强制执行集成测试（issue #63 T1 账号 + #64 订单读路径 + #65 项目核心读路径 +
- * #66 沙箱观测与四干预动作 + #67 成本四读口）
+ * #66 沙箱观测与四干预动作 + #67 成本四读口 + #68 单价表清单/原子改价/停用）
  * ——真实 Sa-Token 过滤链，断言 {@code admin:aiplatform:account:read} / {@code admin:aiplatform:order:read} /
  * {@code admin:aiplatform:project:read} / {@code admin:aiplatform:workspace:read} /
- * {@code admin:aiplatform:cost:read} + 沙箱四独立写码
- * （{@code workspace:wake|hibernate|rebuild|seal}）对未登录（401）/ 无权者（403）/ 有权者（200）的行为，
+ * {@code admin:aiplatform:cost:read} / {@code admin:aiplatform:price-entry:read} + 沙箱四独立写码
+ * （{@code workspace:wake|hibernate|rebuild|seal}）+ 单价表两独立写码
+ * （{@code price-entry:reprice|deactivate}）对未登录（401）/ 无权者（403）/ 有权者（200）的行为，
  * 并钉死北向出口形状、二进制透传与 provider 错误信封透传。成本域另钉死时间窗 from/to 北向必填
  * （缺参 400 / 非 Instant 404 均在本服务绑定层裁决、不到 provider，issue #67：不设默认窗口）。
  *
@@ -135,6 +139,15 @@ class AiplatformRbacEnforcementIntegrationTest {
     private static final String COST_FROM = "2026-09-01T00:00:00Z";
     private static final String COST_TO = "2026-09-16T00:00:00Z";
     private static final String COST_WINDOW_QUERY = "?from=" + COST_FROM + "&to=" + COST_TO;
+    private static final String PRICE_ENTRY_READ_PERMISSION = "admin:aiplatform:price-entry:read";
+    private static final String PRICE_ENTRY_REPRICE_PERMISSION = "admin:aiplatform:price-entry:reprice";
+    private static final String PRICE_ENTRY_DEACTIVATE_PERMISSION = "admin:aiplatform:price-entry:deactivate";
+    private static final String PRICE_ENTRY_ID = "3830100002222222";
+    private static final String PRICE_ENTRIES_ENDPOINT = "/api/admin/aiplatform/price-entries";
+    private static final String REPRICE_ENDPOINT = PRICE_ENTRIES_ENDPOINT + "/" + PRICE_ENTRY_ID + "/reprice";
+    private static final String DEACTIVATE_ENDPOINT = PRICE_ENTRIES_ENDPOINT + "/" + PRICE_ENTRY_ID + "/deactivate";
+    private static final String REPRICE_BODY =
+            "{\"unitPrice\":0.0000018,\"currency\":\"USD\",\"effectiveFrom\":\"2026-09-20T00:00:00Z\"}";
 
     private final AdminUserManagementAppService userAppService;
     private final RoleManagementAppService roleAppService;
@@ -149,6 +162,8 @@ class AiplatformRbacEnforcementIntegrationTest {
     private String usernameWithoutPermission;
     private String usernameWithWorkspaceWrite;
     private String usernameWithHibernateOnly;
+    private String usernameWithPriceWrite;
+    private String usernameWithRepriceOnly;
 
     // 在 mocked client 调用瞬间抓取 RequestContext——证明 operator 身份抵达出站调用点
     // （供 OpenApiClient 带 X-User-Id/X-User-Name 出站头，issue #66 断言必带）
@@ -156,6 +171,8 @@ class AiplatformRbacEnforcementIntegrationTest {
     private final AtomicReference<String> capturedOperatorName = new AtomicReference<>();
     private Long workspaceWriteUserId;
     private String workspaceWriteUserNickname;
+    private Long priceWriteUserId;
+    private String priceWriteUserNickname;
 
     @Autowired
     AiplatformRbacEnforcementIntegrationTest(
@@ -181,13 +198,16 @@ class AiplatformRbacEnforcementIntegrationTest {
         usernameWithoutPermission = "aiplanone" + suffix;
         usernameWithWorkspaceWrite = "aiplawspr" + suffix;
         usernameWithHibernateOnly = "aiplahibr" + suffix;
+        usernameWithPriceWrite = "aiplapwpr" + suffix;
+        usernameWithRepriceOnly = "aiplarpon" + suffix;
 
         Long readRoleId = roleAppService.create(
                 new CreateRoleCommand("AI平台读权限_" + suffix, "AIPLAREAD_" + suffix,
-                        "AI 平台账号档案 + 订单 + 项目 + 沙箱 + 成本读权限", 80, null));
+                        "AI 平台账号档案 + 订单 + 项目 + 沙箱 + 成本 + 单价表读权限", 80, null));
         roleAppService.assignPermissions(readRoleId,
                 new AssignPermissionsCommand(List.of(READ_PERMISSION, ORDER_READ_PERMISSION,
-                        PROJECT_READ_PERMISSION, WORKSPACE_READ_PERMISSION, COST_READ_PERMISSION)));
+                        PROJECT_READ_PERMISSION, WORKSPACE_READ_PERMISSION, COST_READ_PERMISSION,
+                        PRICE_ENTRY_READ_PERMISSION)));
 
         Long userWithReadId = userAppService.create(
                 new CreateAdminUserCommand(usernameWithReadPermission, PASSWORD, "只读运营_" + suffix, null, null, null));
@@ -219,6 +239,29 @@ class AiplatformRbacEnforcementIntegrationTest {
                 new CreateAdminUserCommand(usernameWithHibernateOnly, PASSWORD,
                         "休眠专员_" + suffix, null, null, null));
         userAppService.assignRoles(hibernateOnlyUserId, new AssignRolesCommand(List.of(hibernateOnlyRoleId)));
+
+        // 单价表双写码专用运营（reprice+deactivate，无读码）——操作者透传断言用其 id/昵称
+        Long priceWriteRoleId = roleAppService.create(
+                new CreateRoleCommand("AI平台单价表写操作_" + suffix, "AIPLAPWPR_" + suffix,
+                        "AI 平台单价表改价 + 停用权限", 96, null));
+        roleAppService.assignPermissions(priceWriteRoleId, new AssignPermissionsCommand(List.of(
+                PRICE_ENTRY_REPRICE_PERMISSION, PRICE_ENTRY_DEACTIVATE_PERMISSION)));
+        priceWriteUserNickname = "调价运营_" + suffix;
+        priceWriteUserId = userAppService.create(
+                new CreateAdminUserCommand(usernameWithPriceWrite, PASSWORD,
+                        priceWriteUserNickname, null, null, null));
+        userAppService.assignRoles(priceWriteUserId, new AssignRolesCommand(List.of(priceWriteRoleId)));
+
+        // 仅 reprice 单写码——钉死改价/停用两写码彼此独立（spec #62 最小授权）
+        Long repriceOnlyRoleId = roleAppService.create(
+                new CreateRoleCommand("AI平台单价表改价_" + suffix, "AIPLARPON_" + suffix,
+                        "AI 平台单价表仅改价权限", 97, null));
+        roleAppService.assignPermissions(repriceOnlyRoleId,
+                new AssignPermissionsCommand(List.of(PRICE_ENTRY_REPRICE_PERMISSION)));
+        Long repriceOnlyUserId = userAppService.create(
+                new CreateAdminUserCommand(usernameWithRepriceOnly, PASSWORD,
+                        "调价专员_" + suffix, null, null, null));
+        userAppService.assignRoles(repriceOnlyUserId, new AssignRolesCommand(List.of(repriceOnlyRoleId)));
 
         // 200 用例：aiplatform 下游 mock，证明通路接通（不依赖真实 aiplatform 服务）
         when(aiplatformClient.getAccountProfile(eq(EXTERNAL_ID))).thenReturn(
@@ -353,6 +396,40 @@ class AiplatformRbacEnforcementIntegrationTest {
                         List.of(new AiplatformProjectCostDetailWireResponse.AgentKindUsage(
                                 "executor", "执行智能体",
                                 new AiplatformTokenUsageWireResponse(3000, 1000, 300, 0, 800)))));
+        // 单价表域 mock：清单（当前行 + 历史行）/ 改价双行回执（抓取 RequestContext——操作者透传
+        // 契约证据，同沙箱四动作）/ 停用单行回执
+        when(aiplatformClient.listPriceEntries(any(), anyInt(), anyInt())).thenReturn(new PageResponse<>(List.of(
+                new AiplatformUnitPriceEntryWireResponse(
+                        PRICE_ENTRY_ID, "anthropic", "claude-fable-5", 1, "输入",
+                        "0.000002", "USD",
+                        Instant.parse("2026-08-01T00:00:00Z"), null, "700160", "运营·单价管理员"),
+                new AiplatformUnitPriceEntryWireResponse(
+                        "3830100001111111", "anthropic", "claude-fable-5", 1, "输入",
+                        "0.00000132", "USD",
+                        Instant.parse("2026-07-01T00:00:00Z"), Instant.parse("2026-08-01T00:00:00Z"),
+                        null, null)), 12, 2, 20));
+        doAnswer(inv -> {
+            capture.run();
+            return new AiplatformUnitPriceEntryRepriceWireResponse(
+                    new AiplatformUnitPriceEntryWireResponse(
+                            PRICE_ENTRY_ID, "anthropic", "claude-fable-5", 1, "输入",
+                            "0.000002", "USD",
+                            Instant.parse("2026-08-01T00:00:00Z"), Instant.parse("2026-09-20T00:00:00Z"),
+                            "700160", "运营·单价管理员"),
+                    new AiplatformUnitPriceEntryWireResponse(
+                            "3830100003333333", "anthropic", "claude-fable-5", 1, "输入",
+                            "0.0000018", "USD",
+                            Instant.parse("2026-09-20T00:00:00Z"), null,
+                            String.valueOf(priceWriteUserId), priceWriteUserNickname));
+        }).when(aiplatformClient).repricePriceEntry(eq(PRICE_ENTRY_ID), any(AiplatformPriceEntryRepriceWireRequest.class));
+        doAnswer(inv -> {
+            capture.run();
+            return new AiplatformUnitPriceEntryWireResponse(
+                    PRICE_ENTRY_ID, "anthropic", "claude-fable-5", 1, "输入",
+                    "0.000002", "USD",
+                    Instant.parse("2026-08-01T00:00:00Z"), Instant.parse("2026-09-16T10:30:00Z"),
+                    String.valueOf(priceWriteUserId), priceWriteUserNickname);
+        }).when(aiplatformClient).deactivatePriceEntry(eq(PRICE_ENTRY_ID));
     }
 
     /**
@@ -908,6 +985,142 @@ class AiplatformRbacEnforcementIntegrationTest {
         assertThat(root.path("data").isNull()).isTrue();
     }
 
+    // ========== 单价表（admin:aiplatform:price-entry:read）· 权限三态 + 北向出口形状 ==========
+
+    @Test
+    @DisplayName("非超管且拥有 admin:aiplatform:price-entry:read → 清单 200，含历史行 + tokenKind/*Name + unitPrice String + 留痕镜像 provider")
+    void given_nonSuperAdminWithPriceEntryRead_when_list_then_200AndShapeMirrorsProvider() throws Exception {
+        String token = login(usernameWithReadPermission);
+        // provider/model 精确过滤 + 分页 1-based 直传（page=2 无 ±1）
+        ResponseEntity<String> response = getWithToken(
+                PRICE_ENTRIES_ENDPOINT + "?provider=anthropic&model=claude-fable-5&page=2&size=20", token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode data = objectMapper.readTree(response.getBody()).path("data");
+        // PageResponse 形状：items/total/page/size，回显 provider 回报值（page=2——1-based 原值）
+        assertThat(data.path("total").asLong()).isEqualTo(12L);
+        assertThat(data.path("page").asInt()).isEqualTo(2);
+        assertThat(data.path("size").asInt()).isEqualTo(20);
+        // 首行：当前行（effectiveTo 出 JSON null）——tokenKind Integer code + tokenKindName、
+        // unitPrice String 明文小数、操作者留痕两肢
+        JsonNode current = data.path("items").get(0);
+        assertThat(current.path("id").asText()).isEqualTo(PRICE_ENTRY_ID);
+        assertThat(current.path("tokenKind").asInt()).isEqualTo(1);
+        assertThat(current.path("tokenKindName").asText()).isEqualTo("输入");
+        assertThat(current.path("unitPrice").asText()).isEqualTo("0.000002");
+        assertThat(current.path("effectiveFrom").asText()).isEqualTo("2026-08-01T00:00:00Z");
+        assertThat(current.path("effectiveTo").isNull()).isTrue();
+        assertThat(current.path("operatorId").asText()).isEqualTo("700160");
+        // 次行：历史行（区间两端俱全）——存量形制操作者两列如实出 JSON null（全局 Jackson 含 null）
+        JsonNode historical = data.path("items").get(1);
+        assertThat(historical.path("effectiveTo").asText()).isEqualTo("2026-08-01T00:00:00Z");
+        assertThat(historical.path("operatorId").isNull()).isTrue();
+        assertThat(historical.path("operatorName").isNull()).isTrue();
+    }
+
+    @Test
+    @DisplayName("非超管且缺少权限 → 单价表三端点 403（read 与两写码皆无）")
+    void given_nonSuperAdminWithoutPermission_when_priceEntryEndpoints_then_403() {
+        String token = login(usernameWithoutPermission);
+        assertThat(getWithToken(PRICE_ENTRIES_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(REPRICE_ENDPOINT, REPRICE_BODY, token).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(DEACTIVATE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("单价表清单非法分页值 → 404（本服务绑定层类型不匹配裁决，不到 provider——METER_009 不经北向暴露）")
+    void given_illegalPageParam_when_listPriceEntries_then_bindingLayerRejects() {
+        String token = login(usernameWithReadPermission);
+        // 非整数 page 在北向 int 绑定即类型不匹配，按框架 handleTypeMismatch 既定口径 404
+        // （同成本域非 Instant 404 先例）——provider 的 METER_009 口径不经北向可达
+        assertThat(getWithToken(PRICE_ENTRIES_ENDPOINT + "?page=abc", token).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("仅有 price-entry:read（无写码）→ 改价/停用 403（read ≠ 两写码）")
+    void given_nonSuperAdminWithReadOnly_when_priceEntryActions_then_403() {
+        String token = login(usernameWithReadPermission);
+        assertThat(postWithToken(REPRICE_ENDPOINT, REPRICE_BODY, token).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(postWithToken(DEACTIVATE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("未登录访问单价表三端点返回 401")
+    void given_unauthenticated_when_priceEntryEndpoints_then_401() {
+        assertThat(getWithToken(PRICE_ENTRIES_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(postWithToken(REPRICE_ENDPOINT, REPRICE_BODY, null).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(postWithToken(DEACTIVATE_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    // ========== 单价表写操作（reprice/deactivate 两独立写码）· 权限三态 + 回执形状 + 操作者透传 ==========
+
+    @Test
+    @DisplayName("非超管且拥有双写码 → 改价/停用 200，closed/opened 双行回执且 RequestContext 透传登录 operator")
+    void given_nonSuperAdminWithBothWriteCodes_when_repriceAndDeactivate_then_200_andRequestContextCarriesOperator()
+            throws Exception {
+        String token = login(usernameWithPriceWrite);
+
+        // 改价：回执＝{closed, opened} 双行——closed 落 effectiveTo＝新起点（保留原开行留痕 700160），
+        // opened 沿用匹配键、新单价 String、敞口（effectiveTo null）、带改价操作者
+        ResponseEntity<String> reprice = postWithToken(REPRICE_ENDPOINT, REPRICE_BODY, token);
+        assertThat(reprice.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode data = objectMapper.readTree(reprice.getBody()).path("data");
+        JsonNode closed = data.path("closed");
+        assertThat(closed.path("id").asText()).isEqualTo(PRICE_ENTRY_ID);
+        assertThat(closed.path("effectiveTo").asText()).isEqualTo("2026-09-20T00:00:00Z");
+        assertThat(closed.path("operatorId").asText()).isEqualTo("700160");
+        JsonNode opened = data.path("opened");
+        assertThat(opened.path("id").asText()).isEqualTo("3830100003333333");
+        assertThat(opened.path("unitPrice").asText()).isEqualTo("0.0000018");
+        assertThat(opened.path("effectiveFrom").asText()).isEqualTo("2026-09-20T00:00:00Z");
+        assertThat(opened.path("effectiveTo").isNull()).isTrue();
+        // 改价操作者＝登录运营（RequestContext 透传落痕，provider 口径）
+        assertThat(opened.path("operatorId").asText()).isEqualTo(String.valueOf(priceWriteUserId));
+        assertThat(opened.path("operatorName").asText()).isEqualTo(priceWriteUserNickname);
+
+        // 停用：被关行单行回执（effectiveTo 已落、停用操作者落被关行）
+        ResponseEntity<String> deactivate = postWithToken(DEACTIVATE_ENDPOINT, token);
+        assertThat(deactivate.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode closedRow = objectMapper.readTree(deactivate.getBody()).path("data");
+        assertThat(closedRow.path("id").asText()).isEqualTo(PRICE_ENTRY_ID);
+        assertThat(closedRow.path("effectiveTo").asText()).isEqualTo("2026-09-16T10:30:00Z");
+
+        // 操作者身份不经 body——经 RequestContext 抵达出站调用点（OpenApiClient 据此带
+        // X-User-Id/X-User-Name 出站头）：== 登录调价运营的 id/昵称（沙箱四动作同款手法）
+        assertThat(capturedOperatorId.get()).isEqualTo(priceWriteUserId);
+        assertThat(capturedOperatorName.get()).isEqualTo(priceWriteUserNickname);
+    }
+
+    @Test
+    @DisplayName("仅有 price-entry:reprice 单写码 → 改价 200、停用 403（两写码彼此独立，最小授权）")
+    void given_nonSuperAdminWithRepriceOnly_when_actions_then_reprice200Deactivate403() {
+        String token = login(usernameWithRepriceOnly);
+        assertThat(postWithToken(REPRICE_ENDPOINT, REPRICE_BODY, token).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(postWithToken(DEACTIVATE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("单价表改价下游 METER_008 → 北向 HTTP 409 + 信封 code=3008 + message 原文（不映射）")
+    void given_meter008FromDownstream_when_reprice_then_errorEnvelopePassedThrough() throws Exception {
+        when(aiplatformClient.repricePriceEntry(eq(PRICE_ENTRY_ID), any(AiplatformPriceEntryRepriceWireRequest.class)))
+                .thenThrow(AiplatformUpstreamException.from(new OpenApiClientException(409,
+                        "{\"code\":3008,\"message\":\"同匹配键生效区间重叠（跨区间或同起点）\",\"data\":null}")));
+
+        String token = login(usernameWithPriceWrite);
+        ResponseEntity<String> response = postWithToken(REPRICE_ENDPOINT, REPRICE_BODY, token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        JsonNode root = objectMapper.readTree(response.getBody());
+        // 信封 code＝数字业务码 3008（METER_008＝域码 3×1000＋8），而非映射后的 409——前端比对业务码的分支活
+        assertThat(root.path("code").asInt()).isEqualTo(3008);
+        assertThat(root.path("message").asText()).isEqualTo("同匹配键生效区间重叠（跨区间或同起点）");
+        assertThat(root.path("data").isNull()).isTrue();
+    }
+
     // ========== 错误信封透传（忠实透传，不做映射） ==========
 
     @Test
@@ -952,10 +1165,16 @@ class AiplatformRbacEnforcementIntegrationTest {
                 new HttpEntity<>(jsonHeadersWithToken(token)), String.class);
     }
 
-    /** 无请求体 POST（沙箱四干预动作同形——provider 端只读路径参数，body 为空）。 */
+    /** 无请求体 POST（沙箱四干预动作、单价表停用同形——provider 端只读路径参数，body 为空）。 */
     private ResponseEntity<String> postWithToken(String path, String token) {
         return restTemplate.exchange(url(path), HttpMethod.POST,
                 new HttpEntity<>(null, jsonHeadersWithToken(token)), String.class);
+    }
+
+    /** JSON 请求体 POST（单价表改价命令体同形——逐字镜像 provider 契约 {unitPrice, currency, effectiveFrom}）。 */
+    private ResponseEntity<String> postWithToken(String path, String body, String token) {
+        return restTemplate.exchange(url(path), HttpMethod.POST,
+                new HttpEntity<>(body, jsonHeadersWithToken(token)), String.class);
     }
 
     /** JSON 请求头 + Sa-Token 头（前缀按框架配置拼装；token null 则只带内容类型）。 */

@@ -3,12 +3,14 @@ package com.aieducenter.admin.aiplatform.infrastructure;
 import com.aieducenter.admin.aiplatform.application.AiplatformAccountAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformCostAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformOrderAppService;
+import com.aieducenter.admin.aiplatform.application.AiplatformPriceEntryAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformProjectAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformWorkspaceAppService;
 import com.cartisan.openapi.client.BinaryResponse;
 import com.cartisan.openapi.client.OpenApiClient;
 import com.cartisan.openapi.client.OpenApiClientException;
 import com.cartisan.openapi.config.CartisanOpenapiProperties;
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,8 +27,8 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
  *
  * <p>供 {@code AiplatformAccountClientContractTest} / {@code AiplatformOrderClientContractTest} /
  * {@code AiplatformProjectClientContractTest} / {@code AiplatformWorkspaceClientContractTest} /
- * {@code AiplatformCostClientContractTest} 复用；后续单价表/知识素材各域 {@code *ContractTest}
- * 沿用本脚手架扩展（各域 AppService 重载）。</p>
+ * {@code AiplatformCostClientContractTest} / {@code AiplatformPriceEntryClientContractTest} 复用；
+ * 后续知识素材域 {@code *ContractTest} 沿用本脚手架扩展（各域 AppService 重载）。</p>
  *
  * @since 0.1.0
  */
@@ -250,6 +252,67 @@ final class AiplatformWireTestSupport {
             }
         };
         return new AiplatformCostAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
+    }
+
+    /**
+     * 单价表域版 {@link #accountAppServiceWithStubTransport}——清单走 {@code get}、改价/停用走
+     * {@code post}（改价带命令体、停用 null body），均按真实 {@link TypeReference} 反序列化；
+     * post 额外把命令体按<strong>生产 mapper 口径</strong>序列化进 wireBodySink（出站 JSON 形状
+     * 断言——OpenApiClient 序列化在其 sendWithBody 内部，传输替换于 post 方法边界会绕过它，
+     * 故在 stub 里用对齐生产的 mapper 补打这一 seam；null body 原样记 null）。
+     */
+    static AiplatformPriceEntryAppService priceEntryAppServiceWithStubTransport(
+            String envelopeBody, String[] wireUrlSink, String[] wireBodySink) {
+        ObjectMapper mapper = bootDefaultMapper();
+        // cartisan-web 生产 ObjectMapper 启用 WRITE_BIGDECIMAL_AS_PLAIN（JacksonConfiguration：
+        // BigDecimal 禁科学计数）——出站命令体序列化断言须对齐生产口径，而非 Spring Boot 默认
+        ObjectMapper commandBodyMapper = bootDefaultMapper()
+                .enable(JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN);
+        OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, mapper) {
+            @Override
+            public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                try {
+                    return mapper.readValue(envelopeBody, typeReference);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            public <T> T post(String url, Object body, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                try {
+                    wireBodySink[0] = body == null ? null : commandBodyMapper.writeValueAsString(body);
+                    return mapper.readValue(envelopeBody, typeReference);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        };
+        return new AiplatformPriceEntryAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
+    }
+
+    /**
+     * 单价表域版 {@link #accountAppServiceWithErrorTransport}——{@code get} 与 {@code post} 都始终抛
+     * {@link OpenApiClientException}（框架对 ≥400 的行为复刻：改价/停用的错误信封同读口）。
+     */
+    static AiplatformPriceEntryAppService priceEntryAppServiceWithErrorTransport(
+            int statusCode, String errorBody, String[] wireUrlSink) {
+        OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, bootDefaultMapper()) {
+            @Override
+            public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                throw new OpenApiClientException(statusCode, errorBody);
+            }
+
+            @Override
+            public <T> T post(String url, Object body, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                throw new OpenApiClientException(statusCode, errorBody);
+            }
+        };
+        return new AiplatformPriceEntryAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
     }
 
     private static ObjectMapper bootDefaultMapper() {

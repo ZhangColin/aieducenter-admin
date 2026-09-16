@@ -13,15 +13,19 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformCostWindo
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryListWireRequest;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryRepriceWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnitPriceEntryRepriceWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnitPriceEntryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnpricedUsageWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionWireResponse;
-import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnpricedUsageWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformWorkspaceSummaryWireResponse;
@@ -46,8 +50,8 @@ import org.springframework.stereotype.Component;
  *
  * <p>为 infrastructure 包内裸 {@code @Component}（BFF 出站客户端，不走 {@code @Port/@Adapter}，
  * 详见 ADR-0007，与 {@code PaymentClient} / {@code AccountClient} / {@code AppRegistryClient} 同款）。
- * 六域（订单/项目/沙箱/成本/单价表/知识素材/账号）共用本客户端——同一 downstream、同一签名身份，
- * 各域只加方法。</p>
+ * 六域（订单/项目/沙箱/成本/单价表/知识素材）外加账号读口共用本客户端——同一 downstream、
+ * 同一签名身份，各域只加方法。</p>
  *
  * <p>信封与错误契约（spec #62 定稿）：aiplatform 出口统一 {@code ApiResponse<T>}，本客户端解包取
  * {@code .data()}；下游 ≥400 时框架抛 {@link OpenApiClientException}，此处统一翻译为
@@ -111,6 +115,18 @@ public class AiplatformClient {
             new TypeReference<>() {};
 
     private static final TypeReference<ApiResponse<AiplatformProjectCostDetailWireResponse>> PROJECT_COST_DETAIL_TYPEREF =
+            new TypeReference<>() {};
+
+    // 单价表域（#160 成本运营＋#165 写口唯一化）同为 ApiResponse<T> 信封；清单 data 为 PageResponse
+    // （page 1-based、total JSON string），改价回执为 {closed, opened} 双行——provider 的「开行」端点
+    // 不建北向（种子脚本通道，spec #62），本客户端也不加对应方法
+    private static final TypeReference<ApiResponse<PageResponse<AiplatformUnitPriceEntryWireResponse>>> PRICE_ENTRY_PAGE_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<AiplatformUnitPriceEntryWireResponse>> PRICE_ENTRY_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<AiplatformUnitPriceEntryRepriceWireResponse>> PRICE_ENTRY_REPRICE_TYPEREF =
             new TypeReference<>() {};
 
     // 出站时间参数定长格式（秒恒在场）：LocalDateTime.toString() 会省略零秒（"T00:00"），
@@ -641,6 +657,101 @@ public class AiplatformClient {
         try {
             ApiResponse<AiplatformProjectCostDetailWireResponse> resp =
                     openApiClient.get(url.toString(), PROJECT_COST_DETAIL_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 分页查询单价行清单（透传 aiplatform，含历史行——价史全貌）。
+     *
+     * <p>对接 aiplatform {@code GET /api/backoffice/price-entries}（#160 已冻结）：返回
+     * {@code ApiResponse<PageResponse<UnitPriceEntryResponse>>}。provider/model 均为匹配键成分＝
+     * 精确等值过滤、均可缺省（缺省＝全量行）；排序服务端定死＝生效起点倒序（新段在前，同起点
+     * id 倒序稳定）；effectiveTo 为 null 即当前行。行带操作者两列（最近管理动作留痕；存量行/
+     * 种子脚本种入行落 null）。绑定裁决两段：非整数 page/size 在<strong>北向绑定层</strong>即 404
+     * （框架类型不匹配口径，到不了本方法）；provider 侧绑定失败 400 METER_009（数字业务码 3009）
+     * 仅在 provider 契约演进（如过滤维度加类型化标量）时可能出现——错误信封忠实透传。</p>
+     *
+     * <p>page 1-based 直传零换算（同订单/项目/沙箱/成本），provider clamp（page≥1、size∈[1,100]
+     * 默认 20）行为透传、本客户端不重复夹取。</p>
+     *
+     * @param filter wire 层过滤参数（由应用层从 {@code AiplatformPriceEntryQuery} 映射而来）
+     * @param page   页码，<strong>1-based</strong>（北向原样直传）
+     * @param size   每页大小
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（400 METER_009 等，不做映射）
+     */
+    public PageResponse<AiplatformUnitPriceEntryWireResponse> listPriceEntries(
+            AiplatformPriceEntryListWireRequest filter, int page, int size) {
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/backoffice/price-entries?page=").append(page)
+                .append("&size=").append(size);
+        appendParam(url, "provider", filter.provider());
+        appendParam(url, "model", filter.model());
+        log.debug("AiplatformClient.listPriceEntries: {}", url);
+        try {
+            ApiResponse<PageResponse<AiplatformUnitPriceEntryWireResponse>> resp =
+                    openApiClient.get(url.toString(), PRICE_ENTRY_PAGE_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 原子改价（透传 aiplatform）——单调用关当前行＋开新行（同事务，中途任一守卫失败两行都不动）。
+     *
+     * <p>对接 aiplatform {@code POST /api/backoffice/price-entries/{id}/reprice}（#160）：请求体
+     * {@code {unitPrice, currency, effectiveFrom}} 逐字镜像（unitPrice BigDecimal→JSON 明文小数；
+     * effectiveFrom 可空＝缺省即时、含未来时点＝预发布——预发布与重叠校验语义由 provider 承担，
+     * BFF 不代填时点不预判），返回 {@code ApiResponse<UnitPriceEntryRepriceResponse>}——
+     * {@code {closed, opened}} 双行回执（被关行落 effectiveTo＝新起点且保留其原开行留痕，新行
+     * 沿用匹配键、带改价操作者）。操作者身份经框架 {@code OpenApiClient} 自动带
+     * {@code X-User-Id/X-User-Name} 头（RequestContext→provider 落痕新行，缺头落空）。</p>
+     *
+     * <p>行不存在（含畸形 id——provider 侧 lenient 解析）404 METER_006（3006）；字段不完整/
+     * 单价负数 400 METER_004（3004）；币种非 ISO 4217 400 METER_010（3010）；起点早于被关行起点
+     * 400 METER_005（3005）；目标非当前行 409 METER_007（3007）；区间重叠（跨区间或同起点）
+     * 409 METER_008（3008）——均原样透传。</p>
+     *
+     * @param id      单价行标识（TSID 十进制字符串）
+     * @param command 改价命令体（由应用层从北向命令映射而来，字段合法性归 provider 聚合守卫）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（METER_004/005/006/007/008/010 等，不做映射）
+     */
+    public AiplatformUnitPriceEntryRepriceWireResponse repricePriceEntry(
+            String id, AiplatformPriceEntryRepriceWireRequest command) {
+        String url = baseUrl + "/api/backoffice/price-entries/" + encode(id) + "/reprice";
+        log.debug("AiplatformClient.repricePriceEntry: {}", url);
+        try {
+            ApiResponse<AiplatformUnitPriceEntryRepriceWireResponse> resp =
+                    openApiClient.post(url, command, PRICE_ENTRY_REPRICE_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 停用单价行（透传 aiplatform）——即时生效：关当前行（effectiveTo＝现在）不接新行，此后该匹配键
+     * 用量进 unpriced（缺价不伪装 0、不阻断聚合）。对未生效的预发布行停用＝钳到自身起点成空区间
+     * （从未生效）。
+     *
+     * <p>对接 aiplatform {@code POST /api/backoffice/price-entries/{id}/deactivate}（#160）：<strong>无
+     * 请求体</strong>（框架 {@code OpenApiClient.post} 对 null body 发空 body，provider 端只读路径参数——
+     * 同沙箱四动作先例），返回 {@code ApiResponse<UnitPriceEntryResponse>}（被关行单行回执）。操作者
+     * 透传头自动落痕被关行（停用不接新行，被关行是唯一落点；缺头落空）。行不存在（含畸形 id）
+     * 404 METER_006（3006）；目标非当前行 409 METER_007（3007）——均原样透传。</p>
+     *
+     * @param id 单价行标识（TSID 十进制字符串）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（404 METER_006、409 METER_007 等，不做映射）
+     */
+    public AiplatformUnitPriceEntryWireResponse deactivatePriceEntry(String id) {
+        String url = baseUrl + "/api/backoffice/price-entries/" + encode(id) + "/deactivate";
+        log.debug("AiplatformClient.deactivatePriceEntry: {}", url);
+        try {
+            ApiResponse<AiplatformUnitPriceEntryWireResponse> resp =
+                    openApiClient.post(url, null, PRICE_ENTRY_TYPEREF);
             return resp.data();
         } catch (OpenApiClientException e) {
             throw AiplatformUpstreamException.from(e);

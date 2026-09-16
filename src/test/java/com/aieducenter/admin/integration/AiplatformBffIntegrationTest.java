@@ -24,11 +24,14 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import com.aieducenter.admin.aiplatform.application.AiplatformAccountAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformCostAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformOrderAppService;
+import com.aieducenter.admin.aiplatform.application.AiplatformPriceEntryAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformProjectAppService;
 import com.aieducenter.admin.aiplatform.application.AiplatformUpstreamException;
 import com.aieducenter.admin.aiplatform.application.AiplatformWorkspaceAppService;
+import com.aieducenter.admin.aiplatform.application.dto.command.AiplatformPriceEntryRepriceCommand;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformCostQuery;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformOrderQuery;
+import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformPriceEntryQuery;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformProjectQuery;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformWorkspaceQuery;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformAccountProfileResponse;
@@ -36,6 +39,8 @@ import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformCostO
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformOrderSummaryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectCostDetailResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectCostResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformUnitPriceEntryRepriceResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformUnitPriceEntryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformUnpricedUsageResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectDetailResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectSummaryResponse;
@@ -48,7 +53,11 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformConversat
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderBriefWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderSummaryWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryListWireRequest;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPriceEntryRepriceWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformTokenUsageWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnitPriceEntryRepriceWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnitPriceEntryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnpricedUsageWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostDetailWireResponse;
@@ -68,7 +77,7 @@ import com.cartisan.web.response.PageResponse;
 
 /**
  * aiplatform BFF 集成测试（issue #63 T1 账号首批 + #64 订单读路径 + #65 项目核心读路径 +
- * #66 沙箱观测与四干预动作 + #67 成本四读口）——
+ * #66 沙箱观测与四干预动作 + #67 成本四读口 + #68 单价表清单/原子改价/停用）——
  * mock {@link AiplatformClient}，验证 AppService 在 Spring 上下文中的完整接线（DI、query→wire 映射、
  * wire→response DTO 映射、分页 1-based 透传、二进制载体保全、下游错误透传不映射）。
  *
@@ -104,6 +113,9 @@ class AiplatformBffIntegrationTest {
 
     @Autowired
     private AiplatformCostAppService costAppService;
+
+    @Autowired
+    private AiplatformPriceEntryAppService priceEntryAppService;
 
     @MockBean
     private AiplatformClient aiplatformClient;
@@ -619,6 +631,125 @@ class AiplatformBffIntegrationTest {
                     assertThat(upstream.httpStatus()).isEqualTo(400);
                     assertThat(upstream.envelopeCode()).isEqualTo(3011);
                     assertThat(upstream.getMessage()).isEqualTo("无效的成本查询参数");
+                });
+    }
+
+    // ========== 单价行清单 · query→wire 映射（provider/model 精确过滤）+ 分页 1-based 透传 ==========
+
+    @Test
+    void given_priceEntryQueryAndPage_when_list_then_wireRequestMappedAndPageEchoedFromProvider() {
+        when(aiplatformClient.listPriceEntries(any(), eq(2), eq(50))).thenReturn(new PageResponse<>(List.of(
+                new AiplatformUnitPriceEntryWireResponse(
+                        "3830100002222222", "anthropic", "claude-fable-5", 1, "输入",
+                        "0.000002", "USD",
+                        Instant.parse("2026-08-01T00:00:00Z"), null, "700160", "运营·单价管理员"),
+                new AiplatformUnitPriceEntryWireResponse(
+                        "3830100001111111", "anthropic", "claude-fable-5", 1, "输入",
+                        "0.00000132", "USD",
+                        Instant.parse("2026-07-01T00:00:00Z"), Instant.parse("2026-08-01T00:00:00Z"),
+                        null, null)), 12, 2, 50));
+
+        PageResponse<AiplatformUnitPriceEntryResponse> page = priceEntryAppService.list(
+                new AiplatformPriceEntryQuery("anthropic", "claude-fable-5"), 2, 50);
+
+        // 出站参数：北向 query → wire 过滤记录逐字段映射；page 1-based 直传（2→2，无 ±1）
+        ArgumentCaptor<AiplatformPriceEntryListWireRequest> wireCaptor =
+                ArgumentCaptor.forClass(AiplatformPriceEntryListWireRequest.class);
+        verify(aiplatformClient).listPriceEntries(wireCaptor.capture(), eq(2), eq(50));
+        assertThat(wireCaptor.getValue())
+                .isEqualTo(new AiplatformPriceEntryListWireRequest("anthropic", "claude-fable-5"));
+
+        // 回显取 provider 回报值；wire → response 逐字段——首行当前行（effectiveTo=null、留痕两肢），
+        // 次行历史行（区间两端俱全、存量形制操作者 null）
+        assertThat(page.total()).isEqualTo(12L);
+        assertThat(page.page()).isEqualTo(2);
+        assertThat(page.size()).isEqualTo(50);
+        var current = page.items().get(0);
+        assertThat(current.id()).isEqualTo("3830100002222222");
+        assertThat(current.tokenKind()).isEqualTo(1);
+        assertThat(current.tokenKindName()).isEqualTo("输入");
+        assertThat(current.unitPrice()).isEqualTo("0.000002");
+        assertThat(current.effectiveTo()).isNull();
+        assertThat(current.operatorName()).isEqualTo("运营·单价管理员");
+        var historical = page.items().get(1);
+        assertThat(historical.effectiveTo()).isEqualTo(Instant.parse("2026-08-01T00:00:00Z"));
+        assertThat(historical.operatorId()).isNull();
+    }
+
+    // ========== 原子改价 · 命令映射 + closed/opened 双行回执映射 ==========
+
+    @Test
+    void given_repriceCommand_when_reprice_then_wireCommandMappedAndReceiptMapped() {
+        when(aiplatformClient.repricePriceEntry(eq("3830100002222222"), any())).thenReturn(
+                new AiplatformUnitPriceEntryRepriceWireResponse(
+                        new AiplatformUnitPriceEntryWireResponse(
+                                "3830100002222222", "anthropic", "claude-fable-5", 1, "输入",
+                                "0.000002", "USD",
+                                Instant.parse("2026-08-01T00:00:00Z"), Instant.parse("2026-09-20T00:00:00Z"),
+                                "700160", "运营·单价管理员"),
+                        new AiplatformUnitPriceEntryWireResponse(
+                                "3830100003333333", "anthropic", "claude-fable-5", 1, "输入",
+                                "0.0000018", "USD",
+                                Instant.parse("2026-09-20T00:00:00Z"), null,
+                                "3829492001234567", "调价运营")));
+
+        AiplatformUnitPriceEntryRepriceResponse receipt = priceEntryAppService.reprice(
+                "3830100002222222", new AiplatformPriceEntryRepriceCommand(
+                        new BigDecimal("0.0000018"), "USD", Instant.parse("2026-09-20T00:00:00Z")));
+
+        // 出站参数：北向命令 → wire 命令体逐字段映射（BigDecimal/Instant 原值；null 不代填）
+        ArgumentCaptor<AiplatformPriceEntryRepriceWireRequest> commandCaptor =
+                ArgumentCaptor.forClass(AiplatformPriceEntryRepriceWireRequest.class);
+        verify(aiplatformClient).repricePriceEntry(eq("3830100002222222"), commandCaptor.capture());
+        assertThat(commandCaptor.getValue()).isEqualTo(new AiplatformPriceEntryRepriceWireRequest(
+                new BigDecimal("0.0000018"), "USD", Instant.parse("2026-09-20T00:00:00Z")));
+
+        // wire → response 逐字段：closed 落 effectiveTo、保留原开行留痕；opened 新 id、敞口、带改价操作者
+        assertThat(receipt.closed().effectiveTo()).isEqualTo(Instant.parse("2026-09-20T00:00:00Z"));
+        assertThat(receipt.closed().operatorId()).isEqualTo("700160");
+        assertThat(receipt.opened().id()).isEqualTo("3830100003333333");
+        assertThat(receipt.opened().unitPrice()).isEqualTo("0.0000018");
+        assertThat(receipt.opened().effectiveTo()).isNull();
+        assertThat(receipt.opened().operatorName()).isEqualTo("调价运营");
+    }
+
+    // ========== 停用 · 单行回执映射 ==========
+
+    @Test
+    void given_deactivateReceipt_when_deactivate_then_singleRowMapped() {
+        when(aiplatformClient.deactivatePriceEntry("3830100002222222")).thenReturn(
+                new AiplatformUnitPriceEntryWireResponse(
+                        "3830100002222222", "anthropic", "claude-fable-5", 1, "输入",
+                        "0.000002", "USD",
+                        Instant.parse("2026-08-01T00:00:00Z"), Instant.parse("2026-09-16T10:30:00Z"),
+                        "3829492001234567", "调价运营"));
+
+        AiplatformUnitPriceEntryResponse closed = priceEntryAppService.deactivate("3830100002222222");
+
+        // 被关行单行回执：effectiveTo 已落、停用操作者落被关行（唯一落点）
+        assertThat(closed.effectiveTo()).isEqualTo(Instant.parse("2026-09-16T10:30:00Z"));
+        assertThat(closed.operatorId()).isEqualTo("3829492001234567");
+        assertThat(closed.operatorName()).isEqualTo("调价运营");
+    }
+
+    // ========== 单价表域错误 · 透传不映射 ==========
+
+    @Test
+    void given_meter008FromDownstream_when_reprice_then_propagateWithoutMapping() {
+        when(aiplatformClient.repricePriceEntry(eq("3830100002222222"), any())).thenThrow(
+                AiplatformUpstreamException.from(new OpenApiClientException(409,
+                        "{\"code\":3008,\"message\":\"同匹配键生效区间重叠（跨区间或同起点）\",\"data\":null}")));
+
+        assertThatThrownBy(() -> priceEntryAppService.reprice("3830100002222222",
+                new AiplatformPriceEntryRepriceCommand(
+                        new BigDecimal("0.0000018"), "USD", Instant.parse("2026-09-20T00:00:00Z"))))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    // METER_008 → HTTP 409 + 数字业务码 3008（域码 3×1000＋8）
+                    assertThat(upstream.httpStatus()).isEqualTo(409);
+                    assertThat(upstream.envelopeCode()).isEqualTo(3008);
+                    assertThat(upstream.getMessage()).isEqualTo("同匹配键生效区间重叠（跨区间或同起点）");
                 });
     }
 }
