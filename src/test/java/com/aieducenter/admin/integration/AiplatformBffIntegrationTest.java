@@ -76,6 +76,8 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireRe
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectFileContentWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectFilesWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionDetailWireResponse;
@@ -91,7 +93,8 @@ import com.cartisan.web.response.PageResponse;
 /**
  * aiplatform BFF 集成测试（issue #63 T1 账号首批 + #64 订单读路径 + #65 项目核心读路径 +
  * #66 沙箱观测与四干预动作 + #67 成本四读口 + #68 单价表清单/原子改价/停用 + #69 知识素材
- * 清单/详情/停用⇄启用/删除 + #70 订单写路径报价/改价/取消/重试归档）——mock {@link AiplatformClient}，
+ * 清单/详情/停用⇄启用/删除 + #70 订单写路径报价/改价/取消/重试归档 + #71 项目文件区
+ * 文件树/文件内容/文件包）——mock {@link AiplatformClient}，
  * 验证 AppService 在 Spring 上下文
  * 中的完整接线（DI、query→wire 映射、wire→response DTO 映射、分页 1-based 透传、二进制载体
  * 保全、下游错误透传不映射）。
@@ -507,6 +510,74 @@ class AiplatformBffIntegrationTest {
                     assertThat(upstream.httpStatus()).isEqualTo(404);
                     assertThat(upstream.envelopeCode()).isEqualTo(4001);
                     assertThat(upstream.getMessage()).isEqualTo("项目不存在");
+                });
+    }
+
+    // ========== 项目文件区（#71）· 文件树/文件内容映射 + 文件包二进制载体保全 ==========
+
+    @Test
+    void given_filesWire_when_getFiles_then_fileTreeMapped() {
+        when(aiplatformClient.getProjectFiles("3829492007654321")).thenReturn(
+                new AiplatformProjectFilesWireResponse("3829492007654321", List.of(
+                        new AiplatformProjectFilesWireResponse.FileEntry("README.md", 512L),
+                        new AiplatformProjectFilesWireResponse.FileEntry("docs/PRD.md", 4096L))));
+
+        var files = projectAppService.getFiles("3829492007654321");
+
+        // wire → response 逐字段：{projectId, files:[{path, size}]}——size long（字节）
+        assertThat(files.projectId()).isEqualTo("3829492007654321");
+        assertThat(files.files()).hasSize(2);
+        assertThat(files.files().get(0).path()).isEqualTo("README.md");
+        assertThat(files.files().get(0).size()).isEqualTo(512L);
+        assertThat(files.files().get(1).path()).isEqualTo("docs/PRD.md");
+        assertThat(files.files().get(1).size()).isEqualTo(4096L);
+    }
+
+    @Test
+    void given_fileContentWire_when_getFileContent_then_pathAndContentMapped() {
+        when(aiplatformClient.getProjectFileContent("3829492007654321", "docs/PRD.md"))
+                .thenReturn(new AiplatformProjectFileContentWireResponse(
+                        "docs/PRD.md", "# PRD\n\n做一个英语学习助手……"));
+
+        var content = projectAppService.getFileContent("3829492007654321", "docs/PRD.md");
+
+        // {path, content} 逐字段（path 原样回显）；只读策略归 provider，BFF 不预检不解释
+        assertThat(content.path()).isEqualTo("docs/PRD.md");
+        assertThat(content.content()).startsWith("# PRD");
+    }
+
+    @Test
+    void given_tarGzFromDownstream_when_getFilesPackage_then_bytesAndRawHeadersPreserved() {
+        byte[] tarGz = {(byte) 0x1f, (byte) 0x8b, 0x08, 0x00, (byte) 0xff, 0x41, 0x00};
+        HttpHeaders providerHeaders = HttpHeaders.of(Map.of(
+                "Content-Type", List.of("application/gzip"),
+                "Content-Disposition", List.of("attachment; filename=\"3829492007654321-archive.tar.gz\"")),
+                (a, b) -> true);
+        when(aiplatformClient.downloadProjectFilesPackage("3829492007654321"))
+                .thenReturn(new BinaryResponse(200, providerHeaders, tarGz));
+
+        var pkg = projectAppService.getFilesPackage("3829492007654321");
+
+        // 字节逐位保全 + provider 响应头 raw 值透传（sealed/source 两态文件名由 provider 决定）
+        assertThat(pkg.content()).containsExactly(tarGz);
+        assertThat(pkg.contentType()).isEqualTo("application/gzip");
+        assertThat(pkg.contentDisposition()).isEqualTo("attachment; filename=\"3829492007654321-archive.tar.gz\"");
+    }
+
+    @Test
+    void given_prj020FromDownstream_when_getFileContent_then_propagateWithoutMapping() {
+        when(aiplatformClient.getProjectFileContent(eq("3829492007654321"), eq(".env"))).thenThrow(
+                AiplatformUpstreamException.from(
+                        new OpenApiClientException(400,
+                                "{\"code\":4020,\"message\":\"该文件不在可浏览范围\",\"data\":null}")));
+
+        assertThatThrownBy(() -> projectAppService.getFileContent("3829492007654321", ".env"))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    assertThat(upstream.httpStatus()).isEqualTo(400);
+                    assertThat(upstream.envelopeCode()).isEqualTo(4020);
+                    assertThat(upstream.getMessage()).isEqualTo("该文件不在可浏览范围");
                 });
     }
 

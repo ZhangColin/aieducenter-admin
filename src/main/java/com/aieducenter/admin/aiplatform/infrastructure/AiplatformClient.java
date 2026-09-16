@@ -25,6 +25,8 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireRe
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectFileContentWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectFilesWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnitPriceEntryRepriceWireResponse;
@@ -106,6 +108,13 @@ public class AiplatformClient {
             new TypeReference<>() {};
 
     private static final TypeReference<ApiResponse<AiplatformVersionDetailWireResponse>> VERSION_DETAIL_TYPEREF =
+            new TypeReference<>() {};
+
+    // 项目文件区（#163）：文件树/文件内容同为 ApiResponse<T> 信封；文件包为二进制流无信封（download）
+    private static final TypeReference<ApiResponse<AiplatformProjectFilesWireResponse>> PROJECT_FILES_TYPEREF =
+            new TypeReference<>() {};
+
+    private static final TypeReference<ApiResponse<AiplatformProjectFileContentWireResponse>> PROJECT_FILE_CONTENT_TYPEREF =
             new TypeReference<>() {};
 
     // 沙箱域（#173 观测 + #174 动作）同为 ApiResponse<T> 信封；四干预动作无请求体、回执＝详情 DTO
@@ -510,6 +519,89 @@ public class AiplatformClient {
         try {
             ApiResponse<AiplatformVersionDetailWireResponse> resp = openApiClient.get(url, VERSION_DETAIL_TYPEREF);
             return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 读项目文件树（透传 aiplatform）——交付文件视图＝项目 dev 工作区剔除非交付物（data/、
+     * .platform/、node_modules/ 与 .env——与源码包同口径）后的只读文件清单 [{path, size}]，
+     * 按路径稳定排序；只列文件（目录由调用方按路径段合成）。文件区挂项目不挂订单——未下单
+     * 项目可浏览（排障不依赖成交）。
+     *
+     * <p>对接 aiplatform {@code GET /api/backoffice/projects/{id}/files}（#163 文件区，口径照
+     * 用户面文件树读口）：返回 {@code ApiResponse<ProjectFilesResponse>}。归档项目照读（工作区
+     * 保留）；项目不存在 404 PRJ_001（4001）、环境故障 500 WSP_002（1002）——均原样透传。</p>
+     *
+     * @param id 项目标识（TSID 十进制字符串，provider 侧 lenient 解析）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（404 PRJ_001、500 WSP_002 等，不做映射）
+     */
+    public AiplatformProjectFilesWireResponse getProjectFiles(String id) {
+        String url = baseUrl + "/api/backoffice/projects/" + encode(id) + "/files";
+        log.debug("AiplatformClient.getProjectFiles: {}", url);
+        try {
+            ApiResponse<AiplatformProjectFilesWireResponse> resp = openApiClient.get(url, PROJECT_FILES_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 读项目文本文件内容（透传 aiplatform，「点看」）——path 为工作区相对路径（文件树条目原样
+     * 回传），provider 只收文本且限大小。
+     *
+     * <p>对接 aiplatform {@code GET /api/backoffice/projects/{id}/files/content?path=}（#163）：
+     * 返回 {@code ApiResponse<ProjectFileContentResponse>}。只读策略归 provider 裁决、本客户端
+     * <strong>不预检不解释</strong>（issue #71）：非交付物/机密（根级 .env）/逃逸路径 400
+     * PRJ_020（4020，判定层拒绝、工作区不被触达）；文件不存在 404 PRJ_021（4021）；超在线
+     * 查看上限（1 MiB，容器侧拦截不读取）400 PRJ_022（4022）；非文本（正文含 NUL）400
+     * PRJ_023（4023）——均原样透传。归档项目照读；未下单项目照读。</p>
+     *
+     * @param id   项目标识（TSID 十进制字符串，provider 侧 lenient 解析）
+     * @param path 工作区相对路径（文件树条目原样回传；裁决归 provider）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（PRJ_020/021/022/023 等，不做映射）
+     */
+    public AiplatformProjectFileContentWireResponse getProjectFileContent(String id, String path) {
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("/api/backoffice/projects/").append(encode(id)).append("/files/content");
+        appendParam(url, "path", path);
+        log.debug("AiplatformClient.getProjectFileContent: {}", url);
+        try {
+            ApiResponse<AiplatformProjectFileContentWireResponse> resp =
+                    openApiClient.get(url.toString(), PROJECT_FILE_CONTENT_TYPEREF);
+            return resp.data();
+        } catch (OpenApiClientException e) {
+            throw AiplatformUpstreamException.from(e);
+        }
+    }
+
+    /**
+     * 下载项目文件包（透传 aiplatform）——tar.gz 二进制流，两态文件名由 provider 决定：已封存
+     * 项目直取封存包（整卷口径——含数据库与机密，卷已删、包是唯一事实，{id}-archive.tar.gz）；
+     * 未封存项目即时导出源码包（交付口径：排 node_modules/.env 等，与订单源码包同一导出实现，
+     * {id}-source.tar.gz）。沙箱休眠中会先同步唤醒重建再打包（分钟内）。
+     *
+     * <p>对接 aiplatform {@code GET /api/backoffice/projects/{id}/files/package}（#174）：
+     * <strong>无 ApiResponse 信封</strong>（{@code application/gzip} + Content-Disposition 文件名），
+     * 经 cartisan-openapi {@link OpenApiClient#download} 取回原始字节 + 响应头——ofByteArray
+     * 保全 gzip 字节（ofString 会经 UTF-8 解码不可逆损坏）。内存中转、不落盘。BFF 不判封存态
+     * ——sealed/source 两态由 provider 的 Content-Disposition 原值表达、原样透传。</p>
+     *
+     * <p>项目不存在 404 PRJ_001（4001）；封存态无包记录/包不可读 404 WSP_016（1016）；环境
+     * 故障 500 WSP_002（1002）——错误信封在 body 里，{@code download} 内部抛
+     * {@link OpenApiClientException}，此处同款翻译透传。</p>
+     *
+     * @param id 项目标识（TSID 十进制字符串）
+     * @return 二进制响应载体（HTTP 状态 + 响应头 raw 值 + 原始字节）
+     * @throws AiplatformUpstreamException aiplatform 错误信封透传（404 PRJ_001/WSP_016、500 WSP_002 等，不做映射）
+     */
+    public BinaryResponse downloadProjectFilesPackage(String id) {
+        String url = baseUrl + "/api/backoffice/projects/" + encode(id) + "/files/package";
+        log.debug("AiplatformClient.downloadProjectFilesPackage: {}", url);
+        try {
+            return openApiClient.download(url);
         } catch (OpenApiClientException e) {
             throw AiplatformUpstreamException.from(e);
         }

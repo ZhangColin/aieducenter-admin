@@ -7,6 +7,9 @@ import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformConve
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformOrderBriefResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformPrdResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectDetailResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectFileContentResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectFilesPackageResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectFilesResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectSummaryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformVersionDetailResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformVersionResponse;
@@ -14,17 +17,22 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformConversat
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformOrderBriefWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectFileContentWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectFilesWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectListWireRequest;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformVersionWireResponse;
 import com.aieducenter.admin.aiplatform.infrastructure.AiplatformClient;
+import com.cartisan.openapi.client.BinaryResponse;
 import com.cartisan.web.response.PageResponse;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 
 /**
- * aiplatform 项目域 BFF 应用服务——项目核心读路径聚合（清单四维检索 / 详情带订单引用与成本指针 /
- * 对话史 / PRD / 版本列表与详情），issue #65。
+ * aiplatform 项目域 BFF 应用服务——项目读路径聚合（清单四维检索 / 详情带订单引用与成本指针 /
+ * 对话史 / PRD / 版本列表与详情 / 文件区三端点），issue #65 + #71。
  *
  * <p>admin 作为 BFF：调接口 + DTO 转换，不持业务逻辑、不持项目数据、不记业务审计（审计归
  * aiplatform）。下游错误已由 {@link AiplatformClient} 统一翻译为 {@link AiplatformUpstreamException}
@@ -106,6 +114,42 @@ public class AiplatformProjectAppService {
         return toVersionDetail(aiplatformClient.getVersion(id, ref));
     }
 
+    /**
+     * 项目文件树（透传 aiplatform）——交付文件视图＝工作区剔除非交付物后的 [{path, size}] 清单，
+     * 按路径稳定排序；只列文件（目录由前端按路径段合成）。未下单项目可浏览（排障不依赖成交）。
+     */
+    public AiplatformProjectFilesResponse getFiles(String id) {
+        AiplatformProjectFilesWireResponse wire = aiplatformClient.getProjectFiles(id);
+        return new AiplatformProjectFilesResponse(wire.projectId(), wire.files().stream()
+                .map(AiplatformProjectAppService::toFileEntry)
+                .toList());
+    }
+
+    /**
+     * 项目文本文件内容（透传 aiplatform，「点看」）——path 工作区相对路径原样回传，只读策略
+     * （机密/逃逸拒、1 MiB 上限、非文本拒 PRJ_020–023）全归 provider 裁决，BFF 不预检不解释。
+     */
+    public AiplatformProjectFileContentResponse getFileContent(String id, String path) {
+        AiplatformProjectFileContentWireResponse wire = aiplatformClient.getProjectFileContent(id, path);
+        return new AiplatformProjectFileContentResponse(wire.path(), wire.content());
+    }
+
+    /**
+     * 下载项目文件包（透传 aiplatform）——tar.gz 二进制流 + provider 响应头 raw 值。
+     * sealed/source 两态文件名由 provider 决定（封存包 {id}-archive.tar.gz 整卷口径 /
+     * 即时源码包 {id}-source.tar.gz 交付口径），BFF 不判封存态、不重构文件名。
+     */
+    public AiplatformProjectFilesPackageResponse getFilesPackage(String id) {
+        BinaryResponse binary = aiplatformClient.downloadProjectFilesPackage(id);
+        // HttpHeaders 大小写不敏感取值；provider 契约恒带两头——缺头兜底为通用二进制附件（HTTP 合法性，
+        // 非契约发明）——订单源码包同款
+        String contentType = binary.headers().firstValue(HttpHeaders.CONTENT_TYPE)
+                .orElse(MediaType.APPLICATION_OCTET_STREAM_VALUE);
+        String contentDisposition = binary.headers().firstValue(HttpHeaders.CONTENT_DISPOSITION)
+                .orElse("attachment");
+        return new AiplatformProjectFilesPackageResponse(binary.body(), contentType, contentDisposition);
+    }
+
     private static AiplatformProjectSummaryResponse toSummary(AiplatformProjectSummaryWireResponse wire) {
         return new AiplatformProjectSummaryResponse(
                 wire.id(), wire.name(), wire.ownerDisplayName(),
@@ -144,5 +188,10 @@ public class AiplatformProjectAppService {
         return new AiplatformVersionDetailResponse(
                 wire.commitHash(), wire.subject(), wire.runId(), wire.rollbackFrom(),
                 wire.committedAt(), wire.closing());
+    }
+
+    private static AiplatformProjectFilesResponse.FileEntry toFileEntry(
+            AiplatformProjectFilesWireResponse.FileEntry wire) {
+        return new AiplatformProjectFilesResponse.FileEntry(wire.path(), wire.size());
     }
 }

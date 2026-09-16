@@ -50,6 +50,8 @@ import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformPrdWireRe
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostDetailWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectCostWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectDetailWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectFileContentWireResponse;
+import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectFilesWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformProjectSummaryWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformTokenUsageWireResponse;
 import com.aieducenter.admin.aiplatform.application.dto.wire.AiplatformUnitPriceEntryRepriceWireResponse;
@@ -79,7 +81,8 @@ import cn.dev33.satoken.config.SaTokenConfig;
 /**
  * aiplatform BFF 端点 RBAC 强制执行集成测试（issue #63 T1 账号 + #64 订单读路径 + #65 项目核心读路径 +
  * #66 沙箱观测与四干预动作 + #67 成本四读口 + #68 单价表清单/原子改价/停用 + #69 知识素材
- * 清单/详情/停用⇄启用/删除 + #70 订单写路径报价/改价/取消/重试归档）
+ * 清单/详情/停用⇄启用/删除 + #70 订单写路径报价/改价/取消/重试归档 + #71 项目文件区
+ * 文件树/文件内容/文件包）
  * ——真实 Sa-Token 过滤链，断言 {@code admin:aiplatform:account:read} / {@code admin:aiplatform:order:read} /
  * {@code admin:aiplatform:project:read} / {@code admin:aiplatform:workspace:read} /
  * {@code admin:aiplatform:cost:read} / {@code admin:aiplatform:price-entry:read} /
@@ -142,6 +145,10 @@ class AiplatformRbacEnforcementIntegrationTest {
     private static final String VERSIONS_ENDPOINT = PROJECT_DETAIL_ENDPOINT + "/versions";
     private static final String VERSION_HASH = "3f9c1a2b7d84e5f6a0b1c2d3e4f5a6b7c8d9e0f1";
     private static final String VERSION_DETAIL_ENDPOINT = VERSIONS_ENDPOINT + "/" + VERSION_HASH;
+    private static final String FILES_ENDPOINT = PROJECT_DETAIL_ENDPOINT + "/files";
+    private static final String FILE_CONTENT_ENDPOINT = FILES_ENDPOINT + "/content";
+    private static final String FILES_PACKAGE_ENDPOINT = FILES_ENDPOINT + "/package";
+    private static final String FILE_TREE_PATH = "docs/PRD.md";
     private static final String WORKSPACE_READ_PERMISSION = "admin:aiplatform:workspace:read";
     private static final String WORKSPACE_WAKE_PERMISSION = "admin:aiplatform:workspace:wake";
     private static final String WORKSPACE_HIBERNATE_PERMISSION = "admin:aiplatform:workspace:hibernate";
@@ -408,6 +415,20 @@ class AiplatformRbacEnforcementIntegrationTest {
                         VERSION_HASH, "轮播图上线", "run-abc123", null,
                         LocalDateTime.of(2026, 9, 12, 11, 30, 0),
                         Map.of("runId", "run-abc123", "commitHash", VERSION_HASH)));
+        // 文件区 mock（issue #71）：文件树 + 文件内容 + 文件包（封存包态——两态文件名由 provider 决定）
+        when(aiplatformClient.getProjectFiles(eq(PROJECT_ID))).thenReturn(
+                new AiplatformProjectFilesWireResponse(PROJECT_ID, List.of(
+                        new AiplatformProjectFilesWireResponse.FileEntry("README.md", 512L),
+                        new AiplatformProjectFilesWireResponse.FileEntry(FILE_TREE_PATH, 4096L))));
+        when(aiplatformClient.getProjectFileContent(eq(PROJECT_ID), eq(FILE_TREE_PATH)))
+                .thenReturn(new AiplatformProjectFileContentWireResponse(
+                        FILE_TREE_PATH, "# PRD\n\n做一个英语学习助手……"));
+        when(aiplatformClient.downloadProjectFilesPackage(eq(PROJECT_ID))).thenReturn(new BinaryResponse(200,
+                java.net.http.HttpHeaders.of(Map.of(
+                        "Content-Type", List.of("application/gzip"),
+                        "Content-Disposition", List.of("attachment; filename=\"" + PROJECT_ID + "-archive.tar.gz\"")),
+                        (a, b) -> true),
+                new byte[] {(byte) 0x1f, (byte) 0x8b, 0x08, 0x00, (byte) 0xff, 0x41, 0x00}));
         // 沙箱观测面 mock：漂移行（期望运行而实态无容器）+ 封存态详情（资源观测 + 项目引用）
         when(aiplatformClient.listWorkspaces(any(), anyInt(), anyInt())).thenReturn(new PageResponse<>(List.of(
                 new AiplatformWorkspaceSummaryWireResponse(
@@ -955,7 +976,7 @@ class AiplatformRbacEnforcementIntegrationTest {
     }
 
     @Test
-    @DisplayName("非超管且缺少权限 → 项目六端点 403（独立权限码 project:read，深读三组同码）")
+    @DisplayName("非超管且缺少权限 → 项目九端点 403（独立权限码 project:read，深读三组与文件区同码）")
     void given_nonSuperAdminWithoutPermission_when_projectEndpoints_then_403() {
         String token = login(usernameWithoutPermission);
         assertThat(getWithToken(PROJECTS_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
@@ -964,10 +985,14 @@ class AiplatformRbacEnforcementIntegrationTest {
         assertThat(getWithToken(PRD_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(getWithToken(VERSIONS_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(getWithToken(VERSION_DETAIL_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(getWithToken(FILES_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(getWithToken(FILE_CONTENT_ENDPOINT + "?path=" + FILE_TREE_PATH, token)
+                .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(getWithToken(FILES_PACKAGE_ENDPOINT, token).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
-    @DisplayName("未登录访问项目六端点返回 401")
+    @DisplayName("未登录访问项目九端点返回 401")
     void given_unauthenticated_when_projectEndpoints_then_401() {
         assertThat(getWithToken(PROJECTS_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(getWithToken(PROJECT_DETAIL_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
@@ -975,6 +1000,10 @@ class AiplatformRbacEnforcementIntegrationTest {
         assertThat(getWithToken(PRD_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(getWithToken(VERSIONS_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(getWithToken(VERSION_DETAIL_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(getWithToken(FILES_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(getWithToken(FILE_CONTENT_ENDPOINT + "?path=" + FILE_TREE_PATH, null)
+                .getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(getWithToken(FILES_PACKAGE_ENDPOINT, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
@@ -992,6 +1021,66 @@ class AiplatformRbacEnforcementIntegrationTest {
         // 信封 code＝数字业务码 4001（PRJ_001），而非映射后的 404——前端比对 aiplatform 业务码的分支活
         assertThat(root.path("code").asInt()).isEqualTo(4001);
         assertThat(root.path("message").asText()).isEqualTo("项目不存在");
+        assertThat(root.path("data").isNull()).isTrue();
+    }
+
+    @Test
+    @DisplayName("非超管且拥有 project:read → 文件树/文件内容 200，[{path,size}] 与 {path,content} 镜像 provider")
+    void given_nonSuperAdminWithProjectRead_when_fileArea_then_200AndTreeAndContentMirrored() throws Exception {
+        String token = login(usernameWithReadPermission);
+
+        // 文件树：交付文件视图 [{path, size}]（size 出 JSON string——全局 Long→ToStringSerializer）
+        ResponseEntity<String> files = getWithToken(FILES_ENDPOINT, token);
+        assertThat(files.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode filesData = objectMapper.readTree(files.getBody()).path("data");
+        assertThat(filesData.path("projectId").asText()).isEqualTo(PROJECT_ID);
+        assertThat(filesData.path("files").size()).isEqualTo(2);
+        assertThat(filesData.path("files").get(0).path("path").asText()).isEqualTo("README.md");
+        assertThat(filesData.path("files").get(0).path("size").asLong()).isEqualTo(512L);
+        assertThat(filesData.path("files").get(1).path("path").asText()).isEqualTo(FILE_TREE_PATH);
+        assertThat(filesData.path("files").get(1).path("size").asLong()).isEqualTo(4096L);
+
+        // 文件内容（点看）：path 原样回显 + content 原样
+        ResponseEntity<String> content = getWithToken(
+                FILE_CONTENT_ENDPOINT + "?path=" + FILE_TREE_PATH, token);
+        assertThat(content.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode contentData = objectMapper.readTree(content.getBody()).path("data");
+        assertThat(contentData.path("path").asText()).isEqualTo(FILE_TREE_PATH);
+        assertThat(contentData.path("content").asText()).startsWith("# PRD");
+    }
+
+    @Test
+    @DisplayName("非超管且拥有 project:read → 文件包 200，gzip 字节 + provider 响应头透传（无信封）")
+    void given_nonSuperAdminWithProjectRead_when_downloadFilesPackage_then_200BinaryWithProviderHeaders() {
+        String token = login(usernameWithReadPermission);
+        ResponseEntity<byte[]> response = getBinaryWithToken(FILES_PACKAGE_ENDPOINT, token);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        // 无 ApiResponse 信封：body 即 tar.gz 字节流（含非法 UTF-8 字节，逐位透传）
+        assertThat(response.getBody())
+                .containsExactly((byte) 0x1f, (byte) 0x8b, 0x08, 0x00, (byte) 0xff, 0x41, 0x00);
+        // Content-Type / Content-Disposition 取 provider 原值（sealed/source 两态文件名由 provider 决定）
+        assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE)).isEqualTo("application/gzip");
+        assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION))
+                .isEqualTo("attachment; filename=\"" + PROJECT_ID + "-archive.tar.gz\"");
+    }
+
+    @Test
+    @DisplayName("文件内容下游 PRJ_020 → 北向 HTTP 400 + 信封 code=4020 + message 原文（不映射）")
+    void given_prj020FromDownstream_when_getFileContent_then_errorEnvelopePassedThrough() throws Exception {
+        when(aiplatformClient.getProjectFileContent(eq(PROJECT_ID), eq(".env"))).thenThrow(
+                AiplatformUpstreamException.from(
+                        new OpenApiClientException(400,
+                                "{\"code\":4020,\"message\":\"该文件不在可浏览范围\",\"data\":null}")));
+
+        String token = login(usernameWithReadPermission);
+        ResponseEntity<String> response = getWithToken(FILE_CONTENT_ENDPOINT + "?path=.env", token);
+
+        // 只读策略（机密/逃逸拒）归 provider 裁决——BFF 不预检不解释，信封原样还原
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        JsonNode root = objectMapper.readTree(response.getBody());
+        assertThat(root.path("code").asInt()).isEqualTo(4020);
+        assertThat(root.path("message").asText()).isEqualTo("该文件不在可浏览范围");
         assertThat(root.path("data").isNull()).isTrue();
     }
 

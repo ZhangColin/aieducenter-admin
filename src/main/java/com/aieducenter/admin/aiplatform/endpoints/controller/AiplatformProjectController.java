@@ -8,6 +8,9 @@ import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformProjectQ
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformConversationEntryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformPrdResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectDetailResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectFileContentResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectFilesPackageResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectFilesResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectSummaryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformVersionDetailResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformVersionResponse;
@@ -19,6 +22,8 @@ import com.cartisan.web.response.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,17 +32,18 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.validation.annotation.Validated;
 
 /**
- * AI 平台项目控制器——BFF 核心读路径（清单/详情/对话史/PRD/版本），issue #65。
+ * AI 平台项目控制器——BFF 读路径（清单/详情/对话史/PRD/版本/文件区三端点），issue #65 + #71。
  *
  * <p>北向 {@code /api/admin/aiplatform/projects/**} 逐字镜像 aiplatform
- * {@code /api/backoffice/projects/**}（#159 清单+详情 / #162 深读三组）——查询参数名、缺省值、
- * 分页基准（page 1-based，缺省 1/20）与 provider controller 同形。错误经
+ * {@code /api/backoffice/projects/**}（#159 清单+详情 / #162 深读三组 / #163 文件区）——查询
+ * 参数名、缺省值、分页基准（page 1-based，缺省 1/20）与 provider controller 同形。错误经
  * {@code AiplatformUpstreamErrorAdvice} 原样透传（如 404 PRJ_001→4001、400 PRJ_014→4014、
- * 404 PRJ_015→4015、404 PRJ_028→4028、500 WSP_002→1002）。</p>
+ * 404 PRJ_015→4015、404 PRJ_028→4028、400 PRJ_020~023→4020~4023、404 WSP_016→1016、
+ * 500 WSP_002→1002）。</p>
  *
  * <p>归档项目全读面照读（provider 工作区保留）；已删项目不可见（provider 真删无墓碑）——语义
- * 透传，BFF 不二次过滤。对话史/PRD/版本归 {@code project:read} 同一权限码（spec #62：深读
- * 三组是项目全貌的组成面，不设独立码）。项目文件区（files 三端点）是 T5（issue #71），不在本控制器。</p>
+ * 透传，BFF 不二次过滤。对话史/PRD/版本/文件区（文件树/文件内容/文件包）归
+ * {@code project:read} 同一权限码（spec #62：深读三组与文件区是项目全貌的组成面，不设独立码）。</p>
  *
  * @since 0.1.0
  */
@@ -176,5 +182,69 @@ public class AiplatformProjectController {
     public ApiResponse<AiplatformVersionDetailResponse> versionDetail(
             @PathVariable String id, @PathVariable String ref) {
         return ApiResponse.ok(projectAppService.getVersion(id, ref));
+    }
+
+    @GetMapping("/{id}/files")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:aiplatform:project:read",
+            name = "AI 平台 / 项目查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "项目文件树（交付文件只读浏览）——透传 aiplatform",
+            description = "验收交付物的入口：交付文件视图＝项目 dev 工作区剔除非交付物（data/、"
+                    + ".platform/、node_modules/ 与 .env——与源码包同口径）后的文件清单 "
+                    + "[{path, size}]，path 为工作区相对路径、按路径稳定排序，只列文件（目录由"
+                    + "前端按路径段合成），直读工作区实时状态。size 为 Long（字节，JSON string）。"
+                    + "文件区挂项目不挂订单——未下单项目可浏览（排障不依赖成交）。归档项目照读"
+                    + "（工作区保留）。项目不存在（含已删）404 PRJ_001（数字业务码 4001）；"
+                    + "环境故障 500 WSP_002（1002）。")
+    public ApiResponse<AiplatformProjectFilesResponse> files(@PathVariable String id) {
+        return ApiResponse.ok(projectAppService.getFiles(id));
+    }
+
+    @GetMapping("/{id}/files/content")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:aiplatform:project:read",
+            name = "AI 平台 / 项目查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "项目文本文件内容（点看）——透传 aiplatform",
+            description = "path＝工作区相对路径（文件树条目原样回传），provider 只收文本且限大小"
+                    + "——<strong>只读策略全归 provider 裁决、BFF 不预检不解释</strong>："
+                    + "非交付物/机密（根级 .env）/逃逸路径 400 PRJ_020（4020，判定层拒绝、"
+                    + "工作区不被触达）；文件不存在 404 PRJ_021（4021）；超在线查看上限"
+                    + "（1 MiB，容器侧拦截不读取）400 PRJ_022（4022）；非文本（正文含 NUL）"
+                    + "400 PRJ_023（4023）。返回 {path, content}——path 原样回显、content 为"
+                    + "工作区文件原样文本。未下单/归档项目照读。项目不存在 404 PRJ_001（4001）；"
+                    + "环境故障 500 WSP_002（1002）。")
+    public ApiResponse<AiplatformProjectFileContentResponse> fileContent(
+            @PathVariable String id, @RequestParam String path) {
+        return ApiResponse.ok(projectAppService.getFileContent(id, path));
+    }
+
+    @GetMapping("/{id}/files/package")
+    @RequireAuth
+    @RequirePermission(
+            value = "admin:aiplatform:project:read",
+            name = "AI 平台 / 项目查看",
+            scope = AdminScopes.ADMIN
+    )
+    @Operation(summary = "项目文件包（tar.gz 二进制流，无 ApiResponse 信封）——透传 aiplatform",
+            description = "整体归档核验：取走项目工作区内容——已封存项目直取封存包（整卷口径："
+                    + "含数据库与机密，卷已删、包是唯一事实，文件名 {id}-archive.tar.gz）；"
+                    + "未封存项目即时导出源码包（交付口径：排 node_modules/.env 等，与订单源码包"
+                    + "同一导出实现，文件名 {id}-source.tar.gz）。sealed/source 两态文件名由"
+                    + "<strong>provider 决定</strong>（Content-Disposition 原值透传，BFF 不判"
+                    + "封存态、不重构文件名）。沙箱休眠中会先同步唤醒重建再打包（分钟内）。"
+                    + "归档项目照取。项目不存在 404 PRJ_001（数字业务码 4001）；封存态无包记录/"
+                    + "包不可读 404 WSP_016（1016）；环境故障 500 WSP_002（1002）。")
+    public ResponseEntity<byte[]> filesPackage(@PathVariable String id) {
+        AiplatformProjectFilesPackageResponse pkg = projectAppService.getFilesPackage(id);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_TYPE, pkg.contentType())
+                .header(HttpHeaders.CONTENT_DISPOSITION, pkg.contentDisposition())
+                .body(pkg.content());
     }
 }

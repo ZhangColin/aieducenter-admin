@@ -1,9 +1,11 @@
 package com.aieducenter.admin.aiplatform.infrastructure;
 
 import java.math.BigDecimal;
+import java.net.http.HttpHeaders;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -14,11 +16,14 @@ import com.aieducenter.admin.aiplatform.application.AiplatformUpstreamException;
 import com.aieducenter.admin.aiplatform.application.dto.query.AiplatformProjectQuery;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformConversationEntryResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectDetailResponse;
+import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectFilesResponse;
 import com.aieducenter.admin.aiplatform.application.dto.response.AiplatformProjectSummaryResponse;
+import com.cartisan.openapi.client.BinaryResponse;
 import com.cartisan.web.response.PageResponse;
 
 /**
- * aiplatform 项目域核心读路径的 wire 契约测试（对接 aiplatform #159/#162/#164 契约，issue #65）。
+ * aiplatform 项目域读路径的 wire 契约测试（对接 aiplatform #159/#162/#164 契约，issue #65；
+ * 文件区三端点对接 #163/#174 契约，issue #71）。
  *
  * <p>契约事实（2026-09-15 对照 aiplatform 源码 {@code BackofficeProjectController} /
  * {@code BackofficeProjectAppService} / 各 response DTO 核实）：</p>
@@ -35,8 +40,13 @@ import com.cartisan.web.response.PageResponse;
  *       kindName」已过时）：BFF 透传 provider 值，不臆造映射。question/closing/attachments 载荷
  *       JSON 原样（Map/List 透传不解读）。</li>
  *   <li>PRD {@code updatedAt} 为 Instant（ISO-8601 UTC 带 Z）；版本 ref＝hex 40 位 commit hash。</li>
+ *   <li>文件区（#163，issue #71）：文件树/文件内容包 {@code ApiResponse<T>} 信封；条目
+ *       {@code size} 为原生 long——全局 Long→ToStringSerializer 对 {@code Long.TYPE} 也注册，
+ *       wire 上是 JSON string；文件包为<strong>二进制流无信封</strong>（application/gzip +
+ *       Content-Disposition，sealed/source 两态文件名由 provider 决定、raw 值透传）。</li>
  *   <li>错误透传（数字业务码＝域码×1000＋序号）：PRJ_014→4014（400）、PRJ_001→4001（404）、
- *       PRJ_015→4015（404）、PRJ_028→4028（404）、WSP_002→1002（500）。</li>
+ *       PRJ_015→4015（404）、PRJ_028→4028（404）、PRJ_020→4020（400）、PRJ_021→4021（404）、
+ *       PRJ_022→4022（400）、PRJ_023→4023（400）、WSP_002→1002（500）、WSP_016→1016（404）。</li>
  * </ul>
  *
  * <p>本测试 <strong>不</strong> mock {@code AiplatformClient}（方法边界 mock 会绕过 wire 反序列化
@@ -308,6 +318,103 @@ class AiplatformProjectClientContractTest {
               "errors": null
             }
             """;
+
+    /**
+     * aiplatform GET /api/backoffice/projects/{id}/files 的真实成功响应形状（#163 文件区）：交付
+     * 文件视图＝工作区剔除非交付物后的 [{path, size}]，按路径稳定排序、只列文件。size 为原生
+     * long——cartisan-web 全局 Long→ToStringSerializer 对 {@code Long.TYPE} 也注册（实测定案），
+     * 故 wire 上是 JSON string；Jackson 反序列化 string→long 直读。
+     */
+    private static final String FILES_ENVELOPE = """
+            {
+              "code": 0,
+              "message": "ok",
+              "data": {
+                "projectId": "3829492007654321",
+                "files": [
+                  {"path": "README.md", "size": "512"},
+                  {"path": "docs/PRD.md", "size": "4096"},
+                  {"path": "src/app.js", "size": "1024"}
+                ]
+              },
+              "requestId": "req-6d7e8f",
+              "errors": null
+            }
+            """;
+
+    /** aiplatform GET /api/backoffice/projects/{id}/files/content?path= 的真实成功响应形状（{path, content}）。 */
+    private static final String FILE_CONTENT_ENVELOPE = """
+            {
+              "code": 0,
+              "message": "ok",
+              "data": {
+                "path": "docs/PRD.md",
+                "content": "# PRD\\n\\n做一个英语学习助手……"
+              },
+              "requestId": "req-7e8f9a",
+              "errors": null
+            }
+            """;
+
+    /** aiplatform 非交付物/机密（根级 .env）/逃逸路径：HTTP 400 + 信封 code=4020（PRJ_020，判定层拒绝、工作区不被触达）。 */
+    private static final String PRJ_020_ERROR_ENVELOPE = """
+            {
+              "code": 4020,
+              "message": "该文件不在可浏览范围",
+              "data": null,
+              "requestId": "req-8f9a0b",
+              "errors": null
+            }
+            """;
+
+    /** aiplatform 文件不存在：HTTP 404 + 信封 code=4021（PRJ_021）。 */
+    private static final String PRJ_021_ERROR_ENVELOPE = """
+            {
+              "code": 4021,
+              "message": "文件不存在",
+              "data": null,
+              "requestId": "req-9a0b1c",
+              "errors": null
+            }
+            """;
+
+    /** aiplatform 超在线查看上限（1 MiB，容器侧拦截不读取）：HTTP 400 + 信封 code=4022（PRJ_022）。 */
+    private static final String PRJ_022_ERROR_ENVELOPE = """
+            {
+              "code": 4022,
+              "message": "文件太大，暂不支持在线查看",
+              "data": null,
+              "requestId": "req-0b1c2d",
+              "errors": null
+            }
+            """;
+
+    /** aiplatform 非文本（正文含 NUL）：HTTP 400 + 信封 code=4023（PRJ_023）。 */
+    private static final String PRJ_023_ERROR_ENVELOPE = """
+            {
+              "code": 4023,
+              "message": "该文件不是文本文件，暂不支持在线查看",
+              "data": null,
+              "requestId": "req-1c2d3e",
+              "errors": null
+            }
+            """;
+
+    /** aiplatform 封存态无包记录/包不可读：HTTP 404 + 信封 code=1016（WSP_016，文件包专属）。 */
+    private static final String WSP_016_ERROR_ENVELOPE = """
+            {
+              "code": 1016,
+              "message": "封存包不存在或不可读",
+              "data": null,
+              "requestId": "req-2d3e4f",
+              "errors": null
+            }
+            """;
+
+    /** gzip 字节流 stub（含 0xff/0xfe/NUL/CR——ofString 解码损坏的回归锚点，订单源码包同款）。 */
+    private static final byte[] TAR_GZ_BYTES = {
+            (byte) 0x1f, (byte) 0x8b, 0x08, 0x00, (byte) 0xff, (byte) 0xfe, 0x41, 0x00, 0x0d, 0x0a
+    };
 
     // ========== 清单（四维检索单选 status + 分页 1-based 透传）==========
 
@@ -621,6 +728,200 @@ class AiplatformProjectClientContractTest {
                     assertThat(upstream.httpStatus()).isEqualTo(500);
                     assertThat(upstream.envelopeCode()).isEqualTo(1002);
                     assertThat(upstream.getMessage()).isEqualTo("环境后端操作失败");
+                });
+    }
+
+    // ========== 文件树（#163，issue #71）==========
+
+    @Test
+    void given_filesEnvelope_when_getFiles_then_fileTreeBound() {
+        String[] wireUrl = new String[1];
+        var appService = AiplatformWireTestSupport.projectAppServiceWithStubTransport(
+                FILES_ENVELOPE, wireUrl);
+
+        AiplatformProjectFilesResponse files = appService.getFiles("3829492007654321");
+
+        // 出站路径逐字镜像 provider backoffice 路由
+        assertThat(wireUrl[0]).isEqualTo(
+                "http://stub-aiplatform/api/backoffice/projects/3829492007654321/files");
+
+        // 信封正确拆开：交付文件视图 [{path, size}]，按路径稳定排序、只列文件
+        assertThat(files.projectId()).isEqualTo("3829492007654321");
+        assertThat(files.files()).hasSize(3);
+        assertThat(files.files().get(0).path()).isEqualTo("README.md");
+        // size 为原生 long：wire 上 JSON string（全局 Long→ToStringSerializer 含 Long.TYPE），
+        // 反序列化直读 long
+        assertThat(files.files().get(0).size()).isEqualTo(512L);
+        assertThat(files.files().get(1).path()).isEqualTo("docs/PRD.md");
+        assertThat(files.files().get(1).size()).isEqualTo(4096L);
+        assertThat(files.files().get(2).path()).isEqualTo("src/app.js");
+        assertThat(files.files().get(2).size()).isEqualTo(1024L);
+    }
+
+    @Test
+    void given_wsp002ErrorEnvelope_when_getFiles_then_passThroughWithoutMapping() {
+        String[] wireUrl = new String[1];
+        var appService = AiplatformWireTestSupport.projectAppServiceWithErrorTransport(
+                500, WSP_002_ERROR_ENVELOPE, wireUrl);
+
+        // 沙箱不可用（docker exec 自身失败）跨前缀透传——BFF 不预检不解释（issue #71）
+        assertThatThrownBy(() -> appService.getFiles("3829492007654321"))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    assertThat(upstream.httpStatus()).isEqualTo(500);
+                    assertThat(upstream.envelopeCode()).isEqualTo(1002);
+                    assertThat(upstream.getMessage()).isEqualTo("环境后端操作失败");
+                });
+    }
+
+    // ========== 文件内容（只读策略四拒全归 provider，BFF 不预检不解释）==========
+
+    @Test
+    void given_fileContentEnvelope_when_getFileContent_then_pathAndContentBound() {
+        String[] wireUrl = new String[1];
+        var appService = AiplatformWireTestSupport.projectAppServiceWithStubTransport(
+                FILE_CONTENT_ENVELOPE, wireUrl);
+
+        var content = appService.getFileContent("3829492007654321", "docs/PRD.md");
+
+        // 出站路径逐字镜像 provider backoffice 路由；path URL 编码（/ → %2F，provider 解码后绑定）
+        assertThat(wireUrl[0]).isEqualTo(
+                "http://stub-aiplatform/api/backoffice/projects/3829492007654321/files/content?path=docs%2FPRD.md");
+
+        // {path, content}：path 原样回显、content 工作区文件原样
+        assertThat(content.path()).isEqualTo("docs/PRD.md");
+        assertThat(content.content()).startsWith("# PRD");
+    }
+
+    @Test
+    void given_prj020ErrorEnvelope_when_getFileContent_then_passThroughWithoutMapping() {
+        String[] wireUrl = new String[1];
+        var appService = AiplatformWireTestSupport.projectAppServiceWithErrorTransport(
+                400, PRJ_020_ERROR_ENVELOPE, wireUrl);
+
+        // 非交付物/机密（根级 .env）/逃逸路径——判定层拒绝、工作区不被触达，原样透传
+        assertThatThrownBy(() -> appService.getFileContent("3829492007654321", ".env"))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    assertThat(upstream.httpStatus()).isEqualTo(400);
+                    assertThat(upstream.envelopeCode()).isEqualTo(4020);
+                    assertThat(upstream.getMessage()).isEqualTo("该文件不在可浏览范围");
+                });
+    }
+
+    @Test
+    void given_prj021ErrorEnvelope_when_getFileContent_then_passThroughWithoutMapping() {
+        String[] wireUrl = new String[1];
+        var appService = AiplatformWireTestSupport.projectAppServiceWithErrorTransport(
+                404, PRJ_021_ERROR_ENVELOPE, wireUrl);
+
+        // 文件不存在（4021，与项目不存在 PRJ_001 的 4001 区分）
+        assertThatThrownBy(() -> appService.getFileContent("3829492007654321", "gone.md"))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    assertThat(upstream.httpStatus()).isEqualTo(404);
+                    assertThat(upstream.envelopeCode()).isEqualTo(4021);
+                    assertThat(upstream.getMessage()).isEqualTo("文件不存在");
+                });
+    }
+
+    @Test
+    void given_prj022ErrorEnvelope_when_getFileContent_then_passThroughWithoutMapping() {
+        String[] wireUrl = new String[1];
+        var appService = AiplatformWireTestSupport.projectAppServiceWithErrorTransport(
+                400, PRJ_022_ERROR_ENVELOPE, wireUrl);
+
+        // 超在线查看上限（1 MiB，容器侧拦截不读取）——BFF 不预检大小、provider 裁决透传
+        assertThatThrownBy(() -> appService.getFileContent("3829492007654321", "assets/big.bin"))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    assertThat(upstream.httpStatus()).isEqualTo(400);
+                    assertThat(upstream.envelopeCode()).isEqualTo(4022);
+                    assertThat(upstream.getMessage()).isEqualTo("文件太大，暂不支持在线查看");
+                });
+    }
+
+    @Test
+    void given_prj023ErrorEnvelope_when_getFileContent_then_passThroughWithoutMapping() {
+        String[] wireUrl = new String[1];
+        var appService = AiplatformWireTestSupport.projectAppServiceWithErrorTransport(
+                400, PRJ_023_ERROR_ENVELOPE, wireUrl);
+
+        // 非文本（正文含 NUL）——BFF 不判断文本性、provider 裁决透传
+        assertThatThrownBy(() -> appService.getFileContent("3829492007654321", "assets/logo.png"))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    assertThat(upstream.httpStatus()).isEqualTo(400);
+                    assertThat(upstream.envelopeCode()).isEqualTo(4023);
+                    assertThat(upstream.getMessage()).isEqualTo("该文件不是文本文件，暂不支持在线查看");
+                });
+    }
+
+    // ========== 文件包（#174，二进制无信封，sealed/source 两态文件名由 provider 决定）==========
+
+    @Test
+    void given_sourcePackageDisposition_when_downloadFilesPackage_then_bytesAndHeadersPreserved() {
+        String[] wireUrl = new String[1];
+        String sourceDisposition = "attachment; filename=\"3829492007654321-source.tar.gz\"";
+        HttpHeaders providerHeaders = HttpHeaders.of(Map.of(
+                "Content-Type", List.of("application/gzip"),
+                "Content-Disposition", List.of(sourceDisposition)), (a, b) -> true);
+        var appService = AiplatformWireTestSupport.projectAppServiceWithStubTransport(
+                null, new BinaryResponse(200, providerHeaders, TAR_GZ_BYTES), wireUrl);
+
+        var pkg = appService.getFilesPackage("3829492007654321");
+
+        // 出站路径逐字镜像 provider backoffice 路由
+        assertThat(wireUrl[0]).isEqualTo(
+                "http://stub-aiplatform/api/backoffice/projects/3829492007654321/files/package");
+
+        // gzip 字节逐位相等（含 0xff/0xfe/NUL——ofString 解码损坏的回归锚点），内存中转无信封
+        assertThat(pkg.content()).containsExactly(TAR_GZ_BYTES);
+        // provider 响应头 raw 值透传（不打解析、不重构文件名）——未封存项目＝即时源码包态
+        assertThat(pkg.contentType()).isEqualTo("application/gzip");
+        assertThat(pkg.contentDisposition()).isEqualTo(sourceDisposition);
+    }
+
+    @Test
+    void given_sealedArchiveDisposition_when_downloadFilesPackage_then_archiveFilenamePassedThrough() {
+        String[] wireUrl = new String[1];
+        // 已封存项目＝封存包整卷口径（含数据库与机密）——两态文件名由 provider 决定，BFF 不判封存态
+        String archiveDisposition = "attachment; filename=\"3829492007654321-archive.tar.gz\"";
+        HttpHeaders providerHeaders = HttpHeaders.of(Map.of(
+                "Content-Type", List.of("application/gzip"),
+                "Content-Disposition", List.of(archiveDisposition)), (a, b) -> true);
+        var appService = AiplatformWireTestSupport.projectAppServiceWithStubTransport(
+                null, new BinaryResponse(200, providerHeaders, TAR_GZ_BYTES), wireUrl);
+
+        var pkg = appService.getFilesPackage("3829492007654321");
+
+        assertThat(wireUrl[0]).isEqualTo(
+                "http://stub-aiplatform/api/backoffice/projects/3829492007654321/files/package");
+        assertThat(pkg.content()).containsExactly(TAR_GZ_BYTES);
+        assertThat(pkg.contentType()).isEqualTo("application/gzip");
+        assertThat(pkg.contentDisposition()).isEqualTo(archiveDisposition);
+    }
+
+    @Test
+    void given_wsp016OnDownload_when_downloadFilesPackage_then_passThroughWithoutMapping() {
+        String[] wireUrl = new String[1];
+        var appService = AiplatformWireTestSupport.projectAppServiceWithErrorTransport(
+                404, WSP_016_ERROR_ENVELOPE, wireUrl);
+
+        // download 的 ≥400 由框架抛 OpenApiClientException（错误信封在 body 里）——AiplatformClient
+        // 同款翻译透传（封存态无包记录/包不可读）
+        assertThatThrownBy(() -> appService.getFilesPackage("3829492007654321"))
+                .isInstanceOf(AiplatformUpstreamException.class)
+                .satisfies(e -> {
+                    var upstream = (AiplatformUpstreamException) e;
+                    assertThat(upstream.httpStatus()).isEqualTo(404);
+                    assertThat(upstream.envelopeCode()).isEqualTo(1016);
+                    assertThat(upstream.getMessage()).isEqualTo("封存包不存在或不可读");
                 });
     }
 }

@@ -186,10 +186,21 @@ final class AiplatformWireTestSupport {
     }
 
     /**
-     * 项目域版 {@link #accountAppServiceWithStubTransport}——六读口（清单/详情/对话史/PRD/版本
-     * 列表/版本详情）全走 {@code get}，按真实 {@link TypeReference} 反序列化。
+     * 项目域版 {@link #accountAppServiceWithStubTransport}——读口（清单/详情/对话史/PRD/版本
+     * 列表/版本详情/文件树/文件内容）全走 {@code get}，按真实 {@link TypeReference} 反序列化
+     * （文件包走 download 版重载）。
      */
     static AiplatformProjectAppService projectAppServiceWithStubTransport(String envelopeBody, String[] wireUrlSink) {
+        return projectAppServiceWithStubTransport(envelopeBody, null, wireUrlSink);
+    }
+
+    /**
+     * 项目域文件包版（订单域 {@link #orderAppServiceWithStubTransport} 同款，issue #71）——读口
+     * 走真实 {@code TypeReference} 反序列化，{@code download}（文件包）返回给定
+     * {@link BinaryResponse}：二进制无反序列化路径，stub 只需保全字节与响应头。
+     */
+    static AiplatformProjectAppService projectAppServiceWithStubTransport(
+            String envelopeBody, BinaryResponse downloadStub, String[] wireUrlSink) {
         ObjectMapper mapper = bootDefaultMapper();
         OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, mapper) {
             @Override
@@ -201,19 +212,32 @@ final class AiplatformWireTestSupport {
                     throw new RuntimeException(e);
                 }
             }
+
+            @Override
+            public BinaryResponse download(String url) {
+                wireUrlSink[0] = url;
+                return downloadStub;
+            }
         };
         return new AiplatformProjectAppService(new AiplatformClient(stubTransport, "http://stub-aiplatform"));
     }
 
     /**
-     * 项目域版 {@link #accountAppServiceWithErrorTransport}——{@code get} 始终抛
-     * {@link OpenApiClientException}（框架对 ≥400 的行为复刻）。
+     * 项目域版 {@link #accountAppServiceWithErrorTransport}——{@code get} 与 {@code download}
+     * 都始终抛 {@link OpenApiClientException}（框架对 ≥400 的行为复刻：文件包的错误信封在
+     * body 里、同读口）。
      */
     static AiplatformProjectAppService projectAppServiceWithErrorTransport(
             int statusCode, String errorBody, String[] wireUrlSink) {
         OpenApiClient stubTransport = new OpenApiClient(new CartisanOpenapiProperties(), null, bootDefaultMapper()) {
             @Override
             public <T> T get(String url, TypeReference<T> typeReference) {
+                wireUrlSink[0] = url;
+                throw new OpenApiClientException(statusCode, errorBody);
+            }
+
+            @Override
+            public BinaryResponse download(String url) {
                 wireUrlSink[0] = url;
                 throw new OpenApiClientException(statusCode, errorBody);
             }
